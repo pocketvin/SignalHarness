@@ -1,0 +1,40 @@
+version: 1
+score_weights:
+  source_weight: 0.20
+  keyword_match_score: 0.25
+  project_relevance_score: 0.30
+  novelty_score: 0.10
+  urgency_score: 0.10
+  feedback_adjustment: 0.05
+source_weights:
+  official_release: 95
+  official_issue: 80
+  expert_blog: 70
+  web_change: 60
+  team_update: 75
+keyword_weights:
+  checkpoint: 1.2
+  memory: 1.1
+  skill: 1.1
+suggested_focus_keywords: []
+ignore_patterns:
+  - minor footer
+  - typo only
+category_weights:
+  dependency_update: 1.00
+  competitor_update: 0.85
+  market_signal: 0.70
+  policy_signal: 0.90
+  expert_opinion: 0.65
+  team_update: 0.80
+  noise: 0.10
+thresholds:
+  action_required: 85
+  alert: 75
+  save: 45
+feedback_adjustments:
+  useful: 5
+  not_useful: -4
+  false_positive: -8
+  missed_signal: 8
+  too_generic: -3

@@ -1,0 +1,232 @@
+"""Trace summary formatting."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Iterable
+
+from rich.console import Console
+from rich.table import Table
+
+from openharness.utils.fs import atomic_write_text
+from signal_harness.signal.schemas import TraceStep
+
+STAGE_ALIASES = {
+    "verify_evidence": "evidence",
+    "analyze_impact": "impact",
+    "plan_action": "action",
+    "write_radar_digest": "report",
+    "write_run_summary": "report",
+    "write_json_outputs": "report",
+}
+FLOW_ORDER = (
+    "load_config",
+    "collect_signals",
+    "normalize",
+    "deduplicate",
+    "noise_filter",
+    "cluster_signals",
+    "llm_agent_call",
+    "deterministic_fallback",
+    "classify",
+    "evidence",
+    "score",
+    "impact",
+    "action",
+    "report",
+)
+
+
+def format_trace_summary(steps: Iterable[TraceStep]) -> str:
+    """Return one line per trace step for logs and interview demos."""
+
+    lines: list[str] = []
+    for step in steps:
+        stage = STAGE_ALIASES.get(step.step, step.step)
+        counts = ""
+        if step.input_count is not None or step.output_count is not None:
+            counts = f" input={step.input_count} output={step.output_count}"
+        line = (
+            f"{stage}: {step.status} ({step.duration_ms} ms)"
+            + (f" [{step.agent}]" if step.agent else "")
+            + (f" mode={step.mode}" if step.mode else "")
+            + (" fallback=true" if step.fallback_used else "")
+            + counts
+        )
+        lines.append(line)
+        if step.permission_checks:
+            lines.append(
+                "  permission_checks: " + ", ".join(step.permission_checks)
+            )
+        if step.error:
+            lines.append(f"  error: {step.error}")
+        if step.source_types_observed:
+            lines.append(
+                "  source_types_observed: "
+                + ", ".join(step.source_types_observed)
+            )
+        if step.tools_requested:
+            lines.append("  tools_requested: " + ", ".join(step.tools_requested))
+        if step.tools_executed:
+            lines.append("  tools_executed: " + ", ".join(step.tools_executed))
+        if step.blocked_tools:
+            lines.append("  blocked_tools: " + ", ".join(step.blocked_tools))
+        if step.tool_errors:
+            lines.append("  tool_errors: " + "; ".join(step.tool_errors))
+        if step.cache_events:
+            lines.append("  cache: " + ", ".join(step.cache_events))
+        if step.prompt_prefix_hash:
+            lines.append(f"  prompt_prefix_hash: {step.prompt_prefix_hash}")
+        lines.extend(f"  failed_source: {source}" for source in step.failed_sources)
+        lines.extend(
+            (
+                f"  source_task: {task.source_type}:{task.source_name} "
+                f"status={task.status} cache_hit={task.cache_hit}"
+            )
+            for task in step.source_tasks
+        )
+    return "\n".join(lines)
+
+
+def render_trace_table(
+    steps: Iterable[TraceStep],
+    *,
+    console: Console | None = None,
+) -> None:
+    """Render a phase-oriented trace table with failed source diagnostics."""
+
+    target = console or Console()
+    step_list = list(steps)
+    present = {STAGE_ALIASES.get(step.step, step.step) for step in step_list}
+    flow = [stage for stage in FLOW_ORDER if stage in present]
+    target.print(" → ".join(flow))
+    table = Table(title="SignalHarness Task Trace")
+    table.add_column("Stage")
+    table.add_column("Status")
+    table.add_column("Duration", justify="right")
+    table.add_column("Input", justify="right")
+    table.add_column("Output", justify="right")
+    table.add_column("Agent")
+    table.add_column("Kind")
+    table.add_column("Fallback")
+    table.add_column("Tools")
+    table.add_column("Cache")
+    table.add_column("Permission checks")
+    for step in step_list:
+        tool_parts = []
+        if step.tools_requested:
+            tool_parts.append("req=" + ",".join(step.tools_requested))
+        if step.tools_executed:
+            tool_parts.append("exec=" + ",".join(step.tools_executed))
+        if step.blocked_tools:
+            tool_parts.append("blocked=" + ",".join(step.blocked_tools))
+        table.add_row(
+            STAGE_ALIASES.get(step.step, step.step),
+            step.status,
+            f"{step.duration_ms} ms",
+            "" if step.input_count is None else str(step.input_count),
+            "" if step.output_count is None else str(step.output_count),
+            step.agent_name or step.agent or "",
+            "LLM Agent" if step.step == "llm_agent_call" else "deterministic",
+            "yes" if step.fallback_used else "",
+            " ".join(tool_parts),
+            ",".join(step.cache_events),
+            ", ".join(step.permission_checks),
+        )
+    target.print(table)
+    failed_sources = [
+        source for step in step_list for source in step.failed_sources
+    ]
+    if failed_sources:
+        target.print("[yellow]Failed sources:[/yellow]")
+        for source in dict.fromkeys(failed_sources):
+            target.print(f"- {source}")
+
+
+def write_trace_summary(
+    output_dir: str | Path,
+    steps: Iterable[TraceStep],
+) -> Path:
+    """Write a readable Markdown trace alongside task_trace.json."""
+
+    root = Path(output_dir).expanduser().resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    step_list = list(steps)
+    lines = [
+        "# SignalHarness Trace Summary",
+        "",
+        "## Flow",
+        "",
+    ]
+    present = {STAGE_ALIASES.get(step.step, step.step) for step in step_list}
+    flow = [stage for stage in FLOW_ORDER if stage in present]
+    lines.extend([" → ".join(flow), "", "## Steps", ""])
+    lines.extend(
+        [
+            "| Stage | Status | Duration | Input | Output | Agent | Kind | Fallback | Tools | Cache | Permissions |",
+            "|---|---:|---:|---:|---:|---|---|---:|---|---|---|",
+        ]
+    )
+    for step in step_list:
+        tool_parts = []
+        if step.tools_requested:
+            tool_parts.append("req=" + ",".join(step.tools_requested))
+        if step.tools_executed:
+            tool_parts.append("exec=" + ",".join(step.tools_executed))
+        if step.blocked_tools:
+            tool_parts.append("blocked=" + ",".join(step.blocked_tools))
+        lines.append(
+            "| "
+            + " | ".join(
+                (
+                    STAGE_ALIASES.get(step.step, step.step),
+                    step.status,
+                    f"{step.duration_ms} ms",
+                    "" if step.input_count is None else str(step.input_count),
+                    "" if step.output_count is None else str(step.output_count),
+                    step.agent_name or step.agent or "",
+                    "LLM Agent" if step.step == "llm_agent_call" else "deterministic",
+                    "yes" if step.fallback_used else "",
+                    " ".join(tool_parts),
+                    ",".join(step.cache_events),
+                    ", ".join(step.permission_checks),
+                )
+            )
+            + " |"
+        )
+    failed_sources = list(
+        dict.fromkeys(source for step in step_list for source in step.failed_sources)
+    )
+    if failed_sources:
+        lines.extend(["", "## Failed Sources", ""])
+        lines.extend(f"- {source}" for source in failed_sources)
+    source_tasks = [
+        task for step in step_list for task in step.source_tasks
+    ]
+    if source_tasks:
+        lines.extend(["", "## Source Tasks", ""])
+        lines.extend(
+            (
+                f"- `{task.source_type}:{task.source_name}`: {task.status}, "
+                f"{task.output_count} outputs, {task.duration_ms} ms, "
+                f"cache_hit={str(task.cache_hit).lower()}"
+                + (f", error={task.error}" if task.error else "")
+            )
+            for task in source_tasks
+        )
+    prompt_steps = [step for step in step_list if step.prompt_prefix_hash]
+    if prompt_steps:
+        lines.extend(["", "## Prompt Context Hashes", ""])
+        lines.extend(
+            (
+                f"- `{step.agent_name}` / `{step.output_schema}`: "
+                f"prefix `{step.prompt_prefix_hash}`, "
+                f"static `{step.static_context_hash}`, "
+                f"dynamic `{step.dynamic_context_hash}`, "
+                f"packet `{step.context_packet_version}`"
+            )
+            for step in prompt_steps
+        )
+    path = root / "trace_summary.md"
+    atomic_write_text(path, "\n".join(lines).rstrip() + "\n")
+    return path

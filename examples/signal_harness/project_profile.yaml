@@ -1,0 +1,23 @@
+project_name: DemoCheckpointService
+goal: Maintain a reliable Python service that persists multi-agent checkpoints.
+tech_stack:
+  - Python
+  - LangGraph
+  - PostgreSQL
+critical_modules:
+  - checkpoint
+  - persistence
+  - workflow runtime
+dependencies:
+  - langgraph
+  - psycopg
+competitors:
+  - CrewAI
+focus_keywords:
+  - checkpoint
+  - persistence
+  - durable execution
+  - migration
+ignore_keywords:
+  - mobile game
+  - token price

@@ -1,0 +1,15 @@
+github:
+  repositories:
+    - repo: langchain-ai/langgraph
+      events:
+        - releases
+        - issues
+rss:
+  feeds:
+    - name: Example Expert Feed
+      url: https://example.com/agent-engineering.xml
+web_changes:
+  sources:
+    - name: Demo pricing page
+      adapter: fixture
+      fixture: examples/signal_harness/sample_events.json

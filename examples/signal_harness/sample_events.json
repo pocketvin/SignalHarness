@@ -1,0 +1,58 @@
+[
+  {
+    "event_id": "demo-001",
+    "source_type": "github_release",
+    "source_name": "langchain-ai/langgraph",
+    "title": "Checkpoint persistence migration support",
+    "content": "The release adds migration helpers and reliability fixes for durable checkpoints.",
+    "url": "https://github.com/langchain-ai/langgraph/releases/tag/demo-checkpoint",
+    "published_at": "2026-06-20T09:00:00Z",
+    "raw_payload": {
+      "tag_name": "demo-checkpoint",
+      "official": true
+    },
+    "collected_at": "2026-06-20T09:05:00Z"
+  },
+  {
+    "event_id": "demo-002",
+    "source_type": "github_issue",
+    "source_name": "HKUDS/OpenHarness",
+    "title": "Proposal to restrict tools with a runtime allowlist",
+    "content": "The issue discusses exposing only explicitly enabled tools to an agent.",
+    "url": "https://github.com/HKUDS/OpenHarness/issues/200",
+    "published_at": "2026-06-19T14:00:00Z",
+    "raw_payload": {
+      "state": "open",
+      "official": true
+    },
+    "collected_at": "2026-06-20T09:06:00Z"
+  },
+  {
+    "event_id": "demo-003",
+    "source_type": "rss",
+    "source_name": "Example Expert Feed",
+    "title": "Why evidence trails matter in multi-agent systems",
+    "content": "An expert argues that structured evidence and trace records reduce unsupported conclusions.",
+    "url": "https://example.com/evidence-trails",
+    "published_at": "2026-06-18T08:00:00Z",
+    "raw_payload": {
+      "author": "Demo Expert"
+    },
+    "collected_at": "2026-06-20T09:07:00Z"
+  },
+  {
+    "event_id": "demo-004",
+    "source_type": "web_change",
+    "source_name": "Demo pricing page",
+    "title": "Minor footer wording update",
+    "content": "The copyright footer changed without product or policy impact.",
+    "url": "https://example.com/pricing",
+    "published_at": null,
+    "raw_payload": {
+      "changed_fields": [
+        "footer"
+      ]
+    },
+    "collected_at": "2026-06-20T09:08:00Z"
+  }
+]

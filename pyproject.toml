@@ -3,14 +3,15 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "openharness-ai"
-version = "0.1.9"
-description = "Open-source Python port of Claude Code - an AI-powered CLI coding assistant"
+name = "signalharness"
+version = "0.1.0"
+description = "A project-centric agent harness for structured signal intelligence"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 authors = [
-    { name = "novix-science" },
+    { name = "SignalHarness Contributors" },
+    { name = "OpenHarness Contributors" },
 ]
 
 dependencies = [
@@ -43,16 +44,18 @@ dev = [
     "pytest-cov>=5.0.0",
     "ruff>=0.5.0",
     "mypy>=1.10.0",
+    "types-PyYAML>=6.0.12",
 ]
 
 [project.scripts]
+signal-harness = "signal_harness.cli:app"
 openharness = "openharness.cli:app"
 oh = "openharness.cli:app"
 openh = "openharness.cli:app"
 ohmo = "ohmo.cli:app"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/openharness", "ohmo"]
+packages = ["src/openharness", "src/signal_harness", "ohmo"]
 
 [tool.hatch.build]
 exclude = [
@@ -71,6 +74,7 @@ exclude = [
 "frontend/terminal/package.json" = "openharness/_frontend/package.json"
 "frontend/terminal/tsconfig.json" = "openharness/_frontend/tsconfig.json"
 "frontend/terminal/src" = "openharness/_frontend/src"
+"src/signal_harness/py.typed" = "signal_harness/py.typed"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -83,3 +87,15 @@ target-version = "py311"
 [tool.mypy]
 python_version = "3.11"
 strict = true
+mypy_path = "src"
+explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+module = ["openharness", "openharness.*"]
+ignore_missing_imports = true
+follow_imports = "skip"
+disallow_subclassing_any = false
+
+[[tool.mypy.overrides]]
+module = ["signal_harness.tools.*"]
+disallow_subclassing_any = false

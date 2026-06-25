@@ -1,0 +1,57 @@
+[
+  {
+    "event_id": "multi-001",
+    "source_type": "github_release",
+    "source_name": "HKUDS/OpenHarness",
+    "title": "OpenHarness checkpoint persistence release",
+    "content": "Official release adds durable checkpoint persistence and recovery.",
+    "url": "https://github.com/HKUDS/OpenHarness/releases/tag/v2-checkpoint",
+    "published_at": "2026-06-20T09:00:00Z",
+    "raw_payload": {"official": true},
+    "collected_at": "2026-06-20T09:05:00Z"
+  },
+  {
+    "event_id": "multi-002",
+    "source_type": "github_issue",
+    "source_name": "HKUDS/OpenHarness",
+    "title": "Checkpoint persistence migration issue",
+    "content": "Maintainers discuss compatibility risks for durable checkpoint migration.",
+    "url": "https://github.com/HKUDS/OpenHarness/issues/501",
+    "published_at": "2026-06-20T11:00:00Z",
+    "raw_payload": {"official": true},
+    "collected_at": "2026-06-20T11:05:00Z"
+  },
+  {
+    "event_id": "multi-003",
+    "source_type": "rss",
+    "source_name": "Independent Agent Engineering",
+    "title": "Reviewing OpenHarness checkpoint persistence",
+    "content": "An expert explains why the checkpoint release matters for agent recovery.",
+    "url": "https://engineering.example.com/openharness-checkpoints",
+    "published_at": "2026-06-21T08:00:00Z",
+    "raw_payload": {"author": "Independent Reviewer"},
+    "collected_at": "2026-06-21T08:05:00Z"
+  },
+  {
+    "event_id": "multi-004",
+    "source_type": "web_change",
+    "source_name": "OpenHarness product page",
+    "title": "Minor footer typo formatting only",
+    "content": "Copyright footer whitespace changed.",
+    "url": "https://openharness.example.com/",
+    "published_at": "2026-06-21T10:00:00Z",
+    "raw_payload": {"changed_fields": ["footer"]},
+    "collected_at": "2026-06-21T10:05:00Z"
+  },
+  {
+    "event_id": "multi-005",
+    "source_type": "rss",
+    "source_name": "Unverified AI Roundup",
+    "title": "Checkpoint persistence may be unreliable",
+    "content": "A secondary roundup disputes the release without linking primary evidence.",
+    "url": "",
+    "published_at": "2026-06-21T12:00:00Z",
+    "raw_payload": {"reliability": "unverified"},
+    "collected_at": "2026-06-21T12:05:00Z"
+  }
+]
