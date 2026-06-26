@@ -88,6 +88,16 @@ Calibration writes review-only artifacts under `.signal-harness/`:
 - `watchlist_update_proposal.json`
 - `replay_evaluation.json`
 
+`.signal-harness/` remains the state source of truth. For demos, calibration
+also copies the latest read-only snapshots to:
+
+- `outputs/latest_policy_update_proposal.json`
+- `outputs/latest_skill_update_proposal.md`
+- `outputs/latest_watchlist_update_proposal.json`
+- `outputs/latest_replay_evaluation.json`
+
+These snapshots do not mean that any proposal was applied.
+
 No proposal is applied automatically. `signal_policy.yaml`, skill files, and
 `watchlist.yaml` change only through a separate explicit approval path.
 
@@ -126,6 +136,9 @@ ContextEvidenceAgent uses a two-turn controlled loop:
 4. `ToolObservation` objects are appended to the second Agent turn.
 5. Failed or blocked tools increase uncertainty and cap confidence.
 
+This is controlled orchestration by the SignalHarness runner, not
+provider-native function calling and not a complete handoff-as-tool system.
+
 Prompt context is layered as static instructions, stable project/policy
 summary, semi-stable memory summary, dynamic task data, and volatile run
 metadata. Trace records stable-prefix and dynamic-context hashes; no
@@ -155,6 +168,12 @@ OpenHarness query engine.
 The deterministic layer retains normalization, deduplication, base scoring,
 schema validation, permission enforcement, reporting, persistence, replay
 evaluation, and fallback behavior.
+
+When Supervisor routing skips an event or downstream stage, deterministic
+fallback may still populate evidence, impact, or action-shaped fields so the
+stored assessment remains complete for audit. Those values are audit defaults,
+not downstream LLM Agent execution; the trace marks them as
+`skipped_event_audit_fallback`.
 
 ## Project structure
 
@@ -198,6 +217,7 @@ See:
 - [Self-improvement loop](docs/SELF_IMPROVEMENT_LOOP.md)
 - [Provider integration](docs/PROVIDER_INTEGRATION.md)
 - [Interview guide](docs/INTERVIEW_GUIDE.md)
+- [Real agent-mode smoke test](docs/SMOKE_TEST_AGENT_MODE.md)
 
 ## Attribution
 

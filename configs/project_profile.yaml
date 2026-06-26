@@ -1,0 +1,38 @@
+project_name: SignalHarness
+goal: >-
+  Build a project-centric signal intelligence harness that identifies
+  external changes relevant to a small developer team.
+tech_stack:
+  - Python 3.10+
+  - Pydantic
+  - Typer
+  - OpenHarness runtime
+critical_modules:
+  - signal normalization
+  - evidence verification
+  - impact scoring
+  - feedback memory
+  - permission control
+  - checkpoint persistence
+dependencies:
+  - HKUDS/OpenHarness
+  - langgraph
+  - pydantic
+  - typer
+  - httpx
+competitors:
+  - LangGraph
+  - CrewAI
+  - AutoGen
+focus_keywords:
+  - agent harness
+  - checkpoint persistence
+  - tool registry
+  - multi-agent
+  - structured output
+  - permission guard
+  - feedback memory
+ignore_keywords:
+  - cryptocurrency price
+  - gaming promotion
+  - consumer giveaway

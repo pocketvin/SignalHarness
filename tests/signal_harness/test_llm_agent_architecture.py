@@ -383,6 +383,13 @@ def test_calibrate_mock_agent_writes_review_only_artifacts(
         "replay_evaluation.json",
     ):
         assert (state_dir / name).exists()
+    for name in (
+        "latest_policy_update_proposal.json",
+        "latest_skill_update_proposal.md",
+        "latest_watchlist_update_proposal.json",
+        "latest_replay_evaluation.json",
+    ):
+        assert (output_dir / name).exists()
     assert (
         project_root / "configs/signal_policy.yaml"
     ).read_text(encoding="utf-8") == original_policy

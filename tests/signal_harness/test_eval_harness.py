@@ -17,6 +17,7 @@ from signal_harness.signal.noise import NoiseFilter
 from signal_harness.signal.normalizer import normalize_event
 from signal_harness.signal.policy import load_signal_policy
 from signal_harness.signal.schemas import SignalCategory
+from signal_harness.ui.trace_view import write_trace_summary
 
 
 def _fixture(project_root: Path) -> Path:
@@ -117,6 +118,132 @@ def test_evidence_tool_loop_executes_blocks_and_reprompts(
     assert any("bash:blocked" in item for item in plan_trace.permission_checks)
     observations = final_call.input_payload["tool_observations"]
     assert {item["status"] for item in observations} == {"success", "blocked"}
+
+
+def test_scripted_multi_tool_eval_uses_mock_outputs_without_network(
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    plan = EvidenceToolPlan(
+        source_types_observed=["github_release", "rss", "web_change"],
+        tool_requests=[
+            ToolRequest(
+                tool_name="github_signal",
+                arguments={"mock_tool_eval": True},
+                reason="Read a mocked GitHub primary-source observation.",
+            ),
+            ToolRequest(
+                tool_name="rss_signal",
+                arguments={"mock_tool_eval": True},
+                reason="Read a mocked RSS commentary observation.",
+            ),
+            ToolRequest(
+                tool_name="web_change",
+                arguments={"mock_tool_eval": True},
+                reason="Read a mocked web-change observation.",
+            ),
+            ToolRequest(
+                tool_name="bash",
+                arguments={"command": "echo blocked"},
+                reason="Prove that a disallowed tool is blocked.",
+            ),
+            ToolRequest(
+                tool_name="signal_score",
+                arguments={"mock_tool_error": True},
+                reason="Prove that one tool error does not crash the scan.",
+            ),
+        ],
+        planning_summary="Exercise multiple allowed, blocked, and failed tools.",
+    )
+    provider = MockProvider(
+        strategy="scripted",
+        responses={"EvidenceToolPlan": plan.model_dump_json()},
+    )
+    workflow = SignalHarnessWorkflow(
+        cwd=project_root,
+        output_dir=tmp_path / "outputs",
+        state_dir=tmp_path / "state",
+        mode=RunMode.MOCK_AGENT,
+        provider=provider,
+    )
+    original_call = workflow.executor.call
+    mocked_calls: list[str] = []
+
+    async def mock_tool_call(
+        name: str,
+        arguments: dict[str, object],
+    ) -> ToolResult:
+        if arguments.get("mock_tool_eval") is True:
+            mocked_calls.append(name)
+            return ToolResult(
+                output=f'{{"tool": "{name}", "mocked": true}}'
+            )
+        if arguments.get("mock_tool_error") is True:
+            return ToolResult(output="mock signal_score failure", is_error=True)
+        return await original_call(name, arguments)
+
+    workflow.executor.call = mock_tool_call  # type: ignore[method-assign]
+    result = asyncio.run(workflow.scan(fixture=_fixture(project_root)))
+    plan_trace = next(
+        step
+        for step in result.trace.steps
+        if step.output_schema == "EvidenceToolPlan"
+    )
+    final_trace = next(
+        step
+        for step in result.trace.steps
+        if step.output_schema == "ContextEvidenceOutput"
+    )
+    final_call = next(
+        call
+        for call in provider.calls
+        if call.output_schema == "ContextEvidenceOutput"
+    )
+
+    assert mocked_calls == ["github_signal", "rss_signal", "web_change"]
+    assert plan_trace.tools_requested == [
+        "github_signal",
+        "rss_signal",
+        "web_change",
+        "bash",
+        "signal_score",
+    ]
+    assert plan_trace.tools_executed == [
+        "github_signal",
+        "rss_signal",
+        "web_change",
+    ]
+    assert plan_trace.blocked_tools == ["bash"]
+    assert any("mock signal_score failure" in item for item in plan_trace.tool_errors)
+    assert len(plan_trace.permission_checks) == 5
+    assert final_trace.event_input_count == 4
+    assert final_trace.tool_observation_count == 5
+    assert final_trace.input_count == 9
+    assert final_trace.source_type_count == 3
+    assert final_trace.tools_requested_count == 5
+    assert final_trace.tools_executed_count == 3
+    assert final_trace.exit_condition == "completed_with_tool_errors"
+    observations = final_call.input_payload["tool_observations"]
+    assert [item["status"] for item in observations] == [
+        "success",
+        "success",
+        "success",
+        "blocked",
+        "error",
+    ]
+    assert result.assessments
+    summary_path = write_trace_summary(
+        tmp_path / "trace-output",
+        result.trace.steps,
+    )
+    summary = summary_path.read_text(encoding="utf-8")
+    assert "## ContextEvidenceAgent Final" in summary
+    assert "- events: 4" in summary
+    assert "- tool_observations: 5" in summary
+    assert "- total_inputs: 9" in summary
+    assert "- exit_condition: completed_with_tool_errors" in summary
+    assert "## Skipped Event Audit Completion" in summary
+    assert "not downstream LLM Agent execution" in summary
 
 
 def test_tool_error_does_not_crash_and_caps_confidence(

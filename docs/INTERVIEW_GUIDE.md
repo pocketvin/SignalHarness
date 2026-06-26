@@ -45,6 +45,16 @@ observations to a second evidence turn. Failed tools do not crash the scan:
 uncertainty increases and confidence is capped. Impact analysis then combines
 evidence, project context, and lightweight multi-source clusters.
 
+This remains a controlled runner loop, not provider-native function calling.
+It also avoids implementing a complete handoff-as-tool protocol.
+
+## Skipped routes and audit defaults
+
+Supervisor routing controls actual downstream LLM execution. When a route
+skips an event or stage, deterministic fallback can still populate the stored
+assessment so every input has a complete audit record. That fallback is an
+audit default, not evidence that the skipped downstream Agent ran.
+
 ## Engineering choices
 
 Prompt prefixes keep static instructions and stable project context first;
@@ -56,6 +66,21 @@ concurrent and synchronous from the CLI perspective, with one observable
 OpenHarness is the only Agent Harness dependency. Avoiding orchestration
 frameworks, databases, queues, embeddings, and vector stores is a deliberate
 MVP choice, not an omission hidden by the architecture diagram.
+
+## Ideas borrowed without adding frameworks
+
+SignalHarness borrows selected ideas from mature Agent projects without adding
+their frameworks as dependencies:
+
+- LangGraph and OpenAI Agents SDK: explainable supervisor routing and handoff
+  concepts, without full handoff-as-tool.
+- Haystack: bounded tool-loop ideas, implemented as a controlled tool-use loop.
+- Langfuse: trace, eval, and prompt-version concepts, implemented with local
+  trace files and eval summaries only.
+- Dify and LlamaIndex: layered context and knowledge organization, without
+  Dify or a general-purpose RAG platform.
+- DSPy and Pydantic AI: schema-first Agent contracts, without adding either
+  dependency.
 
 ## Demo script
 

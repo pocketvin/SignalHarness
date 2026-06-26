@@ -1,0 +1,21 @@
+github:
+  repositories:
+    - repo: HKUDS/OpenHarness
+      events:
+        - releases
+        - issues
+    - repo: langchain-ai/langgraph
+      events:
+        - releases
+        - issues
+rss:
+  feeds:
+    - name: GitHub Engineering
+      url: https://github.blog/engineering/feed/
+    - name: Simon Willison
+      url: https://simonwillison.net/atom/everything/
+web_changes:
+  sources:
+    - name: sample-product-changelog
+      adapter: fixture
+      fixture: examples/signal_harness/sample_events.json

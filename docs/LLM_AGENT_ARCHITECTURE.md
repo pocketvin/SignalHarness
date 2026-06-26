@@ -23,6 +23,12 @@ ContextEvidenceAgent normally uses two turns, and routed stages may be skipped
 when `required_agents` does not include them. Noise receives no deep-analysis
 calls; low-priority expert opinion can stop after evidence and impact.
 
+If routing skips an event or a downstream stage, deterministic fallback may
+fill the remaining assessment fields solely to preserve a complete audit
+record. This does not mean ContextEvidenceAgent, ImpactAnalystAgent, or
+ActionPlannerAgent executed for that skipped event. The trace emits
+`skipped_event_audit_fallback` with this distinction.
+
 ## Prompt context layers
 
 `PromptContextBuilder` orders:
@@ -45,6 +51,10 @@ ImpactAnalystAgent receives clusters and can report related events,
 cross-source confidence, and conflicting evidence. Python still validates
 schemas, owns tools and permissions, calculates final scores, and supplies
 fallback.
+
+The tool loop is deliberately runner-controlled. It is not provider-native
+function calling, and SignalHarness does not implement complete
+handoff-as-tool orchestration.
 
 The older classes in `src/signal_harness/agents/` are deterministic fallback
 specialists. They are not described as the true multi-Agent implementation.

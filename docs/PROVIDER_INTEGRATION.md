@@ -34,6 +34,11 @@ execution, cache, and observation handling with the existing OpenHarness tool
 registry. This is an explicit transition design; it does not recreate a
 general-purpose tool runtime.
 
+The current design is not provider-native function calling. The provider
+returns structured JSON plans; the SignalHarness runner validates and executes
+tools, then creates the second prompt. Full handoff-as-tool is intentionally
+out of scope.
+
 OpenHarness remains the sole Agent Harness base. LangGraph, CrewAI, and AutoGen
 are not runtime dependencies. No Redis, Postgres, Celery, VectorDB, or embedding
 store is required.

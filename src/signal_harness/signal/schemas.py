@@ -238,6 +238,12 @@ class TraceStep(BaseModel):
     tools_executed: list[str] = Field(default_factory=list)
     tool_errors: list[str] = Field(default_factory=list)
     blocked_tools: list[str] = Field(default_factory=list)
+    event_input_count: int | None = Field(default=None, ge=0)
+    tool_observation_count: int | None = Field(default=None, ge=0)
+    source_type_count: int | None = Field(default=None, ge=0)
+    tools_requested_count: int | None = Field(default=None, ge=0)
+    tools_executed_count: int | None = Field(default=None, ge=0)
+    exit_condition: str | None = None
     permission_checks: list[str] = Field(default_factory=list)
     prompt_prefix_hash: str | None = None
     static_context_hash: str | None = None

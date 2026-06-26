@@ -117,6 +117,7 @@ def _write_json(path: Path, payload: object) -> Path:
 
 def _save_learning_artifacts(
     state: Path,
+    output: Path,
     *,
     proposal: PolicyUpdateProposal,
     skill_proposal: str,
@@ -132,6 +133,20 @@ def _save_learning_artifacts(
     )
     _write_json(state / "watchlist_update_proposal.json", watchlist_proposal)
     _write_json(state / "replay_evaluation.json", replay)
+    output.mkdir(parents=True, exist_ok=True)
+    save_policy_proposal(
+        output / "latest_policy_update_proposal.json",
+        proposal,
+    )
+    atomic_write_text(
+        output / "latest_skill_update_proposal.md",
+        skill_proposal.rstrip() + "\n",
+    )
+    _write_json(
+        output / "latest_watchlist_update_proposal.json",
+        watchlist_proposal,
+    )
+    _write_json(output / "latest_replay_evaluation.json", replay)
 
 
 def parse_since(value: str | None) -> datetime | None:
@@ -305,6 +320,7 @@ def calibrate(
     )
     _save_learning_artifacts(
         state,
+        resolved_outputs,
         proposal=proposal,
         skill_proposal=learning.skill_update_proposal,
         watchlist_proposal=learning.watchlist_update_proposal,

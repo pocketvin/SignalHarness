@@ -27,6 +27,7 @@ FLOW_ORDER = (
     "noise_filter",
     "cluster_signals",
     "llm_agent_call",
+    "skipped_event_audit_fallback",
     "deterministic_fallback",
     "classify",
     "evidence",
@@ -77,6 +78,22 @@ def format_trace_summary(steps: Iterable[TraceStep]) -> str:
             lines.append("  cache: " + ", ".join(step.cache_events))
         if step.prompt_prefix_hash:
             lines.append(f"  prompt_prefix_hash: {step.prompt_prefix_hash}")
+        if (
+            step.agent_name == "ContextEvidenceAgent"
+            and step.output_schema == "ContextEvidenceOutput"
+        ):
+            lines.extend(
+                [
+                    "  ContextEvidenceAgent final:",
+                    f"    events: {step.event_input_count or 0}",
+                    f"    tool_observations: {step.tool_observation_count or 0}",
+                    f"    total_inputs: {step.input_count or 0}",
+                    f"    source_types: {step.source_type_count or 0}",
+                    f"    tools_requested: {step.tools_requested_count or 0}",
+                    f"    tools_executed: {step.tools_executed_count or 0}",
+                    f"    exit_condition: {step.exit_condition or 'unknown'}",
+                ]
+            )
         lines.extend(f"  failed_source: {source}" for source in step.failed_sources)
         lines.extend(
             (
@@ -227,6 +244,59 @@ def write_trace_summary(
             )
             for step in prompt_steps
         )
+    evidence_final = next(
+        (
+            step
+            for step in step_list
+            if step.agent_name == "ContextEvidenceAgent"
+            and step.output_schema == "ContextEvidenceOutput"
+        ),
+        None,
+    )
+    if evidence_final is not None:
+        lines.extend(
+            [
+                "",
+                "## ContextEvidenceAgent Final",
+                "",
+                f"- events: {evidence_final.event_input_count or 0}",
+                (
+                    "- tool_observations: "
+                    f"{evidence_final.tool_observation_count or 0}"
+                ),
+                f"- total_inputs: {evidence_final.input_count or 0}",
+                f"- source_types: {evidence_final.source_type_count or 0}",
+                (
+                    "- tools_requested: "
+                    f"{evidence_final.tools_requested_count or 0}"
+                ),
+                (
+                    "- tools_executed: "
+                    f"{evidence_final.tools_executed_count or 0}"
+                ),
+                f"- exit_condition: {evidence_final.exit_condition or 'unknown'}",
+            ]
+        )
+    skipped_audit_steps = [
+        step
+        for step in step_list
+        if step.step == "skipped_event_audit_fallback"
+    ]
+    if skipped_audit_steps:
+        lines.extend(
+            [
+                "",
+                "## Skipped Event Audit Completion",
+                "",
+                (
+                    "Supervisor-routed skips are completed with deterministic fallback "
+                    "only so every event retains a full audit assessment. This is not "
+                    "downstream LLM Agent execution."
+                ),
+                "",
+            ]
+        )
+        lines.extend(f"- {step.detail}" for step in skipped_audit_steps)
     path = root / "trace_summary.md"
     atomic_write_text(path, "\n".join(lines).rstrip() + "\n")
     return path

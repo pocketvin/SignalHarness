@@ -45,6 +45,7 @@ from signal_harness.signal.schemas import (
     SignalCluster,
     SignalDecision,
     SignalEvent,
+    TraceStep,
 )
 
 OutputT = TypeVar("OutputT", bound=BaseModel)
@@ -338,6 +339,10 @@ class LLMAgentTeamRunner:
             )
             evidence = self._cap_evidence_after_tool_failures(evidence, observations)
             final_step = self.trace.steps[evidence_trace]
+            exit_condition = self._evidence_exit_condition(
+                plan,
+                observations,
+            )
             self.trace.steps[evidence_trace] = final_step.model_copy(
                 update={
                     "tools_executed": tool_trace["executed"],
@@ -345,6 +350,14 @@ class LLMAgentTeamRunner:
                     "blocked_tools": tool_trace["blocked"],
                     "permission_checks": tool_trace["permission_checks"],
                     "cache_events": tool_trace["cache_events"],
+                    "event_input_count": len(evidence_events),
+                    "tool_observation_count": len(observations),
+                    "source_type_count": len(
+                        {event.source_type for event in evidence_events}
+                    ),
+                    "tools_requested_count": len(plan.tool_requests),
+                    "tools_executed_count": len(tool_trace["executed"]),
+                    "exit_condition": exit_condition,
                 }
             )
         else:
@@ -467,6 +480,34 @@ class LLMAgentTeamRunner:
                         ).results,
                     ]
                 }
+            )
+
+        audit_fallback_event_ids = [
+            event.event_id
+            for event in events
+            if not route_by_id[event.event_id].analyze
+            or any(
+                stage not in route_by_id[event.event_id].required_agents
+                for stage in ("context_evidence", "impact", "action")
+            )
+        ]
+        if audit_fallback_event_ids:
+            self.trace.steps.append(
+                TraceStep(
+                    step="skipped_event_audit_fallback",
+                    status="success",
+                    agent="DeterministicAuditFallback",
+                    input_count=len(audit_fallback_event_ids),
+                    output_count=len(audit_fallback_event_ids),
+                    duration_ms=0,
+                    fallback_used=True,
+                    detail=(
+                        "Supervisor routing skipped one or more downstream LLM stages. "
+                        "Deterministic fallback generated complete audit assessments only; "
+                        "this is not downstream LLM Agent execution. Events: "
+                        + ", ".join(audit_fallback_event_ids)
+                    ),
+                )
             )
 
         assessments, permission_checks = self._guarded_assessments(
@@ -645,6 +686,19 @@ class LLMAgentTeamRunner:
         if name == "signal_memory":
             return str(arguments.get("action", "")).startswith("load_")
         return name in READ_ONLY_TOOL_ALLOWLIST
+
+    @staticmethod
+    def _evidence_exit_condition(
+        plan: EvidenceToolPlan,
+        observations: list[ToolObservation],
+    ) -> str:
+        if not plan.tool_requests:
+            return "completed_without_tool_requests"
+        if any(item.status == "error" for item in observations):
+            return "completed_with_tool_errors"
+        if any(item.status == "blocked" for item in observations):
+            return "completed_with_blocked_tools"
+        return "evidence_complete"
 
     @staticmethod
     def _cap_evidence_after_tool_failures(

@@ -1,5 +1,6 @@
 __pycache__/
 *.py[cod]
+*.pyc
 *$py.class
 *.egg-info/
 dist/
@@ -28,8 +29,21 @@ htmlcov/
 frontend/terminal/node_modules/
 
 # User data (never commit API keys or session data)
-.openharness/
+.openharness/*
+!.openharness/plugins/
+!.openharness/plugins/signal-harness/
+!.openharness/plugins/signal-harness/**
+.signal-harness/
+!.signal-harness/
+.signal-harness/*
+!.signal-harness/.gitkeep
 react_tui_smoke.txt
+
+# SignalHarness generated artifacts
+outputs/
+!outputs/
+outputs/*
+!outputs/.gitkeep
 
 # OS
 .DS_Store
