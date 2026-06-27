@@ -17,6 +17,18 @@ traceability; it is not presented as the primary intelligence source.
 - `agent` uses a real OpenHarness-backed provider and is the primary project
   form.
 
+## Public CI and real API tests
+
+Public CI is intentionally offline and SignalHarness-focused: it runs scripted
+`mock-agent` evals, trace generation, calibration, package build, and quality
+checks scoped to `src/signal_harness` and `tests/signal_harness`. It does not
+need a real API key.
+
+Real provider tests are manual smoke tests under
+`tests/manual/integration_real_api/`. They are excluded from default pytest and
+read credentials only from environment variables. Hardcoded keys and fallback
+credentials are forbidden.
+
 ## Why the score remains guarded
 
 `ImpactAnalystAgent` supplies semantic relevance but cannot emit `final_score`.

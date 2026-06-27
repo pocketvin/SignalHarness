@@ -1119,10 +1119,10 @@ async def test_auth_feedback_and_project_context_commands(tmp_path: Path, monkey
     registry = create_default_command_registry()
     context = _make_context(tmp_path)
 
-    login_command, login_args = registry.lookup("/login sk-test-123456")
+    login_command, login_args = registry.lookup("/login test-key-123456")
     login_result = await login_command.handler(login_args, context)
     assert "Stored API key" in login_result.message
-    assert load_settings().api_key == "sk-test-123456"
+    assert load_settings().api_key == "test-key-123456"
 
     issue_command, issue_args = registry.lookup("/issue set Fix CI :: The CI flakes on task retry")
     issue_result = await issue_command.handler(issue_args, context)

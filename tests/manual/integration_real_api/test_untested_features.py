@@ -1,10 +1,11 @@
 """Comprehensive integration tests for all previously untested OpenHarness features.
 
-Run with: python -m pytest tests/test_untested_features.py -v --tb=short -x
-Or standalone: python tests/test_untested_features.py
+Run manually:
+  ANTHROPIC_API_KEY=... python -m pytest tests/manual/integration_real_api/test_untested_features.py -v --tb=short -x
+Or standalone:
+  ANTHROPIC_API_KEY=... python tests/manual/integration_real_api/test_untested_features.py
 
-Uses real Kimi K2.5 API for agent loop tests. Requires ANTHROPIC_API_KEY env
-or the hardcoded key below.
+Uses real Kimi K2.5 API for agent loop tests. Requires ANTHROPIC_API_KEY env.
 """
 
 from __future__ import annotations
@@ -19,14 +20,12 @@ import tempfile
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+REPO_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from openharness.config.settings import Settings
 
-API_KEY = os.environ.get(
-    "ANTHROPIC_API_KEY",
-    "REDACTED_API_KEY",
-)
+API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 BASE_URL = os.environ.get("ANTHROPIC_BASE_URL", "https://api.moonshot.cn/anthropic")
 MODEL = os.environ.get("ANTHROPIC_MODEL", "kimi-k2.5")
 WORKSPACE = Path("/home/tangjiabin/AutoAgent")
@@ -34,6 +33,13 @@ _SKIP_REAL_API = not WORKSPACE.exists() or not API_KEY
 DEFAULT_MAX_TURNS = Settings().max_turns
 
 RESULTS: dict[str, bool] = {}
+pytestmark = [
+    pytest.mark.manual,
+    pytest.mark.skipif(
+        _SKIP_REAL_API,
+        reason="Manual real API test requires ANTHROPIC_API_KEY and AutoAgent workspace",
+    ),
+]
 
 
 # ====================================================================
@@ -807,6 +813,10 @@ async def test_full_swarm_autoagent():
 # Main runner
 # ====================================================================
 async def main():
+    if _SKIP_REAL_API:
+        print("SKIP: set ANTHROPIC_API_KEY and provide /home/tangjiabin/AutoAgent to run.")
+        return
+
     tests = [
         ("01 Hooks: command block", test_hooks_command_block()),
         ("02 Hooks: post_tool_use", test_hooks_post_tool_use()),

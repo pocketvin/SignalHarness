@@ -32,11 +32,11 @@ class TestExtractFacts:
         assert env_facts[0]["value"] == "OPENAI_BASE_URL"
 
     def test_env_var_does_not_capture_secret_value(self):
-        text = "export OPENAI_API_KEY=sk-secret-value"
+        text = "export OPENAI_API_KEY=secret-value"
         facts = extract_facts_from_text(text)
         env_facts = [f for f in facts if f["type"] == "env_var"]
         assert env_facts[0]["value"] == "OPENAI_API_KEY"
-        assert "sk-secret-value" not in env_facts[0]["value"]
+        assert "secret-value" not in env_facts[0]["value"]
 
     def test_extracts_api_endpoint(self):
         text = "curl https://api.minimax.chat/v1/chat/completions"

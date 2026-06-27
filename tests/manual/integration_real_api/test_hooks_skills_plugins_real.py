@@ -3,7 +3,8 @@
 Not passive logging — the model encounters hook blocks, invokes the skill tool,
 and uses plugin-provided skills through the agent loop.
 
-Run: python tests/test_hooks_skills_plugins_real.py
+Run manually:
+  ANTHROPIC_API_KEY=... python tests/manual/integration_real_api/test_hooks_skills_plugins_real.py
 """
 
 from __future__ import annotations
@@ -18,17 +19,26 @@ import tempfile
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+REPO_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from openharness.config.settings import Settings
 
-API_KEY = os.environ.get("ANTHROPIC_API_KEY", "REDACTED_API_KEY")
+API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 BASE_URL = os.environ.get("ANTHROPIC_BASE_URL", "https://api.moonshot.cn/anthropic")
 MODEL = os.environ.get("ANTHROPIC_MODEL", "kimi-k2.5")
 WORKSPACE = Path("/home/tangjiabin/AutoAgent")
+_SKIP_REAL_API = not API_KEY or not WORKSPACE.exists()
 DEFAULT_MAX_TURNS = Settings().max_turns
 
 RESULTS: dict[str, tuple[bool, float]] = {}
+pytestmark = [
+    pytest.mark.manual,
+    pytest.mark.skipif(
+        _SKIP_REAL_API,
+        reason="Manual real API test requires ANTHROPIC_API_KEY and AutoAgent workspace",
+    ),
+]
 
 
 def collect(events):
@@ -57,7 +67,7 @@ def collect(events):
 # and switches to glob/grep instead. This tests that hooks actually
 # change model behavior in the loop.
 # ====================================================================
-@pytest.mark.skipif(not Path("/home/tangjiabin/AutoAgent").exists(), reason="Needs real API + AutoAgent")
+@pytest.mark.skipif(_SKIP_REAL_API, reason="Needs real API + AutoAgent")
 async def task_hook_blocks_model_adapts():
     print("=" * 70)
     print("  Task 1: Hook blocks bash → model must adapt to glob/grep")
@@ -140,7 +150,7 @@ async def task_hook_blocks_model_adapts():
 # content drives what the model does next. This tests the full
 # skill tool → load → return content → model acts on it loop.
 # ====================================================================
-@pytest.mark.skipif(not Path("/home/tangjiabin/AutoAgent").exists(), reason="Needs real API + AutoAgent")
+@pytest.mark.skipif(_SKIP_REAL_API, reason="Needs real API + AutoAgent")
 async def task_model_invokes_skill_tool():
     print("\n" + "=" * 70)
     print("  Task 2: Model invokes skill tool, then follows skill instructions")
@@ -233,7 +243,7 @@ When performing a code review, follow these exact steps:
 # A plugin is loaded with a custom skill. The model uses the skill
 # tool to access the plugin's skill content, then acts on it.
 # ====================================================================
-@pytest.mark.skipif(not Path("/home/tangjiabin/AutoAgent").exists(), reason="Needs real API + AutoAgent")
+@pytest.mark.skipif(_SKIP_REAL_API, reason="Needs real API + AutoAgent")
 async def task_plugin_skill_in_agent_loop():
     print("\n" + "=" * 70)
     print("  Task 3: Plugin-provided skill used through skill tool in agent loop")
@@ -276,7 +286,7 @@ To scan for hardcoded secrets:
 1. Use grep to search for these patterns:
    - `password` or `passwd` (case insensitive)
    - `secret` or `api_key` or `token` in assignment context
-   - Any string that looks like `sk-` or `ghp_` (API key prefixes)
+   - Any string that looks like a provider API key or `ghp_` token prefix
 2. For each match, report: file path, line number, and the suspicious pattern
 3. Classify severity: HIGH (actual key/password), MEDIUM (variable name), LOW (comment/doc)
 """)
@@ -337,7 +347,7 @@ To scan for hardcoded secrets:
 # certain paths), skill provides a refactoring checklist, model follows
 # it, encounters hook block on protected path, adapts.
 # ====================================================================
-@pytest.mark.skipif(not Path("/home/tangjiabin/AutoAgent").exists(), reason="Needs real API + AutoAgent")
+@pytest.mark.skipif(_SKIP_REAL_API, reason="Needs real API + AutoAgent")
 async def task_hook_gates_writes_skill_guides():
     print("\n" + "=" * 70)
     print("  Task 4: Hook gates file writes + skill guides refactoring workflow")
@@ -489,7 +499,7 @@ def process_v2(data):
 # 2 in-process teammates, each loads a different skill and follows it.
 # Tests: skill tool in teammate context + concurrent skill access.
 # ====================================================================
-@pytest.mark.skipif(not Path("/home/tangjiabin/AutoAgent").exists(), reason="Needs real API + AutoAgent")
+@pytest.mark.skipif(_SKIP_REAL_API, reason="Needs real API + AutoAgent")
 async def task_swarm_teammates_use_skills():
     print("\n" + "=" * 70)
     print("  Task 5: 2 concurrent teammates each invoke different skills")
@@ -604,6 +614,10 @@ Use grep to search for '^import ' and '^from .* import'. Count unique packages. 
 # Main
 # ====================================================================
 async def main():
+    if _SKIP_REAL_API:
+        print("SKIP: set ANTHROPIC_API_KEY and provide /home/tangjiabin/AutoAgent to run.")
+        return
+
     tasks = [
         ("1. Hook blocks bash → model adapts", task_hook_blocks_model_adapts()),
         ("2. Model invokes skill tool → follows instructions", task_model_invokes_skill_tool()),

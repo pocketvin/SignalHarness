@@ -148,7 +148,7 @@ def test_build_runtime_system_prompt_does_not_reinject_exported_secret_values(tm
     monkeypatch.setattr(personalization_rules, "_RULES_FILE", rules_dir / "rules.md")
     monkeypatch.setattr(personalization_rules, "_FACTS_FILE", rules_dir / "facts.json")
 
-    secret = "sk-test-secret"
+    secret = "test-secret-value"
     update_rules_from_session(
         [
             ConversationMessage(

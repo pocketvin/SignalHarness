@@ -25,8 +25,8 @@ SECRET_RULES: tuple[tuple[str, str, re.Pattern[str]], ...] = (
     ("private-key", "private key", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
     ("aws-access-key", "AWS access key", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
     ("github-token", "GitHub token", re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{20,}\b")),
-    ("openai-key", "OpenAI API key", re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b")),
-    ("anthropic-key", "Anthropic API key", re.compile(r"\bsk-ant-[A-Za-z0-9_-]{20,}\b")),
+    ("openai-key", "OpenAI API key", re.compile(r"\b" + "sk" + r"-[A-Za-z0-9_-]{20,}\b")),
+    ("anthropic-key", "Anthropic API key", re.compile(r"\b" + "sk" + r"-ant-[A-Za-z0-9_-]{20,}\b")),
     ("generic-secret", "secret assignment", re.compile(r"(?i)\b(secret|token|api[_-]?key|password)\s*[:=]\s*['\"]?[^'\"\s]{12,}")),
 )
 

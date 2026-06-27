@@ -40,16 +40,16 @@ def test_build_inherited_env_vars_forwards_openharness_config_dir(monkeypatch):
 def test_build_inherited_env_vars_includes_openharness_auth_vars(monkeypatch):
     monkeypatch.setenv("OPENHARNESS_PROVIDER", "openai")
     monkeypatch.setenv("OPENHARNESS_BASE_URL", "https://relay.example.com/v1")
-    monkeypatch.setenv("OPENHARNESS_OPENAI_API_KEY", "sk-oh-openai")
-    monkeypatch.setenv("OPENHARNESS_ANTHROPIC_API_KEY", "sk-oh-anthropic")
+    monkeypatch.setenv("OPENHARNESS_OPENAI_API_KEY", "test-key-oh-openai")
+    monkeypatch.setenv("OPENHARNESS_ANTHROPIC_API_KEY", "test-key-oh-anthropic")
 
     env = build_inherited_env_vars()
 
     assert env["OPENHARNESS_AGENT_TEAMS"] == "1"
     assert env["OPENHARNESS_PROVIDER"] == "openai"
     assert env["OPENHARNESS_BASE_URL"] == "https://relay.example.com/v1"
-    assert env["OPENHARNESS_OPENAI_API_KEY"] == "sk-oh-openai"
-    assert env["OPENHARNESS_ANTHROPIC_API_KEY"] == "sk-oh-anthropic"
+    assert env["OPENHARNESS_OPENAI_API_KEY"] == "test-key-oh-openai"
+    assert env["OPENHARNESS_ANTHROPIC_API_KEY"] == "test-key-oh-anthropic"
 
 
 # ---------------------------------------------------------------------------

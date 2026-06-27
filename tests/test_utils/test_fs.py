@@ -76,7 +76,7 @@ def test_credentials_are_never_world_readable(tmp_path: Path) -> None:
     path = tmp_path / "credentials.json"
     atomic_write_text(
         path,
-        json.dumps({"anthropic": {"api_key": "sk-secret"}}),
+        json.dumps({"anthropic": {"api_key": "secret-value"}}),
         mode=0o600,
     )
     mode = stat.S_IMODE(path.stat().st_mode)

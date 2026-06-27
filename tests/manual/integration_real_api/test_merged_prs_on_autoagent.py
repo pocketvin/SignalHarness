@@ -3,7 +3,8 @@
 Every test runs on /home/tangjiabin/AutoAgent — a 17K LOC unfamiliar Python project.
 Uses real Kimi K2.5 API via both Anthropic and OpenAI endpoints.
 
-Run: python tests/test_merged_prs_on_autoagent.py
+Run manually:
+  ANTHROPIC_API_KEY=... python tests/manual/integration_real_api/test_merged_prs_on_autoagent.py
 """
 
 from __future__ import annotations
@@ -15,18 +16,26 @@ import tempfile
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+import pytest
 
-API_KEY = os.environ.get(
-    "ANTHROPIC_API_KEY",
-    "REDACTED_API_KEY",
-)
+REPO_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO_ROOT / "src"))
+
+API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 ANTHROPIC_BASE = "https://api.moonshot.cn/anthropic"
 OPENAI_BASE = "https://api.moonshot.cn/v1"
 MODEL = "kimi-k2.5"
 WORKSPACE = Path("/home/tangjiabin/AutoAgent")
+_SKIP_REAL_API = not API_KEY or not WORKSPACE.exists()
 
 RESULTS: dict[str, tuple[bool, float]] = {}
+pytestmark = [
+    pytest.mark.manual,
+    pytest.mark.skipif(
+        _SKIP_REAL_API,
+        reason="Manual real API test requires ANTHROPIC_API_KEY and AutoAgent workspace",
+    ),
+]
 
 
 # ==================================================================
@@ -630,6 +639,10 @@ type: project
 # Main
 # ==================================================================
 async def main():
+    if _SKIP_REAL_API:
+        print("SKIP: set ANTHROPIC_API_KEY and provide /home/tangjiabin/AutoAgent to run.")
+        return
+
     tests = [
         ("1. PR#17: diagnose skill on AutoAgent", task_diagnose_autoagent()),
         ("2. PR#12: memory research on AutoAgent", task_memory_research_autoagent()),

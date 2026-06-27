@@ -135,7 +135,7 @@ def test_setup_flow_creates_kimi_profile_with_profile_scoped_key(tmp_path: Path,
     monkeypatch.setattr("openharness.cli._select_setup_workflow", lambda *args, **kwargs: next(selections))
     monkeypatch.setattr("openharness.cli._select_from_menu", lambda *args, **kwargs: next(selections))
     monkeypatch.setattr("openharness.cli._text_prompt", lambda *args, **kwargs: next(prompts))
-    monkeypatch.setattr("openharness.auth.flows.ApiKeyFlow.run", lambda self: "sk-kimi-test")
+    monkeypatch.setattr("openharness.auth.flows.ApiKeyFlow.run", lambda self: "test-key-kimi")
 
     result = runner.invoke(app, ["setup"])
     assert result.exit_code == 0
@@ -151,7 +151,7 @@ def test_setup_flow_creates_kimi_profile_with_profile_scoped_key(tmp_path: Path,
 
     from openharness.auth.storage import load_credential
 
-    assert load_credential("profile:kimi-anthropic", "api_key") == "sk-kimi-test"
+    assert load_credential("profile:kimi-anthropic", "api_key") == "test-key-kimi"
 
 
 def test_provider_add_can_store_profile_api_key(tmp_path: Path, monkeypatch):
@@ -345,7 +345,7 @@ def test_dry_run_rejects_continue_resume(monkeypatch):
 
 def test_build_dry_run_preview_classifies_slash_command_and_flags_bad_mcp(monkeypatch, tmp_path: Path):
     settings = Settings(
-        api_key="sk-test",
+        api_key="test-key-dry-run",
         mcp_servers={
             "broken": McpStdioServerConfig(command="definitely-not-a-real-command-openharness"),
         },
@@ -431,7 +431,7 @@ def test_build_dry_run_preview_sets_blocked_when_model_prompt_lacks_auth(monkeyp
 
 
 def test_build_dry_run_preview_recommends_matching_skills_and_tools(monkeypatch, tmp_path: Path):
-    settings = Settings(api_key="sk-test")
+    settings = Settings(api_key="test-key-dry-run")
 
     class _FakeSkillRegistry:
         def list_skills(self):

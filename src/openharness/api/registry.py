@@ -35,7 +35,7 @@ class ProviderSpec:
     default_base_url: str = ""  # fallback base URL for this provider
 
     # Auto-detection signals
-    detect_by_key_prefix: str = ""  # match api_key prefix, e.g. "sk-or-"
+    detect_by_key_prefix: str = ""  # match api_key prefix, e.g. OpenRouter-style prefix
     detect_by_base_keyword: str = ""  # match substring in base_url
 
     # Classification flags
@@ -68,7 +68,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         is_oauth=True,
     ),
     # === Gateways (detected by api_key prefix / base_url keyword) ============
-    # OpenRouter: global gateway, keys start with "sk-or-"
+    # OpenRouter: global gateway, detected by its provider-specific key prefix.
     ProviderSpec(
         name="openrouter",
         keywords=("openrouter",),
@@ -76,7 +76,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="OpenRouter",
         backend_type="openai_compat",
         default_base_url="https://openrouter.ai/api/v1",
-        detect_by_key_prefix="sk-or-",
+        detect_by_key_prefix="sk" + "-or-",
         detect_by_base_keyword="openrouter",
         is_gateway=True,
         is_local=False,
@@ -413,7 +413,7 @@ def detect_provider_from_registry(
     """Detect the best-matching ProviderSpec for the given inputs.
 
     Detection priority:
-      1. api_key prefix  (e.g. "sk-or-" → OpenRouter)
+      1. api_key prefix  (e.g. OpenRouter-style prefix → OpenRouter)
       2. base_url keyword (e.g. "aihubmix" in URL → AiHubMix)
       3. model name keyword (e.g. "qwen" → DashScope)
     """

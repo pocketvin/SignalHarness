@@ -79,6 +79,10 @@ exclude = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+norecursedirs = ["tests/manual", "tests/integration_real_api"]
+markers = [
+    "manual: manual smoke or real API tests skipped from default public CI",
+]
 
 [tool.ruff]
 line-length = 100

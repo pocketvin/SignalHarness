@@ -201,7 +201,7 @@ def test_resolve_output_paths_multiple(tmp_path: Path) -> None:
 def test_image_generation_config_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENHARNESS_IMAGE_GENERATION_PROVIDER", "openai")
     monkeypatch.setenv("OPENHARNESS_IMAGE_GENERATION_MODEL", "gpt-image-1")
-    monkeypatch.setenv("OPENHARNESS_IMAGE_GENERATION_API_KEY", "sk-test")
+    monkeypatch.setenv("OPENHARNESS_IMAGE_GENERATION_API_KEY", "test-key-image-generation")
     monkeypatch.setenv("OPENHARNESS_IMAGE_GENERATION_BASE_URL", "https://example.test/v1")
     monkeypatch.setenv("OPENHARNESS_IMAGE_GENERATION_CODEX_MODEL", "gpt-5.4")
 
@@ -209,7 +209,7 @@ def test_image_generation_config_from_env(monkeypatch: pytest.MonkeyPatch) -> No
 
     assert cfg.provider == "openai"
     assert cfg.model == "gpt-image-1"
-    assert cfg.api_key == "sk-test"
+    assert cfg.api_key == "test-key-image-generation"
     assert cfg.base_url == "https://example.test/v1"
     assert cfg.codex_model == "gpt-5.4"
     assert cfg.is_configured

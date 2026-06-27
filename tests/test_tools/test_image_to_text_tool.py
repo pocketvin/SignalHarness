@@ -231,12 +231,12 @@ class TestVisionModelConfig:
     def test_configured(self) -> None:
         cfg = VisionModelConfig(
             model="gpt-4o",
-            api_key="sk-test",
+            api_key="test-key-vision",
             base_url="https://api.openai.com/v1",
         )
         assert cfg.is_configured
         assert cfg.model == "gpt-4o"
-        assert cfg.api_key == "sk-test"
+        assert cfg.api_key == "test-key-vision"
 
     def test_partial_not_configured(self) -> None:
         cfg = VisionModelConfig(model="gpt-4o")
@@ -244,12 +244,12 @@ class TestVisionModelConfig:
 
     def test_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("OPENHARNESS_VISION_MODEL", "gpt-4o")
-        monkeypatch.setenv("OPENHARNESS_VISION_API_KEY", "sk-env-key")
+        monkeypatch.setenv("OPENHARNESS_VISION_API_KEY", "test-key-env")
         monkeypatch.setenv("OPENHARNESS_VISION_BASE_URL", "https://api.example.com/v1")
 
         cfg = VisionModelConfig.from_env()
         assert cfg.model == "gpt-4o"
-        assert cfg.api_key == "sk-env-key"
+        assert cfg.api_key == "test-key-env"
         assert cfg.base_url == "https://api.example.com/v1"
         assert cfg.is_configured
 

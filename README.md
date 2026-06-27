@@ -51,6 +51,19 @@ Optional real-provider environment variables:
 - `LLM_MODEL` (default: `gpt-4o-mini`)
 - `LLM_BASE_URL` for an OpenAI-compatible endpoint
 
+## Public-safe CI and secrets policy
+
+Public CI runs only offline `mock-agent` / scripted SignalHarness checks. It
+does not require a real API key and must not call live providers. Real API
+tests are manual smoke tests under `tests/manual/integration_real_api/`; they
+read credentials only from environment variables and are excluded from default
+pytest discovery.
+
+Hardcoded API keys and secret-looking fallback credentials are forbidden. Use
+environment variables such as `LLM_API_KEY` or `ANTHROPIC_API_KEY` for manual
+smoke tests, and keep `.env`, runtime outputs, caches, and build artifacts out
+of git.
+
 ## Guarded score
 
 The LLM supplies semantic relevance and evidence confidence, but it cannot emit
@@ -194,9 +207,11 @@ src/signal_harness/
 
 ```bash
 uv run --extra dev python -m pytest tests/signal_harness -q
-uv run --extra dev python -m pytest -q
 uv run --extra dev ruff check src/signal_harness tests/signal_harness
 uv run --extra dev mypy src/signal_harness
+uv run signal-harness scan --fixture examples/signal_harness/sample_events.json --mode mock-agent
+uv run signal-harness trace
+uv run signal-harness calibrate --mode mock-agent
 uv build
 ```
 

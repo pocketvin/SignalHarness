@@ -36,26 +36,26 @@ class TestSettings:
         assert s.web.synthetic_dns_cidrs == []
 
     def test_resolve_api_key_from_instance(self):
-        s = Settings(api_key="sk-test-123")
-        assert s.resolve_api_key() == "sk-test-123"
+        s = Settings(api_key="test-key-123")
+        assert s.resolve_api_key() == "test-key-123"
 
     def test_resolve_api_key_from_env(self, monkeypatch):
         monkeypatch.delenv("OPENHARNESS_ANTHROPIC_API_KEY", raising=False)
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-env-456")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-env-456")
         s = Settings()
-        assert s.resolve_api_key() == "sk-env-456"
+        assert s.resolve_api_key() == "test-key-env-456"
 
     def test_resolve_api_key_prefers_openharness_env(self, monkeypatch):
-        monkeypatch.setenv("OPENHARNESS_ANTHROPIC_API_KEY", "sk-oh-456")
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-env-456")
+        monkeypatch.setenv("OPENHARNESS_ANTHROPIC_API_KEY", "test-key-oh-456")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-env-456")
         s = Settings()
-        assert s.resolve_api_key() == "sk-oh-456"
+        assert s.resolve_api_key() == "test-key-oh-456"
 
     def test_resolve_api_key_instance_takes_precedence(self, monkeypatch):
         monkeypatch.delenv("OPENHARNESS_ANTHROPIC_API_KEY", raising=False)
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-env-456")
-        s = Settings(api_key="sk-instance-789")
-        assert s.resolve_api_key() == "sk-instance-789"
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-env-456")
+        s = Settings(api_key="test-key-instance-789")
+        assert s.resolve_api_key() == "test-key-instance-789"
 
     def test_resolve_api_key_missing_raises(self, monkeypatch):
         monkeypatch.delenv("OPENHARNESS_ANTHROPIC_API_KEY", raising=False)
@@ -102,22 +102,22 @@ class TestSettings:
         from the environment rather than the flat api_key field which may
         contain an Anthropic key from settings.json."""
         monkeypatch.delenv("OPENHARNESS_OPENAI_API_KEY", raising=False)
-        monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-correct")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key-openai-correct")
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        s = Settings(api_key="sk-ant-wrong-provider", api_format="openai")
+        s = Settings(api_key="test-key-anthropic-wrong-provider", api_format="openai")
         s = s.sync_active_profile_from_flat_fields()
         auth = s.resolve_auth()
-        assert auth.value == "sk-openai-correct"
+        assert auth.value == "test-key-openai-correct"
         assert "OPENAI" in auth.source
 
     def test_resolve_auth_prefers_openharness_env_for_openai(self, monkeypatch):
-        monkeypatch.setenv("OPENHARNESS_OPENAI_API_KEY", "sk-oh-openai")
-        monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-correct")
+        monkeypatch.setenv("OPENHARNESS_OPENAI_API_KEY", "test-key-oh-openai")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key-openai-correct")
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        s = Settings(api_key="sk-ant-wrong-provider", api_format="openai")
+        s = Settings(api_key="test-key-anthropic-wrong-provider", api_format="openai")
         s = s.sync_active_profile_from_flat_fields()
         auth = s.resolve_auth()
-        assert auth.value == "sk-oh-openai"
+        assert auth.value == "test-key-oh-openai"
         assert auth.source == "env:OPENHARNESS_OPENAI_API_KEY"
 
     def test_resolve_auth_falls_back_to_flat_api_key(self, monkeypatch):
@@ -127,10 +127,10 @@ class TestSettings:
         monkeypatch.delenv("OPENHARNESS_OPENAI_API_KEY", raising=False)
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-        s = Settings(api_key="sk-fallback-key")
+        s = Settings(api_key="test-key-fallback")
         s = s.sync_active_profile_from_flat_fields()
         auth = s.resolve_auth()
-        assert auth.value == "sk-fallback-key"
+        assert auth.value == "test-key-fallback"
 
     def test_env_overrides_picks_up_openai_base_url(self, tmp_path: Path, monkeypatch):
         """_apply_env_overrides should pick up OPENAI_BASE_URL for relay
@@ -139,15 +139,15 @@ class TestSettings:
         monkeypatch.delenv("OPENHARNESS_BASE_URL", raising=False)
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         monkeypatch.setenv("OPENAI_BASE_URL", "https://relay.example.com/v1")
-        monkeypatch.setenv("OPENAI_API_KEY", "sk-relay-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key-relay")
         path = tmp_path / "settings.json"
         path.write_text(json.dumps({}))
         s = load_settings(path)
         assert s.base_url == "https://relay.example.com/v1"
 
     def test_load_settings_uses_profile_specific_openharness_env_key(self, tmp_path: Path, monkeypatch):
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-wrong")
-        monkeypatch.setenv("OPENHARNESS_OPENAI_API_KEY", "sk-oh-openai")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-anthropic-wrong")
+        monkeypatch.setenv("OPENHARNESS_OPENAI_API_KEY", "test-key-oh-openai")
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         path = tmp_path / "settings.json"
         path.write_text(
@@ -156,10 +156,10 @@ class TestSettings:
         )
         s = load_settings(path)
         assert s.active_profile == "openai-compatible"
-        assert s.api_key == "sk-oh-openai"
+        assert s.api_key == "test-key-oh-openai"
 
     def test_load_settings_ignores_wrong_provider_native_env_key(self, tmp_path: Path, monkeypatch):
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-wrong")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-anthropic-wrong")
         monkeypatch.delenv("OPENHARNESS_OPENAI_API_KEY", raising=False)
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         path = tmp_path / "settings.json"
@@ -233,7 +233,7 @@ class TestLoadSaveSettings:
         monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
         monkeypatch.delenv("OPENHARNESS_MODEL", raising=False)
         path = tmp_path / "settings.json"
-        original = Settings(api_key="sk-roundtrip", model="claude-opus-4-20250514", verbose=True)
+        original = Settings(api_key="test-key-roundtrip", model="claude-opus-4-20250514", verbose=True)
         save_settings(original, path)
         loaded = load_settings(path)
         assert loaded.api_key == original.api_key
@@ -511,8 +511,8 @@ class TestLoadSaveSettings:
 
     def test_resolve_auth_prefers_profile_scoped_credential_for_custom_compatible_profile(self, tmp_path: Path, monkeypatch):
         monkeypatch.setenv("OPENHARNESS_CONFIG_DIR", str(tmp_path))
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-global-env")
-        store_credential("profile:kimi-anthropic", "api_key", "sk-profile-specific", use_keyring=False)
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-global-env")
+        store_credential("profile:kimi-anthropic", "api_key", "test-key-profile-specific", use_keyring=False)
         settings = Settings(
             active_profile="kimi-anthropic",
             profiles={
@@ -530,7 +530,7 @@ class TestLoadSaveSettings:
 
         resolved = settings.resolve_auth()
 
-        assert resolved.value == "sk-profile-specific"
+        assert resolved.value == "test-key-profile-specific"
         assert resolved.source == "file:profile:kimi-anthropic"
 
 
@@ -566,7 +566,7 @@ def test_normalize_anthropic_model_name_matches_hermes_behavior():
         monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://env.example/anthropic")
         monkeypatch.setenv("OPENHARNESS_TIMEOUT", "42.5")
         monkeypatch.setenv("OPENHARNESS_MAX_TURNS", "42")
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-env-override")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-env-override")
         monkeypatch.setenv("OPENHARNESS_SANDBOX_ENABLED", "true")
         monkeypatch.setenv("OPENHARNESS_SANDBOX_FAIL_IF_UNAVAILABLE", "1")
 
@@ -576,7 +576,7 @@ def test_normalize_anthropic_model_name_matches_hermes_behavior():
         assert s.base_url == "https://env.example/anthropic"
         assert s.timeout == 42.5
         assert s.max_turns == 42
-        assert s.api_key == "sk-env-override"
+        assert s.api_key == "test-key-env-override"
         assert s.sandbox.enabled is True
         assert s.sandbox.fail_if_unavailable is True
 

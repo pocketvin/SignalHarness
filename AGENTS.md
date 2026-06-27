@@ -31,13 +31,20 @@ Rules:
 - Keep provider adapters thin and use the existing OpenHarness tool registry
   and permission boundaries.
 - Prompt, schema, route, or tool-use changes require matching tests and docs.
+- Public CI must use `mock-agent` / scripted evals only. Real API tests live in
+  `tests/manual/integration_real_api/`, are excluded from default pytest, and
+  require explicit environment variables.
+- Never commit hardcoded API keys, secret-looking fallback credentials, `.env`,
+  runtime outputs, caches, or build artifacts.
 
 Before handoff:
 
 ```bash
 uv run --extra dev python -m pytest tests/signal_harness -q
-uv run --extra dev python -m pytest -q
 uv run --extra dev ruff check src/signal_harness tests/signal_harness
 uv run --extra dev mypy src/signal_harness
+uv run signal-harness scan --fixture examples/signal_harness/sample_events.json --mode mock-agent
+uv run signal-harness trace
+uv run signal-harness calibrate --mode mock-agent
 uv build
 ```

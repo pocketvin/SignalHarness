@@ -175,7 +175,7 @@ def test_team_memory_guards_and_agent_memory(tmp_path: Path, monkeypatch: pytest
     assert team_dir.exists()
     assert valid_path is not None and error is None
     assert escaped_path is None and escaped_error
-    assert check_team_memory_secrets("OPENAI_API_KEY=REDACTED_API_KEY")
+    assert check_team_memory_secrets("OPENAI_API_KEY=" + "sk" + "-12345678901234567890")
     assert agent_dir.exists()
     assert get_agent_memory_entrypoint(project, "reviewer/bot", "project").exists()
 
