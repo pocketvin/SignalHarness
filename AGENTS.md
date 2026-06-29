@@ -32,8 +32,10 @@ Rules:
 - Keep provider adapters thin; demo and mock-agent must not require upstream
   OpenHarness imports.
 - Prompt, schema, route, or tool-use changes require matching tests and docs.
-- Public CI must use `mock-agent` / scripted evals only. Real API smoke tests
-  are documented, manual, and require explicit environment variables.
+- Public CI must stay SignalHarness-focused and offline: pytest
+  `tests/signal_harness`, Ruff, mypy, and `uv build` only. It must not require
+  `LLM_API_KEY`, run `--mode agent`, or call live providers. Real API smoke
+  tests are documented, manual, and require explicit environment variables.
 - Never commit hardcoded API keys, secret-looking fallback credentials, `.env`,
   runtime outputs, caches, or build artifacts.
 

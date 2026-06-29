@@ -84,9 +84,12 @@ provider-native tool calling: the default `tool_strategy` remains
 
 ## Public-safe CI and secrets policy
 
-Public CI runs only offline `mock-agent` / scripted SignalHarness checks. It
-does not require a real API key and must not call live providers. Real provider
-checks are manual smoke tests documented in `docs/SMOKE_TEST_AGENT_MODE.md`.
+Public CI is SignalHarness-focused and offline: it runs
+`python -m pytest tests/signal_harness -q`, Ruff, mypy, and `uv build` on
+Python 3.11. It does not set `LLM_API_KEY`, does not run `--mode agent`, and
+must not call live providers. Scripted `mock-agent` behavior is covered by the
+SignalHarness test suite and local acceptance commands, while real provider
+checks remain manual smoke tests documented in `docs/SMOKE_TEST_AGENT_MODE.md`.
 
 Hardcoded API keys and secret-looking fallback credentials are forbidden. Use
 environment variables such as `LLM_API_KEY` or `ANTHROPIC_API_KEY` for manual
@@ -148,6 +151,10 @@ watchlists, or modify skills.
 
 No proposal is applied automatically. `signal_policy.yaml`, skill files, and
 `watchlist.yaml` change only through a separate explicit approval path.
+`calibrate --apply` also goes through this staging gate: without `--yes` it
+stages and prints review/apply instructions; with `--yes`, only a low-risk
+proposal with a passing replay gate can be applied through the same
+`learning-apply` safeguards.
 The staged approval path is:
 
 ```bash
@@ -352,10 +359,10 @@ uv run signal-harness calibrate --mode mock-agent
 uv build
 ```
 
-CI evals use `MockProvider(strategy="scripted")` and the multi-source fixture.
-They evaluate routing, evidence, tool controls, noise, caching, clustering,
-guardrails, and proposal safety—not model intelligence. Real `agent` mode
-remains a manual smoke test.
+Scripted eval tests use `MockProvider(strategy="scripted")` and the
+multi-source fixture. They evaluate routing, evidence, tool controls, noise,
+caching, clustering, guardrails, and proposal safety—not model intelligence.
+Real `agent` mode remains a manual smoke test and is not part of public CI.
 
 See:
 

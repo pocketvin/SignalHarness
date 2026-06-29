@@ -3,9 +3,11 @@
 This manual smoke test verifies the optional real-provider path. It is not
 required for offline `demo` or `mock-agent` CI.
 
-Public CI does not require a real API key. It uses `mock-agent` / scripted evals
-only and does not call live providers. Hardcoded keys and fallback credentials
-are forbidden; real provider credentials must come from environment variables.
+Public CI does not require a real API key. It runs SignalHarness-focused
+offline checks only: `tests/signal_harness`, Ruff, mypy, and `uv build`.
+It does not run `--mode agent` and does not call live providers. Hardcoded keys
+and fallback credentials are forbidden; real provider credentials must come
+from environment variables.
 
 ## Configure the provider
 

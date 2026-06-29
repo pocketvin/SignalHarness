@@ -13,6 +13,7 @@ from signal_harness.signal.schemas import (
     SignalCategory,
     SignalDecision,
     SignalEvent,
+    TraceStep,
 )
 
 
@@ -66,3 +67,22 @@ def test_policy_proposal_cannot_bypass_approval() -> None:
             new_policy={"threshold": 80},
             requires_approval=False,
         )
+
+
+def test_trace_step_metadata_is_optional_and_structured() -> None:
+    legacy = TraceStep(step="classify", status="success", duration_ms=1)
+    structured = TraceStep(
+        step="repair_requested",
+        status="success",
+        duration_ms=0,
+        metadata={
+            "repair": {
+                "triggered_by": "ImpactAnalystAgent",
+                "target_agent": "context_evidence",
+                "event_ids": ["demo-001"],
+            }
+        },
+    )
+
+    assert legacy.metadata == {}
+    assert structured.metadata["repair"]["event_ids"] == ["demo-001"]

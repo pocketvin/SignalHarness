@@ -140,6 +140,22 @@ def test_model_eval_summary_counts_repair_metrics() -> None:
                 status="success",
                 duration_ms=0,
                 fallback_used=True,
+                metadata={
+                    "repair": {
+                        "blocked_reason": "repair_round_budget_exceeded",
+                    }
+                },
+            ),
+            TraceStep(
+                step="llm_agent_call",
+                status="success",
+                duration_ms=12,
+                metadata={
+                    "repair": {
+                        "summary_step": "repair_impact",
+                        "internal_llm_call": True,
+                    }
+                },
             ),
         ],
         runs=1,

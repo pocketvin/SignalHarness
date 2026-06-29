@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
-import json
-import re
-import time
-import asyncio
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, replace
-from typing import Any, TypeVar, TypedDict
+from dataclasses import dataclass
+from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
+from signal_harness.agent_integration.invoker import AgentInvoker, _output_count
 from signal_harness.agent_integration.mode import RunMode
+from signal_harness.agent_integration.repair import (
+    RepairCoordinator,
+    merge_action,
+    merge_context_evidence,
+    merge_impact,
+    repair_metadata,
+)
 from signal_harness.agent_integration.schemas import (
     ActionOutput,
     ContextEvidenceOutput,
@@ -21,9 +25,14 @@ from signal_harness.agent_integration.schemas import (
     LearningPolicyOutput,
     SupervisorOutput,
     ToolObservation,
-    ToolRequest,
 )
-from signal_harness.agent_integration.trace import append_llm_trace
+from signal_harness.agent_integration.scoring_bridge import guarded_assessments
+from signal_harness.agent_integration.tool_loop import (
+    ControlledToolLoop,
+    ToolExecutionTrace,
+    cap_evidence_after_tool_failures,
+    evidence_exit_condition,
+)
 from signal_harness.agent_team import (
     ActionPlannerAgent,
     ContextEvidenceAgent,
@@ -32,47 +41,18 @@ from signal_harness.agent_team import (
     SignalSupervisorAgent,
 )
 from signal_harness.providers.adapter import AgentCall, AgentProvider
-from signal_harness.runtime.cache import ToolObservationCache, stable_hash
-from signal_harness.runtime.permissions import SignalPermissionGuard
 from signal_harness.runtime.tool_executor import SignalToolExecutor
 from signal_harness.runtime.tracing import TraceRecorder
-from signal_harness.signal.policy import decision_for_score
-from signal_harness.signal.scorer import score_signal
 from signal_harness.signal.schemas import (
-    AgentScoreBreakdown,
     FeedbackRecord,
     NoiseAssessment,
     SignalAssessment,
-    SignalCategory,
     SignalCluster,
-    SignalDecision,
     SignalEvent,
     TraceStep,
 )
 
 OutputT = TypeVar("OutputT", bound=BaseModel)
-
-READ_ONLY_TOOL_ALLOWLIST = frozenset(
-    {
-        "github_signal",
-        "rss_signal",
-        "web_change",
-        "signal_memory",
-        "signal_score",
-    }
-)
-EXPLICITLY_BLOCKED_TOOLS = frozenset(
-    {
-        "bash",
-        "shell",
-        "edit_file",
-        "write_file",
-        "mcp",
-        "create_github_issue",
-        "send_team_notification",
-        "modify_signal_policy",
-    }
-)
 
 
 @dataclass(frozen=True)
@@ -90,77 +70,6 @@ class AgentLoopLimits:
 
 
 ToolLoopLimits = AgentLoopLimits
-
-
-class ToolExecutionTrace(TypedDict):
-    executed: list[str]
-    errors: list[str]
-    blocked: list[str]
-    budget_blocked: list[str]
-    permission_checks: list[str]
-    cache_events: list[str]
-
-
-def _json_object(text: str) -> dict[str, Any]:
-    stripped = text.strip()
-    if not stripped:
-        raise ValueError("Agent response was empty")
-    if stripped.startswith("```"):
-        stripped = re.sub(r"^```(?:json)?\s*", "", stripped)
-        stripped = re.sub(r"\s*```$", "", stripped)
-    payload = json.loads(stripped)
-    if not isinstance(payload, dict):
-        raise ValueError("Agent response must be a JSON object")
-    return payload
-
-
-def _output_count(output: BaseModel) -> int:
-    payload = output.model_dump(mode="json")
-    for key in ("routes", "results", "tool_requests"):
-        value = payload.get(key)
-        if isinstance(value, list):
-            return len(value)
-    if isinstance(output, LearningPolicyOutput):
-        return 3
-    return 1
-
-
-def _short_error(exc: Exception, *, limit: int = 320) -> str:
-    message = re.sub(r"\s+", " ", str(exc)).strip()
-    if not message:
-        message = exc.__class__.__name__
-    return message[:limit]
-
-
-def _trace_tools(output: BaseModel) -> tuple[list[str], list[str], list[str], list[str]]:
-    payload = output.model_dump(mode="json")
-    source_types: list[str] = []
-    requested: list[str] = []
-    executed: list[str] = []
-    errors: list[str] = []
-    if isinstance(payload.get("source_types_observed"), list):
-        source_types.extend(str(item) for item in payload["source_types_observed"])
-    if isinstance(payload.get("tool_requests"), list):
-        requested.extend(
-            str(item.get("tool_name"))
-            for item in payload["tool_requests"]
-            if isinstance(item, dict) and item.get("tool_name")
-        )
-    for result in payload.get("results", []):
-        if not isinstance(result, dict):
-            continue
-        source_types.extend(str(item) for item in result.get("source_types_observed", []))
-        requested.extend(str(item) for item in result.get("tools_requested", []))
-        executed.extend(str(item) for item in result.get("tools_executed", []))
-        errors.extend(str(item) for item in result.get("tool_errors", []))
-    if isinstance(payload.get("tools_requested"), list):
-        requested.extend(str(item) for item in payload["tools_requested"])
-    return (
-        list(dict.fromkeys(source_types)),
-        list(dict.fromkeys(requested)),
-        list(dict.fromkeys(executed)),
-        list(dict.fromkeys(errors)),
-    )
 
 
 class LLMAgentTeamRunner:
@@ -184,10 +93,21 @@ class LLMAgentTeamRunner:
         self.tool_executor = tool_executor
         self.loop_limits = loop_limits or tool_limits or AgentLoopLimits()
         self.tool_limits = self.loop_limits
-        self._tool_requests_used = 0
-        self._repair_rounds_used = 0
-        self._repair_events_used = 0
-        self.tool_cache = ToolObservationCache()
+        self.invoker = AgentInvoker(
+            provider=self.provider,
+            mode=self.mode,
+            trace=self.trace,
+            limits=self.loop_limits,
+        )
+        self.tool_loop = ControlledToolLoop(
+            tool_executor=self.tool_executor,
+            limits=self.tool_limits,
+        )
+        self.repair = RepairCoordinator(
+            trace=self.trace,
+            max_repair_rounds_per_run=self.loop_limits.max_repair_rounds_per_run,
+            max_repair_events_per_run=self.loop_limits.max_repair_events_per_run,
+        )
         self.supervisor = SignalSupervisorAgent()
         self.evidence = ContextEvidenceAgent()
         self.impact = ImpactAnalystAgent()
@@ -202,86 +122,12 @@ class LLMAgentTeamRunner:
         *,
         event_ids: Iterable[str],
     ) -> tuple[OutputT, int]:
-        started = time.perf_counter()
-        schema_valid = False
-        fallback_used = False
-        error: str | None = None
-        schema_error: str | None = None
-        retry_count = 0
-
-        def parse_response(response: str) -> OutputT:
-            return output_model.model_validate(_json_object(response))
-
-        async def provider_text(target: AgentCall) -> str:
-            try:
-                return await asyncio.wait_for(
-                    self.provider.complete(target),
-                    timeout=self.loop_limits.max_agent_call_seconds,
-                )
-            except (TimeoutError, asyncio.TimeoutError) as exc:
-                raise TimeoutError(
-                    f"provider_timeout after "
-                    f"{self.loop_limits.max_agent_call_seconds}s"
-                ) from exc
-
-        try:
-            output = parse_response(await provider_text(call))
-            schema_valid = True
-        except TimeoutError as exc:
-            schema_error = _short_error(exc)
-            error = schema_error
-            fallback_used = True
-            output = fallback()
-        except Exception as exc:
-            schema_error = _short_error(exc)
-            if self.loop_limits.max_schema_retries <= 0:
-                fallback_used = True
-                output = fallback()
-                error = schema_error
-            else:
-                retry_count = 1
-                retry_call = replace(
-                    call,
-                    user_prompt=(
-                        call.user_prompt.rstrip()
-                        + "\n\n"
-                        + "Your previous response failed JSON/schema validation: "
-                        + schema_error
-                        + ". Return exactly one valid JSON object matching the required "
-                        + "schema. Do not include Markdown."
-                    ),
-                )
-                try:
-                    output = parse_response(await provider_text(retry_call))
-                    schema_valid = True
-                except Exception as retry_exc:
-                    retry_error = _short_error(retry_exc)
-                    schema_error = f"{schema_error}; retry failed: {retry_error}"
-                    error = schema_error
-                    fallback_used = True
-                    output = fallback()
-        duration_ms = max(0, round((time.perf_counter() - started) * 1000))
-        source_types, requested, executed, tool_errors = _trace_tools(output)
-        index = append_llm_trace(
-            self.trace,
-            call=call,
-            provider=self.provider,
-            mode=self.mode,
-            input_event_id=",".join(event_ids) or "memory",
-            input_count=call.input_count,
-            output_count=_output_count(output),
-            duration_ms=duration_ms,
-            schema_valid=schema_valid,
-            fallback_used=fallback_used,
-            source_types_observed=source_types,
-            tools_requested=requested,
-            tools_executed=executed,
-            tool_errors=tool_errors,
-            retry_count=retry_count,
-            schema_error=schema_error,
-            error=error,
+        return await self.invoker.invoke(
+            call,
+            output_model,
+            fallback,
+            event_ids=event_ids,
         )
-        return output, index
 
     def _ensure_coverage(
         self,
@@ -630,7 +476,7 @@ class LLMAgentTeamRunner:
                 )
             )
 
-        assessments, permission_checks = self._guarded_assessments(
+        assessments, permission_checks = guarded_assessments(
             events,
             routes=routes,
             evidence=evidence,
@@ -705,179 +551,25 @@ class LLMAgentTeamRunner:
         *,
         event_count: int,
     ) -> tuple[list[ToolObservation], ToolExecutionTrace]:
-        observations: list[ToolObservation] = []
-        trace: ToolExecutionTrace = {
-            "executed": [],
-            "errors": [],
-            "blocked": [],
-            "budget_blocked": [],
-            "permission_checks": [],
-            "cache_events": [],
-        }
-        guard = SignalPermissionGuard(policy)
-        max_for_events = max(1, event_count) * self.tool_limits.max_tool_requests_per_event
-        remaining_for_run = max(
-            0,
-            self.tool_limits.max_total_tool_requests_per_run - self._tool_requests_used,
+        return await self.tool_loop.execute_tool_requests(
+            plan,
+            policy,
+            event_count=event_count,
         )
-        allowed_count = min(len(plan.tool_requests), max_for_events, remaining_for_run)
-        for index, request in enumerate(plan.tool_requests):
-            if index >= allowed_count:
-                trace["blocked"].append(request.tool_name)
-                trace["budget_blocked"].append(request.tool_name)
-                trace["permission_checks"].append(
-                    f"{request.tool_name}:blocked:budget_exceeded"
-                )
-                observations.append(
-                    ToolObservation(
-                        tool_name=request.tool_name,
-                        status="blocked",
-                        output_summary="Tool request skipped because the tool budget was exceeded.",
-                        error="budget_exceeded",
-                    )
-                )
-                continue
-            self._tool_requests_used += 1
-            observation = await self._execute_one_tool(request, guard, trace)
-            observations.append(observation)
-        return observations, trace
-
-    async def _execute_one_tool(
-        self,
-        request: ToolRequest,
-        guard: SignalPermissionGuard,
-        trace: ToolExecutionTrace,
-    ) -> ToolObservation:
-        name = request.tool_name
-        if (
-            name in EXPLICITLY_BLOCKED_TOOLS
-            or name not in READ_ONLY_TOOL_ALLOWLIST
-            or not self._request_is_read_only(name, request.arguments)
-        ):
-            trace["blocked"].append(name)
-            trace["permission_checks"].append(f"{name}:blocked:not-read-only-allowlisted")
-            return ToolObservation(
-                tool_name=name,
-                status="blocked",
-                output_summary="Tool request was blocked by the read-only allowlist.",
-                error=f"{name} is not an allowed evidence tool",
-            )
-        permission_action = self._permission_action(name, request.arguments)
-        decision = guard.evaluate(permission_action)
-        trace["permission_checks"].append(
-            f"{name}:{permission_action}:{'allowed' if decision.allowed else 'blocked'}"
-        )
-        if not decision.allowed:
-            trace["blocked"].append(name)
-            return ToolObservation(
-                tool_name=name,
-                status="blocked",
-                output_summary=decision.reason,
-                error=decision.reason,
-            )
-        if self.tool_executor is None:
-            error = "SignalToolExecutor is unavailable"
-            trace["errors"].append(f"{name}: {error}")
-            return ToolObservation(
-                tool_name=name,
-                status="error",
-                output_summary=error,
-                error=error,
-            )
-        cache_key = self.tool_cache.key(name, request.arguments)
-        cached = self.tool_cache.get(cache_key)
-        if isinstance(cached, ToolObservation):
-            trace["cache_events"].append(f"tool_observation:{name}:hit")
-            return cached
-        trace["cache_events"].append(f"tool_observation:{name}:miss")
-        result = await self.tool_executor.call(name, request.arguments)
-        raw_ref = f"sha256:{stable_hash(result.output)}"
-        output_limit = self.tool_limits.max_tool_output_chars
-        if result.is_error:
-            trace["errors"].append(f"{name}: {result.output}")
-            observation = ToolObservation(
-                tool_name=name,
-                status="error",
-                output_summary=result.output[:output_limit],
-                raw_output_ref=raw_ref,
-                error=result.output,
-            )
-        else:
-            trace["executed"].append(name)
-            observation = ToolObservation(
-                tool_name=name,
-                status="success",
-                output_summary=result.output[:output_limit],
-                raw_output_ref=raw_ref,
-            )
-        self.tool_cache.put(cache_key, observation)
-        return observation
-
-    @staticmethod
-    def _permission_action(name: str, arguments: dict[str, Any]) -> str:
-        if name == "github_signal":
-            return (
-                "read_github_issue"
-                if arguments.get("action") == "fetch_repo_issues"
-                else "read_github_release"
-            )
-        if name == "rss_signal":
-            return "read_rss"
-        if name == "web_change":
-            return "read_mock_web_change"
-        return "read_config"
-
-    @staticmethod
-    def _request_is_read_only(name: str, arguments: dict[str, Any]) -> bool:
-        if name == "signal_memory":
-            return str(arguments.get("action", "")).startswith("load_")
-        return name in READ_ONLY_TOOL_ALLOWLIST
 
     @staticmethod
     def _evidence_exit_condition(
         plan: EvidenceToolPlan,
         observations: list[ToolObservation],
     ) -> str:
-        if not plan.tool_requests:
-            return "no_tool_requests"
-        if any(item.error == "budget_exceeded" for item in observations):
-            return "completed_with_budget_blocks"
-        if any(item.status == "error" for item in observations):
-            return "completed_with_tool_errors"
-        if any(item.status == "blocked" for item in observations):
-            return "completed_with_blocked_tools"
-        return "evidence_complete"
+        return evidence_exit_condition(plan, observations)
 
     @staticmethod
     def _cap_evidence_after_tool_failures(
         evidence: ContextEvidenceOutput,
         observations: list[ToolObservation],
     ) -> ContextEvidenceOutput:
-        failures = [
-            item for item in observations if item.status in {"error", "blocked"}
-        ]
-        if not failures:
-            return evidence
-        message = "; ".join(
-            f"{item.tool_name}: {item.error or item.output_summary}"
-            for item in failures
-        )
-        return ContextEvidenceOutput(
-            results=[
-                item.model_copy(
-                    update={
-                        "confidence": min(item.confidence, 0.55),
-                        "uncertainty": " ".join(
-                            value for value in (item.uncertainty, message) if value
-                        ),
-                        "tool_errors": list(
-                            dict.fromkeys([*item.tool_errors, message])
-                        ),
-                    }
-                )
-                for item in evidence.results
-            ]
-        )
+        return cap_evidence_after_tool_failures(evidence, observations)
 
     async def _maybe_run_impact_evidence_repair(
         self,
@@ -892,32 +584,37 @@ class LLMAgentTeamRunner:
         memory_snapshot: dict[str, Any],
         volatile_metadata: dict[str, Any],
     ) -> tuple[ContextEvidenceOutput, ImpactOutput]:
-        event_ids, reason = self._impact_to_evidence_repair_candidates(
+        event_ids, reason = self.repair.impact_to_evidence_repair_candidates(
             events=events,
             evidence=evidence,
             impact=impact,
         )
         if not event_ids:
             return evidence, impact
-        event_ids = self._prepare_repair_event_ids(
+        repair_round = self.repair.next_repair_round()
+        event_ids = self.repair.prepare_repair_event_ids(
             event_ids,
             valid_ids={event.event_id for event in events},
             triggered_by="ImpactAnalystAgent",
             target_agent="context_evidence",
+            repair_round=repair_round,
         )
         if not event_ids:
             return evidence, impact
-        self._append_repair_requested(
+        self.repair.append_repair_requested(
             triggered_by="ImpactAnalystAgent",
             target_agent="context_evidence",
             event_ids=event_ids,
             reason=reason,
             severity="high",
+            repair_round=repair_round,
+            summary_step="repair_context_evidence",
         )
-        if not self._reserve_repair_round(
+        if not self.repair.reserve_repair_round(
             triggered_by="ImpactAnalystAgent",
             target_agent="context_evidence",
             event_ids=event_ids,
+            repair_round=repair_round,
         ):
             return evidence, impact
 
@@ -958,6 +655,13 @@ class LLMAgentTeamRunner:
                     "repair_internal_llm_call=true; "
                     "repair_phase=impact_to_context_evidence_plan; "
                     "summary_step=repair_context_evidence"
+                ),
+                "metadata": repair_metadata(
+                    event_ids=event_ids,
+                    repair_round=repair_round,
+                    summary_step="repair_context_evidence",
+                    internal_llm_call=True,
+                    phase="impact_to_context_evidence_plan",
                 ),
             }
         )
@@ -1020,9 +724,16 @@ class LLMAgentTeamRunner:
                     "repair_phase=impact_to_context_evidence_final; "
                     "summary_step=repair_context_evidence"
                 ),
+                "metadata": repair_metadata(
+                    event_ids=event_ids,
+                    repair_round=repair_round,
+                    summary_step="repair_context_evidence",
+                    internal_llm_call=True,
+                    phase="impact_to_context_evidence_final",
+                ),
             }
         )
-        merged_evidence = self._merge_context_evidence(evidence, repaired_evidence)
+        merged_evidence = merge_context_evidence(evidence, repaired_evidence)
         repaired_impact_input = ContextEvidenceOutput(
             results=[
                 item
@@ -1064,12 +775,14 @@ class LLMAgentTeamRunner:
             ),
             trace_index=impact_trace,
         )
-        self._mark_repair_llm_trace(
+        self.repair.mark_repair_llm_trace(
             impact_trace,
             phase="context_evidence_to_impact",
             summary_step="repair_impact",
+            event_ids=event_ids,
+            repair_round=repair_round,
         )
-        merged_impact = self._merge_impact(impact, repaired_impact)
+        merged_impact = merge_impact(impact, repaired_impact)
         self.trace.steps.append(
             TraceStep(
                 step="repair_context_evidence",
@@ -1081,6 +794,15 @@ class LLMAgentTeamRunner:
                 detail=(
                     "Executed bounded Impact→ContextEvidence repair; "
                     f"event_ids={','.join(event_ids)}; reason={reason}"
+                ),
+                metadata=repair_metadata(
+                    triggered_by="ImpactAnalystAgent",
+                    target_agent="context_evidence",
+                    event_ids=event_ids,
+                    reason=reason,
+                    severity="high",
+                    repair_round=repair_round,
+                    summary_step="repair_context_evidence",
                 ),
                 tools_requested=[
                     request.tool_name for request in plan.tool_requests
@@ -1109,6 +831,14 @@ class LLMAgentTeamRunner:
                     "Reran ImpactAnalystAgent after evidence repair; "
                     f"event_ids={','.join(event_ids)}"
                 ),
+                metadata=repair_metadata(
+                    triggered_by="ContextEvidenceAgent",
+                    target_agent="impact",
+                    event_ids=event_ids,
+                    reason="Reran ImpactAnalystAgent after evidence repair.",
+                    repair_round=repair_round,
+                    summary_step="repair_impact",
+                ),
             )
         )
         return merged_evidence, merged_impact
@@ -1126,32 +856,37 @@ class LLMAgentTeamRunner:
         clusters: list[SignalCluster],
         volatile_metadata: dict[str, Any],
     ) -> tuple[ImpactOutput, ActionOutput]:
-        event_ids, reason = self._action_to_impact_repair_candidates(
+        event_ids, reason = self.repair.action_to_impact_repair_candidates(
             events=events,
             impact=impact,
             action=action,
         )
         if not event_ids:
             return impact, action
-        event_ids = self._prepare_repair_event_ids(
+        repair_round = self.repair.next_repair_round()
+        event_ids = self.repair.prepare_repair_event_ids(
             event_ids,
             valid_ids={event.event_id for event in events},
             triggered_by="ActionPlannerAgent",
             target_agent="impact",
+            repair_round=repair_round,
         )
         if not event_ids:
             return impact, action
-        self._append_repair_requested(
+        self.repair.append_repair_requested(
             triggered_by="ActionPlannerAgent",
             target_agent="impact",
             event_ids=event_ids,
             reason=reason,
             severity="medium",
+            repair_round=repair_round,
+            summary_step="repair_impact",
         )
-        if not self._reserve_repair_round(
+        if not self.repair.reserve_repair_round(
             triggered_by="ActionPlannerAgent",
             target_agent="impact",
             event_ids=event_ids,
+            repair_round=repair_round,
         ):
             return impact, action
 
@@ -1196,12 +931,14 @@ class LLMAgentTeamRunner:
             ),
             trace_index=impact_trace,
         )
-        self._mark_repair_llm_trace(
+        self.repair.mark_repair_llm_trace(
             impact_trace,
             phase="action_to_impact",
             summary_step="repair_impact",
+            event_ids=event_ids,
+            repair_round=repair_round,
         )
-        merged_impact = self._merge_impact(impact, repaired_impact)
+        merged_impact = merge_impact(impact, repaired_impact)
         action_impact = ImpactOutput(results=repaired_impact.results)
         action_call = self.action.build_call(
             repair_events,
@@ -1225,12 +962,14 @@ class LLMAgentTeamRunner:
             fallback=lambda: self.action.fallback(repair_events, action_impact),
             trace_index=action_trace,
         )
-        self._mark_repair_llm_trace(
+        self.repair.mark_repair_llm_trace(
             action_trace,
             phase="impact_to_action",
             summary_step="repair_action",
+            event_ids=event_ids,
+            repair_round=repair_round,
         )
-        merged_action = self._merge_action(action, repaired_action)
+        merged_action = merge_action(action, repaired_action)
         self.trace.steps.append(
             TraceStep(
                 step="repair_impact",
@@ -1242,6 +981,15 @@ class LLMAgentTeamRunner:
                 detail=(
                     "Executed bounded Action→Impact repair; "
                     f"event_ids={','.join(event_ids)}; reason={reason}"
+                ),
+                metadata=repair_metadata(
+                    triggered_by="ActionPlannerAgent",
+                    target_agent="impact",
+                    event_ids=event_ids,
+                    reason=reason,
+                    severity="medium",
+                    repair_round=repair_round,
+                    summary_step="repair_impact",
                 ),
             )
         )
@@ -1257,408 +1005,14 @@ class LLMAgentTeamRunner:
                     "Reran ActionPlannerAgent after impact repair; "
                     f"event_ids={','.join(event_ids)}"
                 ),
+                metadata=repair_metadata(
+                    triggered_by="ImpactAnalystAgent",
+                    target_agent="action",
+                    event_ids=event_ids,
+                    reason="Reran ActionPlannerAgent after impact repair.",
+                    repair_round=repair_round,
+                    summary_step="repair_action",
+                ),
             )
         )
         return merged_impact, merged_action
-
-    def _impact_to_evidence_repair_candidates(
-        self,
-        *,
-        events: list[SignalEvent],
-        evidence: ContextEvidenceOutput,
-        impact: ImpactOutput,
-    ) -> tuple[list[str], str]:
-        valid_ids = {event.event_id for event in events}
-        event_ids: list[str] = []
-        reasons: list[str] = []
-        for request in impact.repair_requests:
-            if request.target_agent != "context_evidence":
-                self._append_repair_blocked(
-                    triggered_by="ImpactAnalystAgent",
-                    target_agent=request.target_agent,
-                    event_ids=request.event_ids,
-                    reason="ImpactAnalystAgent may only request context_evidence repair.",
-                )
-                continue
-            event_ids.extend(request.event_ids)
-            reasons.append(request.reason)
-        evidence_by_id = {item.event_id: item for item in evidence.results}
-        for item in impact.results:
-            evidence_item = evidence_by_id.get(item.event_id)
-            if (
-                item.event_id in valid_ids
-                and evidence_item is not None
-                and item.risk_level in {"high", "critical"}
-                and evidence_item.confidence < 0.45
-                and item.semantic_relevance >= 70
-            ):
-                event_ids.append(item.event_id)
-                reasons.append(
-                    "deterministic trigger: high/critical impact with "
-                    "low evidence confidence"
-                )
-        return (
-            list(dict.fromkeys(event_ids)),
-            "; ".join(dict.fromkeys(reasons)) or "Impact requested evidence repair.",
-        )
-
-    def _action_to_impact_repair_candidates(
-        self,
-        *,
-        events: list[SignalEvent],
-        impact: ImpactOutput,
-        action: ActionOutput,
-    ) -> tuple[list[str], str]:
-        valid_ids = {event.event_id for event in events}
-        event_ids: list[str] = []
-        reasons: list[str] = []
-        for request in action.repair_requests:
-            if request.target_agent != "impact":
-                self._append_repair_blocked(
-                    triggered_by="ActionPlannerAgent",
-                    target_agent=request.target_agent,
-                    event_ids=request.event_ids,
-                    reason="ActionPlannerAgent may only request impact repair.",
-                )
-                continue
-            event_ids.extend(request.event_ids)
-            reasons.append(request.reason)
-        impact_by_id = {item.event_id: item for item in impact.results}
-        for item in action.results:
-            impact_item = impact_by_id.get(item.event_id)
-            if impact_item is None or item.event_id not in valid_ids:
-                continue
-            if item.requested_actions and impact_item.semantic_relevance < 50:
-                event_ids.append(item.event_id)
-                reasons.append(
-                    "deterministic trigger: requested actions with low semantic relevance"
-                )
-            if item.approval_required and impact_item.risk_level == "low":
-                event_ids.append(item.event_id)
-                reasons.append(
-                    "deterministic trigger: approval_required with low impact risk"
-                )
-        return (
-            list(dict.fromkeys(event_ids)),
-            "; ".join(dict.fromkeys(reasons)) or "Action requested impact repair.",
-        )
-
-    def _prepare_repair_event_ids(
-        self,
-        event_ids: list[str],
-        *,
-        valid_ids: set[str],
-        triggered_by: str,
-        target_agent: str,
-    ) -> list[str]:
-        invalid = [event_id for event_id in event_ids if event_id not in valid_ids]
-        if invalid:
-            self._append_repair_blocked(
-                triggered_by=triggered_by,
-                target_agent=target_agent,
-                event_ids=invalid,
-                reason="repair event_ids were not in the routed event set",
-            )
-        remaining = max(
-            0,
-            self.loop_limits.max_repair_events_per_run - self._repair_events_used,
-        )
-        prepared = [
-            event_id
-            for event_id in dict.fromkeys(event_ids)
-            if event_id in valid_ids
-        ]
-        if remaining <= 0:
-            self._append_repair_blocked(
-                triggered_by=triggered_by,
-                target_agent=target_agent,
-                event_ids=prepared,
-                reason="repair_event_budget_exceeded",
-            )
-            return []
-        blocked = prepared[remaining:]
-        if blocked:
-            self._append_repair_blocked(
-                triggered_by=triggered_by,
-                target_agent=target_agent,
-                event_ids=blocked,
-                reason="repair_event_cap_truncated",
-            )
-        return prepared[:remaining]
-
-    def _reserve_repair_round(
-        self,
-        *,
-        triggered_by: str,
-        target_agent: str,
-        event_ids: list[str],
-    ) -> bool:
-        if self._repair_rounds_used >= self.loop_limits.max_repair_rounds_per_run:
-            self._append_repair_blocked(
-                triggered_by=triggered_by,
-                target_agent=target_agent,
-                event_ids=event_ids,
-                reason="repair_round_budget_exceeded",
-            )
-            return False
-        self._repair_rounds_used += 1
-        self._repair_events_used += len(event_ids)
-        return True
-
-    def _append_repair_requested(
-        self,
-        *,
-        triggered_by: str,
-        target_agent: str,
-        event_ids: list[str],
-        reason: str,
-        severity: str,
-    ) -> None:
-        self.trace.steps.append(
-            TraceStep(
-                step="repair_requested",
-                status="success",
-                agent="RepairCoordinator",
-                input_count=len(event_ids),
-                output_count=len(event_ids),
-                duration_ms=0,
-                detail=(
-                    f"triggered_by={triggered_by}; target_agent={target_agent}; "
-                    f"severity={severity}; event_ids={','.join(event_ids)}; "
-                    f"reason={reason}"
-                ),
-            )
-        )
-
-    def _append_repair_blocked(
-        self,
-        *,
-        triggered_by: str,
-        target_agent: str,
-        event_ids: list[str],
-        reason: str,
-    ) -> None:
-        self.trace.steps.append(
-            TraceStep(
-                step="repair_blocked",
-                status="success",
-                agent="RepairCoordinator",
-                input_count=len(event_ids),
-                output_count=0,
-                duration_ms=0,
-                fallback_used=True,
-                detail=(
-                    f"triggered_by={triggered_by}; target_agent={target_agent}; "
-                    f"event_ids={','.join(event_ids)}; reason={reason}"
-                ),
-            )
-        )
-
-    def _mark_repair_llm_trace(
-        self,
-        trace_index: int,
-        *,
-        phase: str,
-        summary_step: str,
-    ) -> None:
-        trace = self.trace.steps[trace_index]
-        self.trace.steps[trace_index] = trace.model_copy(
-            update={
-                "detail": (
-                    "repair_internal_llm_call=true; "
-                    f"repair_phase={phase}; summary_step={summary_step}"
-                )
-            }
-        )
-
-    @staticmethod
-    def _merge_context_evidence(
-        original: ContextEvidenceOutput,
-        repaired: ContextEvidenceOutput,
-    ) -> ContextEvidenceOutput:
-        replacements = {item.event_id: item for item in repaired.results}
-        merged = [
-            replacements.pop(item.event_id, item)
-            for item in original.results
-        ]
-        merged.extend(replacements.values())
-        return original.model_copy(update={"results": merged})
-
-    @staticmethod
-    def _merge_impact(
-        original: ImpactOutput,
-        repaired: ImpactOutput,
-    ) -> ImpactOutput:
-        replacements = {item.event_id: item for item in repaired.results}
-        merged = [
-            replacements.pop(item.event_id, item)
-            for item in original.results
-        ]
-        merged.extend(replacements.values())
-        return original.model_copy(
-            update={
-                "results": merged,
-                "repair_requests": list(original.repair_requests),
-            }
-        )
-
-    @staticmethod
-    def _merge_action(
-        original: ActionOutput,
-        repaired: ActionOutput,
-    ) -> ActionOutput:
-        replacements = {item.event_id: item for item in repaired.results}
-        merged = [
-            replacements.pop(item.event_id, item)
-            for item in original.results
-        ]
-        merged.extend(replacements.values())
-        return original.model_copy(
-            update={
-                "results": merged,
-                "repair_requests": list(original.repair_requests),
-            }
-        )
-
-    def _guarded_assessments(
-        self,
-        events: list[SignalEvent],
-        *,
-        routes: SupervisorOutput,
-        evidence: ContextEvidenceOutput,
-        impact: ImpactOutput,
-        action: ActionOutput,
-        project_profile: dict[str, Any],
-        policy: dict[str, Any],
-        noise_assessments: list[NoiseAssessment],
-        seen_hashes: set[str] | None,
-        feedback_history: Iterable[FeedbackRecord],
-    ) -> tuple[list[SignalAssessment], list[str]]:
-        route_by_id = {item.event_id: item for item in routes.routes}
-        evidence_by_id = {item.event_id: item for item in evidence.results}
-        impact_by_id = {item.event_id: item for item in impact.results}
-        action_by_id = {item.event_id: item for item in action.results}
-        noise_by_id = {item.event_id: item for item in noise_assessments}
-        guard = SignalPermissionGuard(policy)
-        permission_checks: list[str] = []
-        assessments: list[SignalAssessment] = []
-        feedback = list(feedback_history)
-        weights = policy.get("agent_score_weights", {})
-        deterministic_weight = float(weights.get("deterministic_base", 0.70))
-        semantic_weight = float(weights.get("semantic_relevance", 0.20))
-        evidence_weight = float(weights.get("evidence_confidence", 0.10))
-        total = deterministic_weight + semantic_weight + evidence_weight
-        if total <= 0:
-            deterministic_weight, semantic_weight, evidence_weight, total = 0.7, 0.2, 0.1, 1
-        deterministic_weight /= total
-        semantic_weight /= total
-        evidence_weight /= total
-
-        for event in events:
-            route = route_by_id[event.event_id]
-            evidence_item = evidence_by_id[event.event_id]
-            impact_item = impact_by_id[event.event_id]
-            action_item = action_by_id[event.event_id]
-            noise = noise_by_id.get(event.event_id)
-            base = score_signal(
-                event,
-                project_profile,
-                policy,
-                seen_hashes=seen_hashes,
-                feedback_history=feedback,
-                category=route.category,
-            )
-            configured_category = float(
-                policy.get("category_weights", {}).get(route.category.value, 1.0)
-            )
-            policy_multiplier = (
-                0.10
-                if route.category is SignalCategory.NOISE
-                else max(0.85, min(1.0, 0.85 + 0.15 * configured_category))
-            )
-            if noise is not None:
-                policy_multiplier *= noise.score_multiplier
-            blended = (
-                base.final_score * deterministic_weight
-                + impact_item.semantic_relevance * semantic_weight
-                + evidence_item.confidence * 100 * evidence_weight
-            )
-            final_score = round(max(0.0, min(100.0, blended * policy_multiplier)), 2)
-            decision = decision_for_score(final_score, policy)
-            if route.category is SignalCategory.NOISE or not route.analyze:
-                decision = SignalDecision.IGNORE
-
-            approval_notes: list[str] = []
-            if route.category is SignalCategory.POLICY_SIGNAL:
-                action_item = action_item.model_copy(update={"approval_required": True})
-            if (
-                "action" in route.required_agents
-                and not action_item.requested_actions
-            ):
-                permission_checks.append(
-                    f"{event.event_id}:no-high-risk-actions-requested"
-                )
-            for requested in action_item.requested_actions:
-                permission = guard.evaluate(requested)
-                permission_checks.append(
-                    f"{event.event_id}:{requested}:"
-                    f"{'allowed' if permission.allowed else 'blocked'}"
-                )
-                if not permission.allowed:
-                    approval_notes.append(
-                        f"Approval required before `{requested}`: {permission.reason}"
-                    )
-            action_items = list(
-                dict.fromkeys([*action_item.action_items, *approval_notes])
-            )
-            if action_item.approval_required and action_items:
-                action_items.append("Human approval is required before execution.")
-            if decision is SignalDecision.IGNORE:
-                action_items = []
-
-            agent_score = AgentScoreBreakdown(
-                deterministic_base_score=base.final_score,
-                semantic_relevance=impact_item.semantic_relevance,
-                evidence_confidence_score=round(evidence_item.confidence * 100, 2),
-                deterministic_weight=round(deterministic_weight, 4),
-                semantic_weight=round(semantic_weight, 4),
-                evidence_weight=round(evidence_weight, 4),
-                policy_multiplier=round(max(0.0, min(1.0, policy_multiplier)), 4),
-                final_score=final_score,
-            )
-            assessments.append(
-                SignalAssessment(
-                    event_id=event.event_id,
-                    category=route.category,
-                    relevance_score=impact_item.semantic_relevance,
-                    impact_score=final_score,
-                    confidence=evidence_item.confidence,
-                    affected_modules=impact_item.affected_modules,
-                    evidence_urls=evidence_item.evidence_urls,
-                    source_quality=evidence_item.source_quality,
-                    reason=" ".join(
-                        filter(
-                            None,
-                            [
-                                route.routing_reason,
-                                route.noise_reason,
-                                evidence_item.context_summary,
-                                evidence_item.uncertainty,
-                                impact_item.impact_reason,
-                                action_item.critic_notes,
-                            ],
-                        )
-                    ),
-                    action_items=action_items,
-                    decision=decision,
-                    score_breakdown=base,
-                    agent_score_breakdown=agent_score,
-                    related_event_ids=impact_item.related_event_ids,
-                    cross_source_confidence=impact_item.cross_source_confidence,
-                    conflicting_evidence=impact_item.conflicting_evidence,
-                    related_cluster_id=route.related_cluster_id,
-                    noise_reason=route.noise_reason or (noise.noise_reason if noise else None),
-                    required_agents=list(route.required_agents),
-                )
-            )
-        return assessments, permission_checks

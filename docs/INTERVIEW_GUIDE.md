@@ -21,10 +21,10 @@ permission, scoring, replay, and traceability.
 
 ## Public CI and real API tests
 
-Public CI is intentionally offline and SignalHarness-focused: it runs scripted
-`mock-agent` evals, trace generation, calibration, package build, and quality
-checks scoped to `src/signal_harness` and `tests/signal_harness`. It does not
-need a real API key.
+Public CI is intentionally offline and SignalHarness-focused: it runs
+`python -m pytest tests/signal_harness -q`, Ruff, mypy, and `uv build` on
+Python 3.11. It does not set `LLM_API_KEY`, run `--mode agent`, call live
+providers, or depend on real network/API availability.
 
 Real provider smoke testing is manual and documented in
 `docs/SMOKE_TEST_AGENT_MODE.md`. It reads credentials only from environment
@@ -127,6 +127,10 @@ written to `outputs/latest_learning_staging.json` and
 permission, project profile, watchlist deletion, external notification, and
 GitHub issue changes are high risk. Missing or negative replay keeps a proposal
 staged for human review rather than auto-applying it.
+`calibrate --apply` uses the same gate. Without `--yes` it stages the proposal
+and prints review/apply instructions; with `--yes`, only a low-risk proposal
+with a passing replay gate can be applied. High-risk or replay-failed proposals
+remain staged and cannot be applied non-interactively.
 
 ## Engineering choices
 

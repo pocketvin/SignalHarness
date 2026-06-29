@@ -66,8 +66,20 @@ def format_trace_summary(steps: Iterable[TraceStep]) -> str:
             )
         if step.error:
             lines.append(f"  error: {step.error}")
-        if step.step.startswith("repair_") and step.detail:
-            lines.append(f"  repair_detail: {step.detail}")
+        if step.step.startswith("repair_"):
+            repair = _repair_metadata(step)
+            if repair:
+                events = ", ".join(_repair_event_ids([step])) or "none"
+                lines.append(
+                    "  repair_detail: "
+                    f"triggered_by={repair.get('triggered_by') or 'n/a'}; "
+                    f"target={repair.get('target_agent') or 'n/a'}; "
+                    f"events={events}; "
+                    f"round={repair.get('repair_round') or 'n/a'}; "
+                    f"reason={repair.get('blocked_reason') or repair.get('reason') or 'n/a'}"
+                )
+            elif step.detail:
+                lines.append(f"  repair_detail: {step.detail}")
         if step.source_types_observed:
             lines.append(
                 "  source_types_observed: "
@@ -377,12 +389,7 @@ def write_trace_summary(
                 "",
             ]
         )
-        lines.extend(
-            (
-                f"- `{step.step}`: {step.detail or 'no detail'}"
-                for step in repair_steps
-            )
-        )
+        lines.extend(_repair_summary_line(step) for step in repair_steps)
     else:
         lines.extend(
             [
@@ -396,7 +403,10 @@ def write_trace_summary(
         step
         for step in step_list
         if step.step == "llm_agent_call"
-        and "repair_internal_llm_call=true" in step.detail
+        and (
+            _repair_metadata(step).get("internal_llm_call") is True
+            or "repair_internal_llm_call=true" in step.detail
+        )
     ]
     if repair_llm_steps:
         lines.extend(
@@ -415,7 +425,8 @@ def write_trace_summary(
         lines.extend(
             (
                 f"- `{step.agent_name or step.agent}` / "
-                f"`{step.output_schema or 'unknown'}`: {step.detail}"
+                f"`{step.output_schema or 'unknown'}`: "
+                f"{_repair_internal_llm_detail(step)}"
             )
             for step in repair_llm_steps
         )
@@ -444,9 +455,49 @@ def write_trace_summary(
     return path
 
 
+def _repair_metadata(step: TraceStep) -> dict[str, object]:
+    repair = step.metadata.get("repair")
+    return repair if isinstance(repair, dict) else {}
+
+
+def _repair_summary_line(step: TraceStep) -> str:
+    repair = _repair_metadata(step)
+    if repair:
+        reason = repair.get("blocked_reason") or repair.get("reason") or "n/a"
+        events = ", ".join(_repair_event_ids([step])) or "none"
+        return (
+            f"- `{step.step}`: status={step.status}, "
+            f"triggered_by={repair.get('triggered_by') or 'n/a'}, "
+            f"target={repair.get('target_agent') or 'n/a'}, "
+            f"events={events}, "
+            f"round={repair.get('repair_round') or 'n/a'}, "
+            f"reason={reason}"
+        )
+    return f"- `{step.step}`: {step.detail or 'no detail'}"
+
+
+def _repair_internal_llm_detail(step: TraceStep) -> str:
+    repair = _repair_metadata(step)
+    if repair:
+        return (
+            f"phase={repair.get('phase') or 'n/a'}; "
+            f"summary_step={repair.get('summary_step') or 'n/a'}; "
+            f"events={', '.join(_repair_event_ids([step])) or 'none'}; "
+            f"round={repair.get('repair_round') or 'n/a'}"
+        )
+    return step.detail
+
+
 def _repair_event_ids(steps: Iterable[TraceStep]) -> list[str]:
     event_ids: list[str] = []
     for step in steps:
+        repair = _repair_metadata(step)
+        metadata_ids = repair.get("event_ids")
+        if isinstance(metadata_ids, list):
+            event_ids.extend(
+                str(item).strip() for item in metadata_ids if str(item).strip()
+            )
+            continue
         marker = "event_ids="
         if marker not in step.detail:
             continue

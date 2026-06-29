@@ -120,6 +120,28 @@ def test_fixture_scan_feedback_and_calibration(project_root: Path, tmp_path: Pat
 
     config_copy = tmp_path / "configs"
     shutil.copytree(project_root / "configs", config_copy)
+    staged_result = runner.invoke(
+        app,
+        [
+            "calibrate",
+            "--apply",
+            "--cwd",
+            str(project_root),
+            "--config-dir",
+            str(config_copy),
+            "--state-dir",
+            str(state_dir),
+        ],
+    )
+    assert staged_result.exit_code == 0, staged_result.output
+    assert "Staged proposal" in staged_result.output
+    assert "Policy, watchlist, and skill changes were not applied." in staged_result.output
+    staged_policy = yaml.safe_load(
+        (config_copy / "signal_policy.yaml").read_text(encoding="utf-8")
+    )
+    assert "checkpoint" not in staged_policy["suggested_focus_keywords"]
+    assert (state_dir / "learning_staging.json").exists()
+
     apply_result = runner.invoke(
         app,
         [
