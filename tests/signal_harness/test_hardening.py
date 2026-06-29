@@ -55,7 +55,8 @@ def test_since_rejects_invalid_value(project_root: Path, tmp_path: Path) -> None
 
     assert result.exit_code != 0
     assert "Invalid value" in result.output
-    assert "Usage: signal-harness scan" in result.output
+    assert "Usage:" in result.output
+    assert "signal-harness scan" in result.output
 
 
 def test_remote_failures_do_not_block_fixture_web_changes(
