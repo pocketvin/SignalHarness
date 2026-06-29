@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import time
+import asyncio
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from typing import Any, TypeVar, TypedDict
@@ -75,12 +76,20 @@ EXPLICITLY_BLOCKED_TOOLS = frozenset(
 
 
 @dataclass(frozen=True)
-class ToolLoopLimits:
-    """Bound the controlled two-step evidence tool loop."""
+class AgentLoopLimits:
+    """Bound LLM calls, schema repair, and controlled evidence tool use."""
 
+    max_schema_retries: int = 1
+    max_agent_call_seconds: int = 45
+    max_run_seconds: int = 180
     max_total_tool_requests_per_run: int = 20
     max_tool_requests_per_event: int = 3
     max_tool_output_chars: int = 1000
+    max_repair_rounds_per_run: int = 1
+    max_repair_events_per_run: int = 5
+
+
+ToolLoopLimits = AgentLoopLimits
 
 
 class ToolExecutionTrace(TypedDict):
@@ -164,7 +173,8 @@ class LLMAgentTeamRunner:
         mode: RunMode,
         trace: TraceRecorder,
         tool_executor: SignalToolExecutor | None = None,
-        tool_limits: ToolLoopLimits | None = None,
+        tool_limits: AgentLoopLimits | None = None,
+        loop_limits: AgentLoopLimits | None = None,
     ) -> None:
         if not mode.uses_llm_agent_path:
             raise ValueError("LLMAgentTeamRunner requires mock-agent or agent mode")
@@ -172,7 +182,8 @@ class LLMAgentTeamRunner:
         self.mode = mode
         self.trace = trace
         self.tool_executor = tool_executor
-        self.tool_limits = tool_limits or ToolLoopLimits()
+        self.loop_limits = loop_limits or tool_limits or AgentLoopLimits()
+        self.tool_limits = self.loop_limits
         self._tool_requests_used = 0
         self.tool_cache = ToolObservationCache()
         self.supervisor = SignalSupervisorAgent()
@@ -199,32 +210,54 @@ class LLMAgentTeamRunner:
         def parse_response(response: str) -> OutputT:
             return output_model.model_validate(_json_object(response))
 
+        async def provider_text(target: AgentCall) -> str:
+            try:
+                return await asyncio.wait_for(
+                    self.provider.complete(target),
+                    timeout=self.loop_limits.max_agent_call_seconds,
+                )
+            except TimeoutError as exc:
+                raise TimeoutError(
+                    f"provider_timeout after "
+                    f"{self.loop_limits.max_agent_call_seconds}s"
+                ) from exc
+
         try:
-            output = parse_response(await self.provider.complete(call))
+            output = parse_response(await provider_text(call))
             schema_valid = True
+        except TimeoutError as exc:
+            schema_error = _short_error(exc)
+            error = schema_error
+            fallback_used = True
+            output = fallback()
         except Exception as exc:
             schema_error = _short_error(exc)
-            retry_count = 1
-            retry_call = replace(
-                call,
-                user_prompt=(
-                    call.user_prompt.rstrip()
-                    + "\n\n"
-                    + "Your previous response failed JSON/schema validation: "
-                    + schema_error
-                    + ". Return exactly one valid JSON object matching the required "
-                    + "schema. Do not include Markdown."
-                ),
-            )
-            try:
-                output = parse_response(await self.provider.complete(retry_call))
-                schema_valid = True
-            except Exception as retry_exc:
-                retry_error = _short_error(retry_exc)
-                schema_error = f"{schema_error}; retry failed: {retry_error}"
-                error = schema_error
+            if self.loop_limits.max_schema_retries <= 0:
                 fallback_used = True
                 output = fallback()
+                error = schema_error
+            else:
+                retry_count = 1
+                retry_call = replace(
+                    call,
+                    user_prompt=(
+                        call.user_prompt.rstrip()
+                        + "\n\n"
+                        + "Your previous response failed JSON/schema validation: "
+                        + schema_error
+                        + ". Return exactly one valid JSON object matching the required "
+                        + "schema. Do not include Markdown."
+                    ),
+                )
+                try:
+                    output = parse_response(await provider_text(retry_call))
+                    schema_valid = True
+                except Exception as retry_exc:
+                    retry_error = _short_error(retry_exc)
+                    schema_error = f"{schema_error}; retry failed: {retry_error}"
+                    error = schema_error
+                    fallback_used = True
+                    output = fallback()
         duration_ms = max(0, round((time.perf_counter() - started) * 1000))
         source_types, requested, executed, tool_errors = _trace_tools(output)
         index = append_llm_trace(

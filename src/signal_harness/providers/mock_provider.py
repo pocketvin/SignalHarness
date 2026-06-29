@@ -343,7 +343,7 @@ class MockProvider:
         results: list[ImpactItem] = []
         for event in self._events(payload):
             text = f"{event.title} {event.content}".lower()
-            semantic = 88.0 if "checkpoint" in text else 72.0 if "tool" in text else 55.0
+            semantic = 90.0 if "checkpoint" in text else 72.0 if "tool" in text else 55.0
             cluster = cluster_by_event.get(event.event_id)
             conflicts = (
                 ["Secondary source expresses uncertainty about the primary claim."]

@@ -13,12 +13,13 @@ from uuid import uuid4
 
 from signal_harness.utils.fs import atomic_write_text
 from signal_harness.agent_integration.mode import RunMode
-from signal_harness.agent_integration.runner import LLMAgentTeamRunner
+from signal_harness.agent_integration.runner import AgentLoopLimits, LLMAgentTeamRunner
 from signal_harness.agent_integration.schemas import LearningPolicyOutput
 from signal_harness.alerts import AlertPolicy, write_alert_outputs
 from signal_harness.agents import SupervisorAgent
 from signal_harness.memory import MemoryBundle
 from signal_harness.providers.adapter import AgentProvider
+from signal_harness.providers.factory import provider_from_env
 from signal_harness.providers.mock_provider import MockProvider
 from signal_harness.runtime.cache import SourceFetchCache
 from signal_harness.runtime.permissions import SignalPermissionGuard
@@ -85,6 +86,7 @@ class SignalHarnessWorkflow:
         state_dir: str | Path | None = None,
         mode: RunMode | str = RunMode.DEMO,
         provider: AgentProvider | None = None,
+        agent_loop_limits: AgentLoopLimits | None = None,
     ) -> None:
         self.cwd = Path(cwd).expanduser().resolve()
         self.config_dir = self._resolve(config_dir or "configs")
@@ -92,6 +94,7 @@ class SignalHarnessWorkflow:
         self.state_dir = self._resolve(state_dir or ".signal-harness")
         self.mode = RunMode(mode)
         self.provider = provider
+        self.agent_loop_limits = agent_loop_limits
         self.source_cache = SourceFetchCache(self.state_dir / "cache")
         self.trace = TraceRecorder()
         self.executor = SignalToolExecutor(
@@ -230,6 +233,7 @@ class SignalHarnessWorkflow:
                 mode=self.mode,
                 trace=self.trace,
                 tool_executor=self.executor,
+                loop_limits=self.agent_loop_limits,
             )
             memory_snapshot = MemoryBundle.from_paths(
                 config_dir=self.config_dir,
@@ -320,9 +324,7 @@ class SignalHarnessWorkflow:
         if self.mode is RunMode.MOCK_AGENT:
             return MockProvider()
         if self.mode is RunMode.AGENT:
-            from signal_harness.providers.openharness_provider import OpenHarnessProvider
-
-            return OpenHarnessProvider.from_env()
+            return provider_from_env(self.mode, config_dir=self.config_dir)
         raise ValueError("demo mode does not create an LLM provider")
 
     async def _load_config(self) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:

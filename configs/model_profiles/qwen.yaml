@@ -1,0 +1,11 @@
+provider: openai_compatible
+model: qwen-plus
+supports_json_schema: false
+supports_json_mode: false
+supports_native_tool_calling: false
+supports_system_prompt: true
+max_input_tokens: 32768
+max_output_tokens: 4096
+recommended_temperature: 0.0
+schema_strategy: prompt_json_retry
+tool_strategy: controlled_tool_request

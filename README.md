@@ -54,7 +54,7 @@ uv run signal-harness scan \
   --fixture examples/signal_harness/sample_events.json \
   --mode mock-agent
 
-# Real provider path, optional OpenHarness-compatible integration
+# Real provider path, defaults to SignalHarness OpenAI-compatible HTTP adapter
 LLM_API_KEY=... uv run signal-harness scan \
   --fixture examples/signal_harness/sample_events.json \
   --mode agent
@@ -67,8 +67,18 @@ reads controlled observations before producing final evidence.
 
 Optional real-provider environment variables:
 
+- `LLM_PROVIDER` (default: `openai_compatible`; use `openharness` only for the
+  optional compatibility adapter)
+- `LLM_API_KEY`
 - `LLM_MODEL` (default: `gpt-4o-mini`)
 - `LLM_BASE_URL` for an OpenAI-compatible endpoint
+- `LLM_MODEL_PROFILE` (`openai_gpt4o_mini`, `kimi`, `qwen`, `deepseek`, or a
+  YAML path under `configs/model_profiles/`)
+
+`ModelProfile` documents conservative model capabilities such as JSON mode,
+system prompt support, token limits, and strategy names. It does not enable
+provider-native tool calling: the default `tool_strategy` remains
+`controlled_tool_request`, and `supports_native_tool_calling` is false.
 
 ## Public-safe CI and secrets policy
 
@@ -165,6 +175,10 @@ fallback status, duration, requested and executed tools, budget-blocked tools,
 blocked tools, permission checks, cache events, context hashes, and errors.
 Deterministic stages remain visible alongside
 `llm_agent_call` records.
+`AgentLoopLimits` bounds schema retries, LLM call timeout, tool request budget,
+tool output size, and future repair-pass limits. Provider timeouts are recorded
+in trace as `provider_timeout` schema/error details and trigger deterministic
+fallback.
 
 ## Operational layer
 
@@ -176,6 +190,9 @@ platforms such as GitHub Actions, cron, or launchd; see
 uv run signal-harness dashboard
 uv run signal-harness digest --period daily
 uv run signal-harness digest --period weekly
+uv run signal-harness model-eval \
+  --fixture examples/signal_harness/sample_events.json \
+  --mode mock-agent
 ```
 
 The deterministic `AlertPolicy` writes:
@@ -186,6 +203,11 @@ The deterministic `AlertPolicy` writes:
 
 Alert dispatch defaults to local files only. The LLM cannot directly send
 notifications, and no Slack/Discord/Telegram/Feishu dependency is included.
+
+`model-eval` writes `outputs/model_eval_summary.json` and
+`outputs/model_eval_summary.md`. It compares models under the same Harness
+metrics: schema valid rate, retry/fallback rate, timeout count, tool budget
+blocks, blocked tools, tool errors, decision counts, and average LLM latency.
 
 ## Controlled evidence tools and context
 
@@ -221,12 +243,17 @@ LangGraph, CrewAI, AutoGen, LangChain, LlamaIndex, Haystack, DSPy, Langfuse,
 Ragas, Redis, Postgres, Celery, vector databases, and embedding databases are
 intentionally excluded from this project.
 
-## OpenHarness integration
+## Provider integration
+
+`src/signal_harness/providers/openai_compatible_provider.py` is the default
+real-provider path for `--mode agent`. It uses the existing `httpx` dependency
+and standard `/v1/chat/completions`-style assistant text. That text is still
+parsed by the existing schema retry/fallback path.
 
 `src/signal_harness/providers/openharness_provider.py` is deliberately optional.
 Demo and mock-agent modes do not import or require the upstream OpenHarness
-runtime. If `--mode agent` is used without the optional provider runtime,
-SignalHarness returns a clear error and suggests `demo` or `mock-agent`.
+runtime. Set `LLM_PROVIDER=openharness` only when intentionally using that
+compatibility path.
 
 The deterministic layer retains normalization, deduplication, base scoring,
 schema validation, permission enforcement, reporting, persistence, replay
@@ -262,6 +289,10 @@ uv run --extra dev mypy src/signal_harness
 uv run signal-harness scan --fixture examples/signal_harness/sample_events.json --mode demo
 uv run signal-harness scan --fixture examples/signal_harness/sample_events.json --mode mock-agent
 uv run signal-harness trace
+uv run signal-harness dashboard
+uv run signal-harness digest --period daily
+uv run signal-harness digest --period weekly
+uv run signal-harness model-eval --fixture examples/signal_harness/sample_events.json --mode mock-agent
 uv run signal-harness calibrate --mode mock-agent
 uv build
 ```

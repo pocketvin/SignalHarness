@@ -16,9 +16,11 @@ from signal_harness.agent_integration.mode import RunMode
 from signal_harness.agent_integration.runner import LLMAgentTeamRunner
 from signal_harness.agent_integration.schemas import LearningPolicyOutput
 from signal_harness.agent_team.learning_policy import LearningPolicyAgent
+from signal_harness.evals import build_model_eval_summary, write_model_eval_summary
 from signal_harness.memory import FeedbackMemory, MemoryBundle
 from signal_harness.memory.replay import evaluate_policy_replay
 from signal_harness.providers.adapter import AgentProvider
+from signal_harness.providers.factory import provider_from_env
 from signal_harness.providers.mock_provider import MockProvider
 from signal_harness.runtime.permissions import SignalPermissionGuard
 from signal_harness.runtime.tracing import TraceRecorder
@@ -39,6 +41,7 @@ from signal_harness.signal.schemas import (
     PolicyUpdateProposal,
     SignalAssessment,
     SignalEvent,
+    TraceStep,
 )
 from signal_harness.ui.terminal_view import render_assessment_table
 from signal_harness.ui.dashboard import write_dashboard
@@ -82,14 +85,16 @@ def _require_agent_key(mode: RunMode) -> None:
         raise typer.Exit(code=2)
 
 
-def _provider_for_mode(mode: RunMode) -> AgentProvider:
+def _provider_for_mode(
+    mode: RunMode,
+    *,
+    config_dir: Path | None = None,
+) -> AgentProvider:
     _require_agent_key(mode)
     if mode is RunMode.MOCK_AGENT:
         return MockProvider()
     if mode is RunMode.AGENT:
-        from signal_harness.providers.openharness_provider import OpenHarnessProvider
-
-        return OpenHarnessProvider.from_env()
+        return provider_from_env(mode, config_dir=config_dir)
     raise ValueError("demo mode does not use an LLM provider")
 
 
@@ -98,8 +103,9 @@ async def _run_learning_with_provider(
     mode: RunMode,
     snapshot: dict[str, Any],
     trace: TraceRecorder,
+    config_dir: Path | None = None,
 ) -> LearningPolicyOutput:
-    provider = _provider_for_mode(mode)
+    provider = _provider_for_mode(mode, config_dir=config_dir)
     try:
         return await LLMAgentTeamRunner(
             provider=provider,
@@ -271,6 +277,88 @@ def digest(
     typer.echo(f"Digest: {path}")
 
 
+@app.command("model-eval")
+def model_eval(
+    fixture: Path = typer.Option(
+        Path("examples/signal_harness/sample_events.json"),
+        "--fixture",
+        help="Local JSON event fixture",
+    ),
+    mode: RunMode = typer.Option(
+        RunMode.MOCK_AGENT,
+        "--mode",
+        help="demo, mock-agent, or agent",
+    ),
+    profile: str | None = typer.Option(
+        None,
+        "--profile",
+        help="Model profile name or path, for example kimi or qwen",
+    ),
+    runs: int = typer.Option(1, "--runs", min=1),
+    cwd: Path = typer.Option(Path.cwd(), "--cwd", hidden=True),
+    config_dir: Path = typer.Option(Path("configs"), "--config-dir"),
+    output_dir: Path = typer.Option(Path("outputs"), "--output-dir"),
+    state_dir: Path = typer.Option(Path(".signal-harness/model-eval"), "--state-dir"),
+) -> None:
+    """Run a lightweight local model evaluation with uniform Harness metrics."""
+
+    root = cwd.expanduser().resolve()
+    _require_agent_key(mode)
+    resolved_output = _resolve(root, output_dir)
+    resolved_state = _resolve(root, state_dir)
+    previous_profile = os.environ.get("LLM_MODEL_PROFILE")
+    if profile:
+        os.environ["LLM_MODEL_PROFILE"] = profile
+    try:
+        assessments: list[SignalAssessment] = []
+        trace_steps: list[TraceStep] = []
+        for _ in range(runs):
+            workflow = SignalHarnessWorkflow(
+                cwd=root,
+                config_dir=config_dir,
+                output_dir=resolved_output,
+                state_dir=resolved_state,
+                mode=mode,
+            )
+            result = asyncio.run(
+                workflow.scan(
+                    fixture=_resolve(root, fixture),
+                )
+            )
+            assessments.extend(result.assessments)
+            trace_steps.extend(result.trace.steps)
+    finally:
+        if profile:
+            if previous_profile is None:
+                os.environ.pop("LLM_MODEL_PROFILE", None)
+            else:
+                os.environ["LLM_MODEL_PROFILE"] = previous_profile
+
+    llm_models = [step.model for step in trace_steps if step.model]
+    provider = (
+        "demo-deterministic"
+        if mode is RunMode.DEMO
+        else "mock-provider"
+        if mode is RunMode.MOCK_AGENT
+        else os.environ.get("LLM_PROVIDER", "openai_compatible")
+    )
+    summary = build_model_eval_summary(
+        assessments=assessments,
+        trace=trace_steps,
+        runs=runs,
+        provider=provider,
+        model=llm_models[0] if llm_models else "deterministic",
+        model_profile=(
+            profile
+            or os.environ.get("LLM_MODEL_PROFILE")
+            or ("mock-agent" if mode is RunMode.MOCK_AGENT else "openai_gpt4o_mini")
+        ),
+    )
+    paths = write_model_eval_summary(resolved_output, summary)
+    typer.echo(f"Model eval JSON: {paths['json']}")
+    typer.echo(f"Model eval Markdown: {paths['markdown']}")
+
+
 @app.command()
 def feedback(
     signal_id: str = typer.Option(..., "--signal-id"),
@@ -339,6 +427,7 @@ def calibrate(
                 mode=mode,
                 snapshot=snapshot,
                 trace=calibration_trace,
+                config_dir=config,
             )
         )
     proposal = learning.policy_update_proposal

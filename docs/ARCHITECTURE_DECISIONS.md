@@ -40,8 +40,9 @@ SignalHarness keeps small local interfaces for what it actually needs:
 - `signal_harness.runtime.tools_base`
 
 This lets `demo` and `mock-agent` run without importing the full OpenHarness
-package. Optional real-provider integration still has a thin compatibility
-adapter, but it is loaded only when `--mode agent` is used.
+package. The default real-provider path is now a SignalHarness-native
+OpenAI-compatible HTTP adapter using `httpx`. The OpenHarness adapter remains
+available only behind `LLM_PROVIDER=openharness`.
 
 ## Why not LangGraph, CrewAI, AutoGen, LangChain, Dify, or similar frameworks
 
@@ -66,6 +67,7 @@ engineering choices visible:
 - which Agent runs at each stage;
 - how tool requests are validated and executed;
 - how invalid JSON/schema output is retried once;
+- how provider timeouts are bounded by `AgentLoopLimits`;
 - when deterministic fallback is used;
 - why the LLM cannot directly execute tools or own final score.
 
@@ -84,6 +86,25 @@ general orchestration framework.
 This is not provider-native function calling. The provider returns structured
 JSON; Python owns tool execution.
 
+`ModelProfile` records conservative provider capabilities and strategy names:
+`prompt_json_retry` for schemas and `controlled_tool_request` for tools.
+Profiles are documentation and selection metadata, not permission to use
+native tool calling.
+
+## Eval boundary
+
+`signal-harness model-eval` computes local metrics such as schema valid rate,
+retry/fallback rate, timeout count, tool budget blocks, blocked tools, tool
+errors, decision counts, and average latency. It is intentionally local and
+does not depend on Langfuse, Ragas, or any external eval platform.
+
+## Repair boundary
+
+Bounded repair is a limited design direction, not an open-ended ReAct loop.
+The runner exposes limits for one repair round and a small event cap, but
+LearningPolicyAgent cannot repair upstream Agents and cannot apply policy,
+watchlist, permission, or skill changes automatically.
+
 ## Learning boundary
 
 `LearningPolicyAgent` produces policy, skill, and watchlist proposals for human
@@ -101,6 +122,7 @@ deterministic and policy-controlled.
 
 - Agent mode still depends on structured JSON responses, with one retry before
   deterministic fallback.
+- Bounded repair pass is not enabled in the current default scan path.
 - Tool use is runner-controlled, not provider-native function calling.
 - The evidence loop is bounded to two steps.
 - The system is not fully autonomous or self-evolving.
@@ -115,4 +137,3 @@ deterministic and policy-controlled.
 - Optional provider integrations only when necessary.
 - No framework adapter unless the workflow genuinely needs a more complex
   state model.
-

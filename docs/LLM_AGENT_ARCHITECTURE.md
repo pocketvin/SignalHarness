@@ -7,7 +7,7 @@ SignalHarness has one fixed LLM-enhanced routed Agent team:
    work, generate actions, update policy, or override final scores.
 2. `ContextEvidenceAgent` first returns `EvidenceToolPlan` with `ToolRequest`
    objects. The runner validates a read-only allowlist, permissions, and
-   lightweight tool budgets, executes existing OpenHarness tools, then supplies
+   lightweight tool budgets, executes local SignalHarness tools, then supplies
    `ToolObservation` objects to a second turn that returns final evidence.
 3. `ImpactAnalystAgent` reads the project profile and evidence and returns
    affected modules, semantic relevance, risk, and impact reasoning. Its schema
@@ -61,6 +61,24 @@ Real agent mode still asks the provider for structured JSON. If JSON parsing,
 schema validation, or an empty response fails, the runner retries once with a
 short schema-correction instruction. A second failure triggers deterministic
 fallback.
+
+`AgentLoopLimits` bounds `max_schema_retries`, provider-call timeout, total
+tool requests, per-event tool requests, tool output size, and future repair
+round/event limits. Provider timeouts are recorded as `provider_timeout` in
+the LLM trace and use deterministic fallback.
+
+The default real-provider path is `OpenAICompatibleProvider`, configured with
+`LLM_PROVIDER=openai_compatible`, `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`,
+and `LLM_MODEL_PROFILE`. `OpenHarnessProvider` remains an optional
+compatibility integration. `ModelProfile` documents capabilities but does not
+enable native tool calling.
+
+`model-eval` computes local metrics from trace and assessments so different
+models can be compared under the same SignalHarness constraints.
+
+Bounded repair is not an open ReAct loop. The current implementation reserves
+limits for at most one future repair round over a small event set; learning is
+not allowed to repair upstream Agents or mutate configuration.
 
 The older classes in `src/signal_harness/agents/` are deterministic fallback
 specialists. They are not described as the true multi-Agent implementation.

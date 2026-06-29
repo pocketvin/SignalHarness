@@ -11,14 +11,22 @@ are forbidden; real provider credentials must come from environment variables.
 
 ```bash
 export LLM_API_KEY="..."
+export LLM_PROVIDER="openai_compatible"
 export LLM_MODEL="gpt-4o-mini"
+export LLM_MODEL_PROFILE="openai_gpt4o_mini"
 
 # Optional for an OpenAI-compatible provider:
 export LLM_BASE_URL="https://your-provider.example/v1"
 ```
 
-`LLM_API_KEY` is required. `LLM_MODEL` defaults to `gpt-4o-mini`.
-`LLM_BASE_URL` is optional.
+`LLM_API_KEY` is required. `LLM_PROVIDER` defaults to `openai_compatible`.
+`LLM_MODEL` defaults to the model in the selected profile, and `LLM_BASE_URL`
+is optional. Use `LLM_PROVIDER=openharness` only for the optional
+OpenHarness-compatible adapter.
+
+Available profile names include `openai_gpt4o_mini`, `kimi`, `qwen`, and
+`deepseek`. Profiles describe model capabilities conservatively; they do not
+turn on provider-native tool calling.
 
 ## Run the smoke test
 
@@ -34,11 +42,14 @@ Inspect `outputs/task_trace.json` and `outputs/trace_summary.md`.
 If a provider returns invalid structured JSON, SignalHarness records the schema
 error, retries the Agent once with a repair prompt, and then falls back to the
 deterministic guardrail path if validation still fails.
+If a provider call exceeds `AgentLoopLimits.max_agent_call_seconds`,
+SignalHarness records a `provider_timeout` trace error and falls back.
 
 The smoke test validates:
 
 - real provider calls through the optional provider integration;
 - structured schema validation and deterministic fallback;
+- LLM timeout handling through `AgentLoopLimits`;
 - controlled tool-request validation and observations;
 - prompt and Agent trace fields;
 - deterministic scoring and permission guards.

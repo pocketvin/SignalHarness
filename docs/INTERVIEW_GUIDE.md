@@ -14,8 +14,10 @@ permission, scoring, replay, and traceability.
   not true multi-Agent execution.
 - `mock-agent` uses an offline mock provider but exercises the real five-Agent
   architecture with scripted LLM-like JSON and controlled tool turns.
-- `agent` uses an optional real-provider integration and validates the same
-  structured JSON schemas, with one schema retry before deterministic fallback.
+- `agent` uses the SignalHarness OpenAI-compatible provider by default and
+  validates the same structured JSON schemas, with one schema retry before
+  deterministic fallback. `OpenHarnessProvider` is optional via
+  `LLM_PROVIDER=openharness`.
 
 ## Public CI and real API tests
 
@@ -27,6 +29,8 @@ need a real API key.
 Real provider smoke testing is manual and documented in
 `docs/SMOKE_TEST_AGENT_MODE.md`. It reads credentials only from environment
 variables. Hardcoded keys and fallback credentials are forbidden.
+`ModelProfile` files under `configs/model_profiles/` describe model
+capabilities conservatively; they do not enable native tool calling.
 
 ## Why the score remains guarded
 
@@ -62,6 +66,17 @@ and lightweight multi-source clusters.
 
 This remains a controlled runner loop, not provider-native function calling.
 It also avoids implementing a complete handoff-as-tool protocol.
+`AgentLoopLimits` bounds provider timeouts, schema retries, tool budgets, and
+future repair limits. Provider timeout falls back deterministically and is
+visible in trace as `provider_timeout`.
+
+## Model eval
+
+`signal-harness model-eval` runs the same fixture through the Harness and
+writes `outputs/model_eval_summary.json` plus Markdown. The point is not a
+large benchmark; it is a consistent local comparison across models using
+schema valid rate, retry/fallback rate, timeout count, tool budget blocks,
+blocked tools, tool errors, decisions, and latency.
 
 ## Skipped routes and audit defaults
 
@@ -78,6 +93,13 @@ GitHub Actions, cron, or launchd. A deterministic `AlertPolicy` writes
 `.signal-harness/alert_state.json`; it does not send external notifications.
 `signal-harness dashboard` writes a static `outputs/dashboard.html`, and
 `signal-harness digest --period daily|weekly` writes Markdown review digests.
+
+## Bounded repair boundary
+
+Repair is intentionally bounded. The current build reserves limits for one
+future repair round and a small event cap, but does not enable an open-ended
+ReAct loop. LearningPolicyAgent remains downstream review-only and cannot
+repair upstream Agents or auto-apply policy, watchlist, or skill changes.
 
 ## Engineering choices
 
@@ -126,7 +148,7 @@ uv run signal-harness calibrate --mode mock-agent
 ## Honest limitations
 
 The optional agent-mode adapter targets structured JSON responses through
-`LLM_API_KEY`, `LLM_MODEL`, and optional `LLM_BASE_URL`.
+`LLM_API_KEY`, `LLM_MODEL`, `LLM_MODEL_PROFILE`, and optional `LLM_BASE_URL`.
 Evidence Agents receive collected primary-source context and can declare tool
 requests, but broad live search is not enabled in the restricted SignalHarness
 tool registry. Source clustering is rule-based rather than semantic. Proposals
