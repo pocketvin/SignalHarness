@@ -1,8 +1,8 @@
 blank_issues_enabled: true
 contact_links:
-  - name: Contribution guide
-    url: https://github.com/HKUDS/OpenHarness/blob/main/CONTRIBUTING.md
-    about: Read local setup, validation, and PR expectations before contributing.
-  - name: Showcase ideas
-    url: https://github.com/HKUDS/OpenHarness/blob/main/docs/SHOWCASE.md
-    about: See example workflows and suggest new real-world use cases.
+  - name: SignalHarness README
+    url: https://github.com/pocketvin/SignalHarness#readme
+    about: Read the project scope, run modes, safety boundaries, and validation commands.
+  - name: Agent-mode smoke test
+    url: https://github.com/pocketvin/SignalHarness/blob/main/docs/SMOKE_TEST_AGENT_MODE.md
+    about: Real provider checks are manual and require environment-provided credentials.

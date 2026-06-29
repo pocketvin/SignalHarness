@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible problem in OpenHarness
+description: Report a reproducible problem in SignalHarness
 title: "[Bug]: "
 labels:
   - bug
@@ -21,7 +21,7 @@ body:
       label: Steps to reproduce
       description: Include commands, prompts, or config that reliably reproduces the issue.
       placeholder: |
-        1. Run `uv run oh ...`
+        1. Run `uv run signal-harness ...`
         2. Trigger ...
         3. Observe ...
     validations:
@@ -30,7 +30,7 @@ body:
     id: environment
     attributes:
       label: Environment
-      description: OS, Python version, Node version if relevant, provider/base URL, and install method.
+      description: OS, Python version, run mode, provider/base URL if relevant, and install method.
     validations:
       required: true
   - type: textarea

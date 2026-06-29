@@ -5,9 +5,11 @@
 
 ## Validation
 
-- [ ] `uv run ruff check src tests scripts`
-- [ ] `uv run pytest -q`
-- [ ] `cd frontend/terminal && npx tsc --noEmit` (if frontend touched)
+- [ ] `uv run --extra dev python -m pytest tests/signal_harness -q`
+- [ ] `uv run --extra dev ruff check src/signal_harness tests/signal_harness`
+- [ ] `uv run --extra dev mypy src/signal_harness`
+- [ ] `uv run signal-harness scan --fixture examples/signal_harness/sample_events.json --mode mock-agent`
+- [ ] `uv build`
 
 ## Notes
 
