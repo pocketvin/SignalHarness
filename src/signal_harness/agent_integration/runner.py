@@ -216,7 +216,7 @@ class LLMAgentTeamRunner:
                     self.provider.complete(target),
                     timeout=self.loop_limits.max_agent_call_seconds,
                 )
-            except TimeoutError as exc:
+            except (TimeoutError, asyncio.TimeoutError) as exc:
                 raise TimeoutError(
                     f"provider_timeout after "
                     f"{self.loop_limits.max_agent_call_seconds}s"
