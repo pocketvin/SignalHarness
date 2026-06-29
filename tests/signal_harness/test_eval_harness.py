@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 from openharness.tools.base import ToolResult
@@ -18,6 +19,24 @@ from signal_harness.signal.normalizer import normalize_event
 from signal_harness.signal.policy import load_signal_policy
 from signal_harness.signal.schemas import SignalCategory
 from signal_harness.ui.trace_view import write_trace_summary
+
+
+class SequencedMockProvider(MockProvider):
+    def __init__(
+        self,
+        *,
+        sequences: dict[str, list[str]],
+        strategy: str = "scripted",
+    ) -> None:
+        super().__init__(strategy=strategy)  # type: ignore[arg-type]
+        self.sequences = {key: list(value) for key, value in sequences.items()}
+
+    async def complete(self, call):
+        sequence = self.sequences.get(call.output_schema)
+        if sequence:
+            self.calls.append(call)
+            return sequence.pop(0)
+        return await super().complete(call)
 
 
 def _fixture(project_root: Path) -> Path:
@@ -77,6 +96,52 @@ def test_scripted_eval_routes_noise_and_multisource(
     assert action_trace.output_count == 2
 
 
+def test_default_mock_agent_requests_multisource_tools(
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    workflow = SignalHarnessWorkflow(
+        cwd=project_root,
+        output_dir=tmp_path / "outputs",
+        state_dir=tmp_path / "state",
+        mode=RunMode.MOCK_AGENT,
+        provider=MockProvider(strategy="scripted"),
+    )
+    result = asyncio.run(
+        workflow.scan(
+            fixture=project_root / "examples/signal_harness/sample_events.json"
+        )
+    )
+    plan_trace = next(
+        step
+        for step in result.trace.steps
+        if step.output_schema == "EvidenceToolPlan"
+    )
+    final_trace = next(
+        step
+        for step in result.trace.steps
+        if step.output_schema == "ContextEvidenceOutput"
+    )
+
+    assert {
+        "signal_memory",
+        "github_signal",
+        "rss_signal",
+        "web_change",
+    } <= set(plan_trace.tools_requested)
+    assert {
+        "signal_memory",
+        "github_signal",
+        "rss_signal",
+        "web_change",
+    } <= set(plan_trace.tools_executed)
+    assert plan_trace.blocked_tools == []
+    assert plan_trace.tool_errors == []
+    assert len(plan_trace.permission_checks) == 5
+    assert final_trace.tool_observation_count == 5
+    assert final_trace.exit_condition == "evidence_complete"
+
+
 def test_evidence_tool_loop_executes_blocks_and_reprompts(
     project_root: Path,
     tmp_path: Path,
@@ -118,6 +183,50 @@ def test_evidence_tool_loop_executes_blocks_and_reprompts(
     assert any("bash:blocked" in item for item in plan_trace.permission_checks)
     observations = final_call.input_payload["tool_observations"]
     assert {item["status"] for item in observations} == {"success", "blocked"}
+
+
+def test_tool_budget_blocks_excess_requests_without_crashing(
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    plan = EvidenceToolPlan(
+        source_types_observed=["github_release", "rss", "web_change"],
+        tool_requests=[
+            ToolRequest(
+                tool_name="signal_memory",
+                arguments={"action": "load_project_profile"},
+                reason=f"Budget exercise request {index}.",
+            )
+            for index in range(14)
+        ],
+        planning_summary="Exercise budget blocking without adding tool rounds.",
+    )
+    result = _scan(
+        project_root,
+        tmp_path,
+        MockProvider(
+            strategy="scripted",
+            responses={"EvidenceToolPlan": plan.model_dump_json()},
+        ),
+    )
+    plan_trace = next(
+        step
+        for step in result.trace.steps
+        if step.output_schema == "EvidenceToolPlan"
+    )
+    final_trace = next(
+        step
+        for step in result.trace.steps
+        if step.output_schema == "ContextEvidenceOutput"
+    )
+
+    assert plan_trace.budget_blocked_count == 2
+    assert plan_trace.blocked_tools[-2:] == ["signal_memory", "signal_memory"]
+    assert any("budget_exceeded" in item for item in plan_trace.permission_checks)
+    assert final_trace.tool_observation_count == 14
+    assert final_trace.budget_blocked_count == 2
+    assert final_trace.exit_condition == "completed_with_budget_blocks"
+    assert result.assessments
 
 
 def test_scripted_multi_tool_eval_uses_mock_outputs_without_network(
@@ -244,6 +353,85 @@ def test_scripted_multi_tool_eval_uses_mock_outputs_without_network(
     assert "- exit_condition: completed_with_tool_errors" in summary
     assert "## Skipped Event Audit Completion" in summary
     assert "not downstream LLM Agent execution" in summary
+
+
+def test_schema_retry_recovers_without_fallback(
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    valid_plan = EvidenceToolPlan(
+        source_types_observed=["github_release"],
+        tool_requests=[],
+        planning_summary="Retry recovered with a valid schema.",
+    )
+    result = _scan(
+        project_root,
+        tmp_path,
+        SequencedMockProvider(
+            sequences={
+                "EvidenceToolPlan": ["{invalid-json", valid_plan.model_dump_json()]
+            }
+        ),
+    )
+    trace = next(
+        step
+        for step in result.trace.steps
+        if step.output_schema == "EvidenceToolPlan"
+    )
+
+    assert trace.retry_count == 1
+    assert trace.schema_error
+    assert trace.schema_valid is True
+    assert trace.fallback_used is False
+    assert result.assessments
+
+
+def test_schema_retry_falls_back_after_second_failure(
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    result = _scan(
+        project_root,
+        tmp_path,
+        SequencedMockProvider(
+            sequences={"EvidenceToolPlan": ["", "{invalid-json"]}
+        ),
+    )
+    trace = next(
+        step
+        for step in result.trace.steps
+        if step.output_schema == "EvidenceToolPlan"
+    )
+
+    assert trace.retry_count == 1
+    assert trace.schema_error
+    assert "retry failed" in trace.schema_error
+    assert trace.schema_valid is False
+    assert trace.fallback_used is True
+    assert result.assessments
+
+
+def test_mock_agent_scan_writes_review_only_learning_observation(
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    policy_path = project_root / "configs/signal_policy.yaml"
+    watchlist_path = project_root / "configs/watchlist.yaml"
+    policy_before = policy_path.read_text(encoding="utf-8")
+    watchlist_before = watchlist_path.read_text(encoding="utf-8")
+
+    result = _scan(project_root, tmp_path)
+
+    state_path = tmp_path / "state/latest_learning_observation.json"
+    output_path = result.output_dir / "latest_learning_observation.json"
+    assert state_path.exists()
+    assert output_path.exists()
+    payload = json.loads(state_path.read_text(encoding="utf-8"))
+    assert payload["requires_approval"] is True
+    assert payload["policy_update_proposal"]["requires_approval"] is True
+    assert payload["watchlist_update_proposal"]["requires_approval"] is True
+    assert policy_path.read_text(encoding="utf-8") == policy_before
+    assert watchlist_path.read_text(encoding="utf-8") == watchlist_before
 
 
 def test_tool_error_does_not_crash_and_caps_confidence(

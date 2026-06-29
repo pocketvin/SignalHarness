@@ -72,8 +72,14 @@ def format_trace_summary(steps: Iterable[TraceStep]) -> str:
             lines.append("  tools_executed: " + ", ".join(step.tools_executed))
         if step.blocked_tools:
             lines.append("  blocked_tools: " + ", ".join(step.blocked_tools))
+        if step.budget_blocked_count:
+            lines.append(f"  budget_blocked_count: {step.budget_blocked_count}")
         if step.tool_errors:
             lines.append("  tool_errors: " + "; ".join(step.tool_errors))
+        if step.retry_count:
+            lines.append(f"  retry_count: {step.retry_count}")
+        if step.schema_error:
+            lines.append(f"  schema_error: {step.schema_error}")
         if step.cache_events:
             lines.append("  cache: " + ", ".join(step.cache_events))
         if step.prompt_prefix_hash:
@@ -91,6 +97,7 @@ def format_trace_summary(steps: Iterable[TraceStep]) -> str:
                     f"    source_types: {step.source_type_count or 0}",
                     f"    tools_requested: {step.tools_requested_count or 0}",
                     f"    tools_executed: {step.tools_executed_count or 0}",
+                    f"    budget_blocked: {step.budget_blocked_count or 0}",
                     f"    exit_condition: {step.exit_condition or 'unknown'}",
                 ]
             )
@@ -137,6 +144,8 @@ def render_trace_table(
             tool_parts.append("exec=" + ",".join(step.tools_executed))
         if step.blocked_tools:
             tool_parts.append("blocked=" + ",".join(step.blocked_tools))
+        if step.budget_blocked_count:
+            tool_parts.append(f"budget={step.budget_blocked_count}")
         table.add_row(
             STAGE_ALIASES.get(step.step, step.step),
             step.status,
@@ -192,6 +201,8 @@ def write_trace_summary(
             tool_parts.append("exec=" + ",".join(step.tools_executed))
         if step.blocked_tools:
             tool_parts.append("blocked=" + ",".join(step.blocked_tools))
+        if step.budget_blocked_count:
+            tool_parts.append(f"budget={step.budget_blocked_count}")
         lines.append(
             "| "
             + " | ".join(
@@ -273,6 +284,10 @@ def write_trace_summary(
                 (
                     "- tools_executed: "
                     f"{evidence_final.tools_executed_count or 0}"
+                ),
+                (
+                    "- budget_blocked: "
+                    f"{evidence_final.budget_blocked_count or 0}"
                 ),
                 f"- exit_condition: {evidence_final.exit_condition or 'unknown'}",
             ]

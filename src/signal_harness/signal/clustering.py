@@ -29,7 +29,7 @@ def _tokens(event: SignalEvent) -> set[str]:
         token
         for token in re.findall(
             r"[a-z][a-z0-9_-]{3,}",
-            f"{event.source_name} {event.title} {event.content}".lower(),
+            f"{event.title} {event.content}".lower(),
         )
         if token not in STOP_WORDS
     }
@@ -68,7 +68,10 @@ class SignalClusterer:
                 same_source = first.source_name.lower() == second.source_name.lower()
                 same_domain = bool(_domain(first)) and _domain(first) == _domain(second)
                 close_in_time = self._close_in_time(first, second)
-                if same_source or same_domain or (overlap >= 0.28 and close_in_time):
+                if not close_in_time:
+                    continue
+                threshold = 0.18 if same_source or same_domain else 0.28
+                if overlap >= threshold:
                     union(left, right)
 
         groups: dict[int, list[SignalEvent]] = defaultdict(list)
@@ -97,6 +100,8 @@ class SignalClusterer:
                     + 0.15 * min(len(source_types), 3),
                 )
             )
+            if any(event.published_at is None for event in grouped):
+                confidence = max(0.25, confidence - 0.1)
             event_ids = [event.event_id for event in grouped]
             digest = hashlib.sha256("|".join(sorted(event_ids)).encode()).hexdigest()[:12]
             clusters.append(
@@ -122,7 +127,7 @@ class SignalClusterer:
     @staticmethod
     def _close_in_time(first: SignalEvent, second: SignalEvent) -> bool:
         if first.published_at is None or second.published_at is None:
-            return True
+            return False
         left = first.published_at
         right = second.published_at
         if left.tzinfo is None:

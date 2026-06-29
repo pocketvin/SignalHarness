@@ -140,9 +140,19 @@ def test_mock_agent_runs_complete_five_agent_team(
     evidence_step = next(
         step for step in llm_steps if step.output_schema == "EvidenceToolPlan"
     )
-    assert evidence_step.tools_requested == ["signal_memory"]
-    assert "signal_memory" in evidence_step.tools_executed
-    assert {"github_release", "github_issue", "rss"}.issubset(
+    assert {
+        "signal_memory",
+        "github_signal",
+        "rss_signal",
+        "web_change",
+    } <= set(evidence_step.tools_requested)
+    assert {
+        "signal_memory",
+        "github_signal",
+        "rss_signal",
+        "web_change",
+    } <= set(evidence_step.tools_executed)
+    assert {"github_release", "github_issue", "rss", "web_change"}.issubset(
         evidence_step.source_types_observed
     )
     assert all(step.fallback_used is False for step in llm_steps)
@@ -305,7 +315,7 @@ def test_permission_guard_blocks_llm_requested_high_risk_action(
                 requested_actions=["create_github_issue"],
             )
             for item in events
-            if item["event_id"] in {"demo-001", "demo-002"}
+            if item["event_id"] in {"demo-001", "demo-002", "demo-004"}
         ]
     )
     provider = MockProvider(

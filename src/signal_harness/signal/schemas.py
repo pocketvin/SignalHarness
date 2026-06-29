@@ -243,7 +243,10 @@ class TraceStep(BaseModel):
     source_type_count: int | None = Field(default=None, ge=0)
     tools_requested_count: int | None = Field(default=None, ge=0)
     tools_executed_count: int | None = Field(default=None, ge=0)
+    budget_blocked_count: int | None = Field(default=None, ge=0)
     exit_condition: str | None = None
+    retry_count: int = Field(default=0, ge=0)
+    schema_error: str | None = None
     permission_checks: list[str] = Field(default_factory=list)
     prompt_prefix_hash: str | None = None
     static_context_hash: str | None = None

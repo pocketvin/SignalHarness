@@ -1,12 +1,12 @@
 # SignalHarness
 
-SignalHarness is an LLM-native multi-agent signal intelligence harness.
-It uses deterministic components as guardrails, fallback, permission control,
-scoring constraints, and traceability layers.
+SignalHarness is an LLM-enhanced routed multi-agent signal intelligence
+harness. It uses deterministic components as guardrails, fallback, permission
+control, scoring constraints, and traceability layers.
 
-Built on HKUDS/OpenHarness, SignalHarness turns GitHub, RSS, and web-change
-events into project-specific evidence, impact judgments, action plans, and
-reviewable learning proposals.
+Built as an OpenHarness downstream project, SignalHarness turns GitHub, RSS,
+and web-change events into project-specific evidence, impact judgments, action
+plans, and review-only self-improvement proposals.
 
 ## Fixed five-Agent team
 
@@ -111,6 +111,12 @@ also copies the latest read-only snapshots to:
 
 These snapshots do not mean that any proposal was applied.
 
+`mock-agent` and `agent` scans also save the latest learning observation to
+`.signal-harness/latest_learning_observation.json` and
+`outputs/latest_learning_observation.json`. This records what
+LearningPolicyAgent proposed for review; it does not apply policy, edit
+watchlists, or modify skills.
+
 No proposal is applied automatically. `signal_policy.yaml`, skill files, and
 `watchlist.yaml` change only through a separate explicit approval path.
 
@@ -134,9 +140,10 @@ outputs/
 ```
 
 Each LLM trace record includes Agent name, mode, model, prompt version, input
-event IDs, output schema, schema validity, fallback status, duration, requested
-and executed tools, blocked tools, permission checks, cache events, context
-hashes, and errors. Deterministic stages remain visible alongside
+event IDs, output schema, schema validity, retry count, schema error,
+fallback status, duration, requested and executed tools, budget-blocked tools,
+blocked tools, permission checks, cache events, context hashes, and errors.
+Deterministic stages remain visible alongside
 `llm_agent_call` records.
 
 ## Controlled evidence tools and context
@@ -145,9 +152,12 @@ ContextEvidenceAgent uses a two-turn controlled loop:
 
 1. The model returns `ToolRequest` objects.
 2. Python validates the read-only allowlist and permission policy.
-3. Existing OpenHarness `SignalToolExecutor` tools run.
-4. `ToolObservation` objects are appended to the second Agent turn.
-5. Failed or blocked tools increase uncertainty and cap confidence.
+3. Python applies lightweight budgets: at most 20 tool requests per run, 3 per
+   event, and 1000 output characters per observation by default.
+4. Existing OpenHarness `SignalToolExecutor` tools run.
+5. `ToolObservation` objects are appended to the second Agent turn.
+6. Failed, blocked, or budget-blocked tools increase uncertainty and cap
+   confidence.
 
 This is controlled orchestration by the SignalHarness runner, not
 provider-native function calling and not a complete handoff-as-tool system.
@@ -161,9 +171,10 @@ provider-specific prompt-cache API is required.
 
 The pre-LLM `NoiseFilter` downweights or routes obvious noise without deleting
 raw signals. `SignalClusterer` groups related GitHub, RSS, and web-change events
-using source, domain, token, and time overlap. Local JSON source caching and
-per-run tool-observation caching require no service process. Concurrent source
-tasks record duration, output count, cache hits, and independent failures.
+only when token overlap and time proximity agree; same source or same domain is
+not enough by itself. Local JSON source caching and per-run tool-observation
+caching require no service process. Concurrent source tasks record duration,
+output count, cache hits, and independent failures.
 
 OpenHarness is the only Agent Harness foundation. LangGraph, CrewAI, and
 AutoGen are references or competitors, not runtime dependencies. Redis,

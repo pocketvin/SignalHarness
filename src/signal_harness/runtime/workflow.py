@@ -11,8 +11,10 @@ from pathlib import Path
 from typing import Any, cast
 from uuid import uuid4
 
+from openharness.utils.fs import atomic_write_text
 from signal_harness.agent_integration.mode import RunMode
 from signal_harness.agent_integration.runner import LLMAgentTeamRunner
+from signal_harness.agent_integration.schemas import LearningPolicyOutput
 from signal_harness.agents import SupervisorAgent
 from signal_harness.memory import MemoryBundle
 from signal_harness.providers.adapter import AgentProvider
@@ -98,6 +100,8 @@ class SignalHarnessWorkflow:
                 "config_dir": str(self.config_dir),
                 "output_dir": str(self.output_dir),
                 "state_dir": str(self.state_dir),
+                "mode": self.mode.value,
+                "allow_mock_tool_eval": self.mode is RunMode.MOCK_AGENT,
             },
         )
 
@@ -118,6 +122,7 @@ class SignalHarnessWorkflow:
             profile, policy, watchlist = await self._load_config()
             state["output_count"] = 3
         guard = SignalPermissionGuard(policy)
+        learning_observation: LearningPolicyOutput | None = None
 
         with self.trace.step("collect_signals") as state:
             if fixture is not None:
@@ -235,7 +240,7 @@ class SignalHarnessWorkflow:
                     agent="LLMAgentTeamRunner",
                     input_count=len(events),
                 ) as state:
-                    assessments, _learning_observation = await runner.run_scan(
+                    assessments, learning_observation = await runner.run_scan(
                         events,
                         project_profile=profile,
                         policy=policy,
@@ -257,6 +262,11 @@ class SignalHarnessWorkflow:
                     await provider.close()
 
         self.state_dir.mkdir(parents=True, exist_ok=True)
+        if learning_observation is not None:
+            self._save_learning_observation(
+                learning_observation,
+                run_id=run_id,
+            )
         save_seen_signals(signal_memory_path, events, assessments)
         await self._write_outputs(
             events,
@@ -272,6 +282,36 @@ class SignalHarnessWorkflow:
             self.trace,
             collection.failed_sources,
             collection.source_tasks,
+        )
+
+    def _save_learning_observation(
+        self,
+        learning: LearningPolicyOutput,
+        *,
+        run_id: str,
+    ) -> None:
+        payload = {
+            "run_id": run_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "learning_summary": learning.learning_summary,
+            "memory_sections_read": learning.memory_sections_read,
+            "policy_update_proposal": learning.policy_update_proposal.model_dump(
+                mode="json"
+            ),
+            "watchlist_update_proposal": learning.watchlist_update_proposal,
+            "skill_update_proposal": learning.skill_update_proposal,
+            "requires_approval": True,
+        }
+        serialized = json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(
+            self.state_dir / "latest_learning_observation.json",
+            serialized,
+        )
+        atomic_write_text(
+            self.output_dir / "latest_learning_observation.json",
+            serialized,
         )
 
     def _provider_for_mode(self) -> AgentProvider:

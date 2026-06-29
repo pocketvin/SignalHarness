@@ -6,7 +6,8 @@ import json
 import re
 import time
 from collections.abc import Callable, Iterable
-from typing import Any, TypeVar
+from dataclasses import dataclass, replace
+from typing import Any, TypeVar, TypedDict
 
 from pydantic import BaseModel
 
@@ -73,8 +74,28 @@ EXPLICITLY_BLOCKED_TOOLS = frozenset(
 )
 
 
+@dataclass(frozen=True)
+class ToolLoopLimits:
+    """Bound the controlled two-step evidence tool loop."""
+
+    max_total_tool_requests_per_run: int = 20
+    max_tool_requests_per_event: int = 3
+    max_tool_output_chars: int = 1000
+
+
+class ToolExecutionTrace(TypedDict):
+    executed: list[str]
+    errors: list[str]
+    blocked: list[str]
+    budget_blocked: list[str]
+    permission_checks: list[str]
+    cache_events: list[str]
+
+
 def _json_object(text: str) -> dict[str, Any]:
     stripped = text.strip()
+    if not stripped:
+        raise ValueError("Agent response was empty")
     if stripped.startswith("```"):
         stripped = re.sub(r"^```(?:json)?\s*", "", stripped)
         stripped = re.sub(r"\s*```$", "", stripped)
@@ -93,6 +114,13 @@ def _output_count(output: BaseModel) -> int:
     if isinstance(output, LearningPolicyOutput):
         return 3
     return 1
+
+
+def _short_error(exc: Exception, *, limit: int = 320) -> str:
+    message = re.sub(r"\s+", " ", str(exc)).strip()
+    if not message:
+        message = exc.__class__.__name__
+    return message[:limit]
 
 
 def _trace_tools(output: BaseModel) -> tuple[list[str], list[str], list[str], list[str]]:
@@ -136,6 +164,7 @@ class LLMAgentTeamRunner:
         mode: RunMode,
         trace: TraceRecorder,
         tool_executor: SignalToolExecutor | None = None,
+        tool_limits: ToolLoopLimits | None = None,
     ) -> None:
         if not mode.uses_llm_agent_path:
             raise ValueError("LLMAgentTeamRunner requires mock-agent or agent mode")
@@ -143,6 +172,8 @@ class LLMAgentTeamRunner:
         self.mode = mode
         self.trace = trace
         self.tool_executor = tool_executor
+        self.tool_limits = tool_limits or ToolLoopLimits()
+        self._tool_requests_used = 0
         self.tool_cache = ToolObservationCache()
         self.supervisor = SignalSupervisorAgent()
         self.evidence = ContextEvidenceAgent()
@@ -162,14 +193,38 @@ class LLMAgentTeamRunner:
         schema_valid = False
         fallback_used = False
         error: str | None = None
+        schema_error: str | None = None
+        retry_count = 0
+
+        def parse_response(response: str) -> OutputT:
+            return output_model.model_validate(_json_object(response))
+
         try:
-            response = await self.provider.complete(call)
-            output = output_model.model_validate(_json_object(response))
+            output = parse_response(await self.provider.complete(call))
             schema_valid = True
         except Exception as exc:
-            error = str(exc)
-            fallback_used = True
-            output = fallback()
+            schema_error = _short_error(exc)
+            retry_count = 1
+            retry_call = replace(
+                call,
+                user_prompt=(
+                    call.user_prompt.rstrip()
+                    + "\n\n"
+                    + "Your previous response failed JSON/schema validation: "
+                    + schema_error
+                    + ". Return exactly one valid JSON object matching the required "
+                    + "schema. Do not include Markdown."
+                ),
+            )
+            try:
+                output = parse_response(await self.provider.complete(retry_call))
+                schema_valid = True
+            except Exception as retry_exc:
+                retry_error = _short_error(retry_exc)
+                schema_error = f"{schema_error}; retry failed: {retry_error}"
+                error = schema_error
+                fallback_used = True
+                output = fallback()
         duration_ms = max(0, round((time.perf_counter() - started) * 1000))
         source_types, requested, executed, tool_errors = _trace_tools(output)
         index = append_llm_trace(
@@ -187,6 +242,8 @@ class LLMAgentTeamRunner:
             tools_requested=requested,
             tools_executed=executed,
             tool_errors=tool_errors,
+            retry_count=retry_count,
+            schema_error=schema_error,
             error=error,
         )
         return output, index
@@ -295,13 +352,18 @@ class LLMAgentTeamRunner:
                 lambda: self.evidence.fallback_plan(evidence_events),
                 event_ids=[event.event_id for event in evidence_events],
             )
-            observations, tool_trace = await self._execute_tool_requests(plan, policy)
+            observations, tool_trace = await self._execute_tool_requests(
+                plan,
+                policy,
+                event_count=len(evidence_events),
+            )
             plan_step = self.trace.steps[plan_trace]
             self.trace.steps[plan_trace] = plan_step.model_copy(
                 update={
                     "tools_executed": tool_trace["executed"],
                     "tool_errors": tool_trace["errors"],
                     "blocked_tools": tool_trace["blocked"],
+                    "budget_blocked_count": len(tool_trace["budget_blocked"]),
                     "permission_checks": tool_trace["permission_checks"],
                     "cache_events": tool_trace["cache_events"],
                 }
@@ -357,6 +419,7 @@ class LLMAgentTeamRunner:
                     ),
                     "tools_requested_count": len(plan.tool_requests),
                     "tools_executed_count": len(tool_trace["executed"]),
+                    "budget_blocked_count": len(tool_trace["budget_blocked"]),
                     "exit_condition": exit_condition,
                 }
             )
@@ -582,17 +645,42 @@ class LLMAgentTeamRunner:
         self,
         plan: EvidenceToolPlan,
         policy: dict[str, Any],
-    ) -> tuple[list[ToolObservation], dict[str, list[str]]]:
+        *,
+        event_count: int,
+    ) -> tuple[list[ToolObservation], ToolExecutionTrace]:
         observations: list[ToolObservation] = []
-        trace: dict[str, list[str]] = {
+        trace: ToolExecutionTrace = {
             "executed": [],
             "errors": [],
             "blocked": [],
+            "budget_blocked": [],
             "permission_checks": [],
             "cache_events": [],
         }
         guard = SignalPermissionGuard(policy)
-        for request in plan.tool_requests:
+        max_for_events = max(1, event_count) * self.tool_limits.max_tool_requests_per_event
+        remaining_for_run = max(
+            0,
+            self.tool_limits.max_total_tool_requests_per_run - self._tool_requests_used,
+        )
+        allowed_count = min(len(plan.tool_requests), max_for_events, remaining_for_run)
+        for index, request in enumerate(plan.tool_requests):
+            if index >= allowed_count:
+                trace["blocked"].append(request.tool_name)
+                trace["budget_blocked"].append(request.tool_name)
+                trace["permission_checks"].append(
+                    f"{request.tool_name}:blocked:budget_exceeded"
+                )
+                observations.append(
+                    ToolObservation(
+                        tool_name=request.tool_name,
+                        status="blocked",
+                        output_summary="Tool request skipped because the tool budget was exceeded.",
+                        error="budget_exceeded",
+                    )
+                )
+                continue
+            self._tool_requests_used += 1
             observation = await self._execute_one_tool(request, guard, trace)
             observations.append(observation)
         return observations, trace
@@ -601,7 +689,7 @@ class LLMAgentTeamRunner:
         self,
         request: ToolRequest,
         guard: SignalPermissionGuard,
-        trace: dict[str, list[str]],
+        trace: ToolExecutionTrace,
     ) -> ToolObservation:
         name = request.tool_name
         if (
@@ -647,12 +735,13 @@ class LLMAgentTeamRunner:
         trace["cache_events"].append(f"tool_observation:{name}:miss")
         result = await self.tool_executor.call(name, request.arguments)
         raw_ref = f"sha256:{stable_hash(result.output)}"
+        output_limit = self.tool_limits.max_tool_output_chars
         if result.is_error:
             trace["errors"].append(f"{name}: {result.output}")
             observation = ToolObservation(
                 tool_name=name,
                 status="error",
-                output_summary=result.output[:500],
+                output_summary=result.output[:output_limit],
                 raw_output_ref=raw_ref,
                 error=result.output,
             )
@@ -661,7 +750,7 @@ class LLMAgentTeamRunner:
             observation = ToolObservation(
                 tool_name=name,
                 status="success",
-                output_summary=result.output[:1000],
+                output_summary=result.output[:output_limit],
                 raw_output_ref=raw_ref,
             )
         self.tool_cache.put(cache_key, observation)
@@ -693,7 +782,9 @@ class LLMAgentTeamRunner:
         observations: list[ToolObservation],
     ) -> str:
         if not plan.tool_requests:
-            return "completed_without_tool_requests"
+            return "no_tool_requests"
+        if any(item.error == "budget_exceeded" for item in observations):
+            return "completed_with_budget_blocks"
         if any(item.status == "error" for item in observations):
             return "completed_with_tool_errors"
         if any(item.status == "blocked" for item in observations):

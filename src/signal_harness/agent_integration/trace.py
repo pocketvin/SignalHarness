@@ -26,6 +26,8 @@ def append_llm_trace(
     tool_errors: list[str] | None = None,
     blocked_tools: list[str] | None = None,
     permission_checks: list[str] | None = None,
+    retry_count: int = 0,
+    schema_error: str | None = None,
     error: str | None = None,
 ) -> int:
     """Append one complete LLM invocation record and return its index."""
@@ -49,6 +51,8 @@ def append_llm_trace(
             tool_errors=tool_errors or [],
             blocked_tools=blocked_tools or [],
             permission_checks=permission_checks or [],
+            retry_count=retry_count,
+            schema_error=schema_error,
             prompt_prefix_hash=call.prompt_prefix_hash or None,
             static_context_hash=call.static_context_hash or None,
             dynamic_context_hash=call.dynamic_context_hash or None,
@@ -61,6 +65,8 @@ def append_llm_trace(
             detail=(
                 f"Schema fallback used: {error}"
                 if fallback_used and error
+                else f"Schema retry succeeded after: {schema_error}"
+                if retry_count and schema_error
                 else "Structured LLM Agent output accepted."
             ),
         )

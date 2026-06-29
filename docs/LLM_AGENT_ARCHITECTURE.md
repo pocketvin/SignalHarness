@@ -1,14 +1,14 @@
 # LLM Agent Architecture
 
-SignalHarness has one fixed LLM-native team:
+SignalHarness has one fixed LLM-enhanced routed Agent team:
 
 1. `SignalSupervisorAgent` receives a `SignalEvent` batch, classifies, routes,
    and decides which events merit analysis. It cannot perform deep evidence
    work, generate actions, update policy, or override final scores.
 2. `ContextEvidenceAgent` first returns `EvidenceToolPlan` with `ToolRequest`
-   objects. The runner validates a read-only allowlist and permissions, executes
-   existing OpenHarness tools, then supplies `ToolObservation` objects to a
-   second turn that returns final evidence.
+   objects. The runner validates a read-only allowlist, permissions, and
+   lightweight tool budgets, executes existing OpenHarness tools, then supplies
+   `ToolObservation` objects to a second turn that returns final evidence.
 3. `ImpactAnalystAgent` reads the project profile and evidence and returns
    affected modules, semantic relevance, risk, and impact reasoning. Its schema
    intentionally has no `final_score`.
@@ -46,7 +46,8 @@ strategy. Volatile metadata never enters the static prefix.
 ## Multi-source and deterministic boundaries
 
 `NoiseFilter` supplies conservative route hints. `SignalClusterer` groups
-related sources with lightweight source/domain/token/time rules.
+related sources with lightweight token/time rules; same source or same domain
+can lower the token threshold, but neither is sufficient by itself.
 ImpactAnalystAgent receives clusters and can report related events,
 cross-source confidence, and conflicting evidence. Python still validates
 schemas, owns tools and permissions, calculates final scores, and supplies
@@ -55,6 +56,11 @@ fallback.
 The tool loop is deliberately runner-controlled. It is not provider-native
 function calling, and SignalHarness does not implement complete
 handoff-as-tool orchestration.
+
+Real agent mode still asks the provider for structured JSON. If JSON parsing,
+schema validation, or an empty response fails, the runner retries once with a
+short schema-correction instruction. A second failure triggers deterministic
+fallback.
 
 The older classes in `src/signal_harness/agents/` are deterministic fallback
 specialists. They are not described as the true multi-Agent implementation.

@@ -2,11 +2,12 @@
 
 ## Thirty-second explanation
 
-SignalHarness is an LLM-native multi-agent signal intelligence harness built on
-OpenHarness. Five LLM Agents classify and route signals, verify evidence,
-analyze project impact, plan bounded actions, and learn from memory. Python is
-the constraint layer for schemas, fallback, permission, scoring, replay, and
-traceability; it is not presented as the primary intelligence source.
+SignalHarness is an LLM-enhanced routed multi-agent signal intelligence
+harness built as an OpenHarness downstream project. Five structured Agents
+classify and route signals, verify evidence, analyze project impact, plan
+bounded actions, and produce review-only learning proposals. Python is the
+constraint layer for schemas, fallback, permission, scoring, replay, and
+traceability.
 
 ## The three modes
 
@@ -14,8 +15,8 @@ traceability; it is not presented as the primary intelligence source.
   not true multi-Agent execution.
 - `mock-agent` uses an offline mock provider but exercises the real five-Agent
   architecture with scripted LLM-like JSON and controlled tool turns.
-- `agent` uses a real OpenHarness-backed provider and is the primary project
-  form.
+- `agent` uses a real OpenHarness-backed provider and validates the same
+  structured JSON schemas, with one schema retry before deterministic fallback.
 
 ## Public CI and real API tests
 
@@ -42,6 +43,9 @@ Memory is infrastructure, not an Agent. `ProjectMemory`, `SignalMemory`,
 `FeedbackMemory`, and `PolicyMemory` feed `LearningPolicyAgent`. It creates
 policy, skill, and watchlist proposals plus a deterministic replay evaluation.
 Nothing is applied without explicit approval.
+Mock-agent and agent scans persist
+`.signal-harness/latest_learning_observation.json` plus a demo copy under
+`outputs/`; these files are observations, not applied configuration.
 
 ## OpenHarness reuse
 
@@ -52,10 +56,11 @@ runtime or rewrite the OpenHarness Agent executor.
 ## Multi-step evidence reasoning
 
 ContextEvidenceAgent first proposes read-only tool requests. Python validates
-the allowlist and permissions, executes existing OpenHarness tools, and returns
-observations to a second evidence turn. Failed tools do not crash the scan:
-uncertainty increases and confidence is capped. Impact analysis then combines
-evidence, project context, and lightweight multi-source clusters.
+the allowlist, permissions, and tool budget, executes existing OpenHarness
+tools, and returns observations to a second evidence turn. Failed, blocked, or
+budget-blocked tools do not crash the scan: uncertainty increases and
+confidence is capped. Impact analysis then combines evidence, project context,
+and lightweight multi-source clusters.
 
 This remains a controlled runner loop, not provider-native function calling.
 It also avoids implementing a complete handoff-as-tool protocol.
@@ -77,7 +82,10 @@ concurrent and synchronous from the CLI perspective, with one observable
 
 OpenHarness is the only Agent Harness dependency. Avoiding orchestration
 frameworks, databases, queues, embeddings, and vector stores is a deliberate
-MVP choice, not an omission hidden by the architecture diagram.
+MVP choice, not an omission hidden by the architecture diagram. Heavy
+dependency surface mostly comes from upstream OpenHarness; SignalHarness uses a
+focused subset for provider adaptation, local CLI/reporting, trace/eval,
+permission checks, and read-only signal tools.
 
 ## Ideas borrowed without adding frameworks
 
@@ -117,4 +125,6 @@ Evidence Agents receive collected primary-source context and can declare tool
 requests, but broad live search is not enabled in the restricted SignalHarness
 tool registry. The controlled tool loop is narrower than OpenHarness's complete
 general Agent loop. Source clustering is rule-based rather than semantic.
-Proposals are deliberately review-only.
+Proposals are deliberately review-only. The project does not claim
+provider-native function calling, fully autonomous self-evolution, or a fully
+conversational multi-Agent debate runtime.

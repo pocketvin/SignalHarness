@@ -193,7 +193,7 @@ class MockProvider:
 
     def _scripted_tool_plan(self, payload: dict[str, Any]) -> EvidenceToolPlan:
         events = self._events(payload)
-        requests = []
+        requests: list[ToolRequest] = []
         if events:
             requests.append(
                 ToolRequest(
@@ -202,13 +202,81 @@ class MockProvider:
                     reason="Confirm stable project context before evidence synthesis.",
                 )
             )
+        by_type: dict[str, list[SignalEvent]] = {}
+        for event in events:
+            by_type.setdefault(event.source_type, []).append(event)
+        for source_type, grouped in by_type.items():
+            event_ids = [event.event_id for event in grouped]
+            if source_type in {"github_release", "github_issue"}:
+                action = (
+                    "fetch_repo_issues"
+                    if source_type == "github_issue"
+                    else "fetch_repo_releases"
+                )
+                requests.append(
+                    ToolRequest(
+                        tool_name="github_signal",
+                        arguments={
+                            "mock_tool_eval": True,
+                            "action": action,
+                            "repo": self._mock_repo(grouped[0]),
+                            "source_type": source_type,
+                            "event_ids": event_ids,
+                        },
+                        reason=(
+                            "Read a fixture-safe mocked GitHub signal observation "
+                            f"for {source_type} evidence."
+                        ),
+                    )
+                )
+            elif source_type == "rss":
+                requests.append(
+                    ToolRequest(
+                        tool_name="rss_signal",
+                        arguments={
+                            "mock_tool_eval": True,
+                            "action": "fetch_feed",
+                            "url": grouped[0].url or "https://mock.signalharness.local/rss",
+                            "feed_name": grouped[0].source_name,
+                            "source_type": source_type,
+                            "event_ids": event_ids,
+                        },
+                        reason="Read a fixture-safe mocked RSS commentary observation.",
+                    )
+                )
+            elif source_type == "web_change":
+                requests.append(
+                    ToolRequest(
+                        tool_name="web_change",
+                        arguments={
+                            "mock_tool_eval": True,
+                            "action": "load_fixture",
+                            "fixture": "examples/signal_harness/sample_events.json",
+                            "source_type": source_type,
+                            "event_ids": event_ids,
+                        },
+                        reason="Read a fixture-safe mocked web-change observation.",
+                    )
+                )
         return EvidenceToolPlan(
             source_types_observed=list(
                 dict.fromkeys(event.source_type for event in events)
             ),
             tool_requests=requests,
-            planning_summary="Request only a local read-only project-memory lookup.",
+            planning_summary=(
+                "Request local memory plus fixture-safe mocked source observations "
+                "derived from the observed event source types."
+            ),
         )
+
+    @staticmethod
+    def _mock_repo(event: SignalEvent) -> str:
+        if "/" in event.source_name:
+            return event.source_name
+        raw_repo = event.raw_payload.get("repo")
+        if isinstance(raw_repo, str) and "/" in raw_repo:
+            return raw_repo
+        return "mock/signal-source"
 
     def _scripted_evidence(self, payload: dict[str, Any]) -> ContextEvidenceOutput:
         plan = EvidenceToolPlan.model_validate(payload.get("tool_plan", {}))
