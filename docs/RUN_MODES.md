@@ -16,8 +16,9 @@ and final evidence—while stages not required by any route may be skipped.
 
 ## `agent`
 
-`signal-harness scan --mode agent` is the primary project form. It requires
-`LLM_API_KEY` and uses the OpenHarness-backed provider adapter.
+`signal-harness scan --mode agent` is the optional real-provider path. It
+requires `LLM_API_KEY` and uses the same SignalHarness schemas, runner
+guardrails, trace fields, and deterministic fallback as `mock-agent`.
 
 If the key is missing, the CLI reports:
 
@@ -25,5 +26,6 @@ If the key is missing, the CLI reports:
 agent mode requires LLM_API_KEY. Use --mode demo or --mode mock-agent for offline execution.
 ```
 
-`LLM_MODEL` selects the model and `LLM_BASE_URL` may select an OpenAI-compatible
-endpoint.
+`LLM_MODEL` selects the model and `LLM_BASE_URL` may select an
+OpenAI-compatible endpoint. This mode is for manual smoke testing; public CI
+uses offline `mock-agent` checks.

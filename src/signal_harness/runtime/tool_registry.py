@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from openharness.tools.base import ToolRegistry
+from signal_harness.runtime.tools_base import ToolRegistry
 from signal_harness.tools import (
     GitHubSignalTool,
     ReportWriterTool,

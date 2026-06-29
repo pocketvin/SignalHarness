@@ -2,12 +2,11 @@
 
 ## Thirty-second explanation
 
-SignalHarness is an LLM-enhanced routed multi-agent signal intelligence
-harness built as an OpenHarness downstream project. Five structured Agents
-classify and route signals, verify evidence, analyze project impact, plan
-bounded actions, and produce review-only learning proposals. Python is the
-constraint layer for schemas, fallback, permission, scoring, replay, and
-traceability.
+SignalHarness is a standalone LLM-enhanced routed multi-agent signal
+intelligence harness. Five structured Agents classify and route signals, verify
+evidence, analyze project impact, plan bounded actions, and produce review-only
+learning proposals. Python is the constraint layer for schemas, fallback,
+permission, scoring, replay, and traceability.
 
 ## The three modes
 
@@ -15,7 +14,7 @@ traceability.
   not true multi-Agent execution.
 - `mock-agent` uses an offline mock provider but exercises the real five-Agent
   architecture with scripted LLM-like JSON and controlled tool turns.
-- `agent` uses a real OpenHarness-backed provider and validates the same
+- `agent` uses an optional real-provider integration and validates the same
   structured JSON schemas, with one schema retry before deterministic fallback.
 
 ## Public CI and real API tests
@@ -25,10 +24,9 @@ Public CI is intentionally offline and SignalHarness-focused: it runs scripted
 checks scoped to `src/signal_harness` and `tests/signal_harness`. It does not
 need a real API key.
 
-Real provider tests are manual smoke tests under
-`tests/manual/integration_real_api/`. They are excluded from default pytest and
-read credentials only from environment variables. Hardcoded keys and fallback
-credentials are forbidden.
+Real provider smoke testing is manual and documented in
+`docs/SMOKE_TEST_AGENT_MODE.md`. It reads credentials only from environment
+variables. Hardcoded keys and fallback credentials are forbidden.
 
 ## Why the score remains guarded
 
@@ -47,16 +45,16 @@ Mock-agent and agent scans persist
 `.signal-harness/latest_learning_observation.json` plus a demo copy under
 `outputs/`; these files are observations, not applied configuration.
 
-## OpenHarness reuse
+## OpenHarness attribution
 
-The real adapter calls OpenHarness's existing OpenAI-compatible streaming
-client and message protocol. SignalHarness does not add a second provider
-runtime or rewrite the OpenHarness Agent executor.
+SignalHarness originated from OpenHarness downstream work and preserves MIT
+attribution. The public package now contains only SignalHarness core; optional
+provider integration is loaded only for `--mode agent`.
 
 ## Multi-step evidence reasoning
 
 ContextEvidenceAgent first proposes read-only tool requests. Python validates
-the allowlist, permissions, and tool budget, executes existing OpenHarness
+the allowlist, permissions, and tool budget, executes local SignalHarness
 tools, and returns observations to a second evidence turn. Failed, blocked, or
 budget-blocked tools do not crash the scan: uncertainty increases and
 confidence is capped. Impact analysis then combines evidence, project context,
@@ -72,6 +70,15 @@ skips an event or stage, deterministic fallback can still populate the stored
 assessment so every input has a complete audit record. That fallback is an
 audit default, not evidence that the skipped downstream Agent ran.
 
+## Operational layer
+
+SignalHarness is still a one-shot scan engine. Scheduled runs are delegated to
+GitHub Actions, cron, or launchd. A deterministic `AlertPolicy` writes
+`outputs/alerts.json`, `outputs/alerts.md`, and
+`.signal-harness/alert_state.json`; it does not send external notifications.
+`signal-harness dashboard` writes a static `outputs/dashboard.html`, and
+`signal-harness digest --period daily|weekly` writes Markdown review digests.
+
 ## Engineering choices
 
 Prompt prefixes keep static instructions and stable project context first;
@@ -80,12 +87,11 @@ visible without provider-specific cache APIs. Source collection remains
 concurrent and synchronous from the CLI perspective, with one observable
 `SourceTask` per source and no background queue.
 
-OpenHarness is the only Agent Harness dependency. Avoiding orchestration
-frameworks, databases, queues, embeddings, and vector stores is a deliberate
-MVP choice, not an omission hidden by the architecture diagram. Heavy
-dependency surface mostly comes from upstream OpenHarness; SignalHarness uses a
-focused subset for provider adaptation, local CLI/reporting, trace/eval,
-permission checks, and read-only signal tools.
+Avoiding orchestration frameworks, databases, queues, embeddings, and vector
+stores is a deliberate MVP choice, not an omission hidden by the architecture
+diagram. SignalHarness now keeps a focused dependency set for provider
+adaptation, local CLI/reporting, trace/eval, permission checks, and read-only
+signal tools.
 
 ## Ideas borrowed without adding frameworks
 
@@ -119,12 +125,11 @@ uv run signal-harness calibrate --mode mock-agent
 
 ## Honest limitations
 
-The OpenHarness-backed adapter currently targets OpenAI-compatible chat
-endpoints through `LLM_API_KEY`, `LLM_MODEL`, and optional `LLM_BASE_URL`.
+The optional agent-mode adapter targets structured JSON responses through
+`LLM_API_KEY`, `LLM_MODEL`, and optional `LLM_BASE_URL`.
 Evidence Agents receive collected primary-source context and can declare tool
 requests, but broad live search is not enabled in the restricted SignalHarness
-tool registry. The controlled tool loop is narrower than OpenHarness's complete
-general Agent loop. Source clustering is rule-based rather than semantic.
-Proposals are deliberately review-only. The project does not claim
+tool registry. Source clustering is rule-based rather than semantic. Proposals
+are deliberately review-only. The project does not claim
 provider-native function calling, fully autonomous self-evolution, or a fully
 conversational multi-Agent debate runtime.

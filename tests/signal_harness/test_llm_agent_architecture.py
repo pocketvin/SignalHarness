@@ -8,9 +8,6 @@ import pytest
 from pydantic import ValidationError
 from typer.testing import CliRunner
 
-from openharness.api.client import ApiMessageCompleteEvent
-from openharness.api.usage import UsageSnapshot
-from openharness.engine.messages import ConversationMessage, TextBlock
 from signal_harness.agent_integration.mode import RunMode
 from signal_harness.agent_integration.schemas import (
     ActionItem,
@@ -367,7 +364,7 @@ def test_calibrate_mock_agent_writes_review_only_artifacts(
     original_watchlist = (project_root / "configs/watchlist.yaml").read_text(
         encoding="utf-8"
     )
-    skill_path = project_root / ".claude/skills/signal-triage/SKILL.md"
+    skill_path = project_root / "src/signal_harness/skills/signal_triage/SKILL.md"
     original_skill = skill_path.read_text(encoding="utf-8")
 
     result = runner.invoke(
@@ -456,16 +453,16 @@ def test_memory_is_named_as_infrastructure() -> None:
 def test_openharness_provider_is_a_thin_native_client_adapter(
     project_root: Path,
 ) -> None:
+    class FakeMessage:
+        text = '{"ok": true}'
+
+    class FakeEvent:
+        message = FakeMessage()
+
     class FakeOpenHarnessClient:
         async def stream_message(self, request):
             assert request.model == "test-model"
-            yield ApiMessageCompleteEvent(
-                message=ConversationMessage(
-                    role="assistant",
-                    content=[TextBlock(text='{"ok": true}')],
-                ),
-                usage=UsageSnapshot(input_tokens=1, output_tokens=2),
-            )
+            yield FakeEvent()
 
     provider = OpenHarnessProvider(
         api_key="unused",
@@ -491,5 +488,5 @@ def test_openharness_provider_is_a_thin_native_client_adapter(
 
     assert output == '{"ok": true}'
     assert "OpenAICompatibleClient" in source
-    assert "ApiMessageRequest" in source
+    assert "ProviderRequest" in source
     assert "QueryEngine" not in source

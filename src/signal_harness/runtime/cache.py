@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from openharness.utils.fs import atomic_write_text
+from signal_harness.utils.fs import atomic_write_text
 
 
 def stable_hash(value: object) -> str:

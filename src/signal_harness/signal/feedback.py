@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Iterable
 from uuid import uuid4
 
-from openharness.utils.fs import atomic_write_text
+from signal_harness.utils.fs import atomic_write_text
 from signal_harness.signal.schemas import FeedbackLabel, FeedbackRecord, PolicyUpdateProposal
 
 

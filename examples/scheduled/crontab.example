@@ -1,0 +1,9 @@
+# Run from the SignalHarness repository root.
+# This example writes local outputs only; it does not send notifications.
+
+SHELL=/bin/bash
+PATH=/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin
+
+# Every weekday at 09:00.
+0 9 * * 1-5 cd /path/to/SignalHarness && uv run signal-harness scan --fixture examples/signal_harness/sample_events.json --mode mock-agent && uv run signal-harness trace && uv run signal-harness dashboard && uv run signal-harness digest --period daily
+

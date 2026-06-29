@@ -8,7 +8,7 @@ from typing import Iterable
 from rich.console import Console
 from rich.table import Table
 
-from openharness.utils.fs import atomic_write_text
+from signal_harness.utils.fs import atomic_write_text
 from signal_harness.signal.schemas import TraceStep
 
 STAGE_ALIASES = {
@@ -254,6 +254,48 @@ def write_trace_summary(
                 f"packet `{step.context_packet_version}`"
             )
             for step in prompt_steps
+        )
+    retry_steps = [
+        step
+        for step in step_list
+        if step.retry_count or step.schema_error or step.fallback_used
+    ]
+    if retry_steps:
+        lines.extend(["", "## Schema Retry and Fallback", ""])
+        lines.extend(
+            (
+                f"- `{step.agent_name or step.agent or step.step}` / "
+                f"`{step.output_schema or step.step}`: "
+                f"retry_count={step.retry_count}, "
+                f"schema_error={step.schema_error or 'none'}, "
+                f"fallback_used={str(step.fallback_used).lower()}"
+            )
+            for step in retry_steps
+        )
+    tool_steps = [
+        step
+        for step in step_list
+        if step.tools_requested
+        or step.tools_executed
+        or step.blocked_tools
+        or step.budget_blocked_count
+        or step.tool_observation_count
+        or step.permission_checks
+    ]
+    if tool_steps:
+        lines.extend(["", "## Tool Controls", ""])
+        lines.extend(
+            (
+                f"- `{step.agent_name or step.agent or step.step}`: "
+                f"tools_requested_count={step.tools_requested_count if step.tools_requested_count is not None else len(step.tools_requested)}, "
+                f"tools_executed_count={step.tools_executed_count if step.tools_executed_count is not None else len(step.tools_executed)}, "
+                f"budget_blocked_count={step.budget_blocked_count or 0}, "
+                f"tool_observation_count={step.tool_observation_count or 0}, "
+                f"exit_condition={step.exit_condition or 'n/a'}, "
+                f"blocked_tools={','.join(step.blocked_tools) or 'none'}, "
+                f"permission_checks={'; '.join(step.permission_checks) or 'none'}"
+            )
+            for step in tool_steps
         )
     evidence_final = next(
         (

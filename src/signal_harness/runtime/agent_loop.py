@@ -3,13 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
-from openharness.api.client import SupportsStreamingMessages
-from openharness.config.settings import PermissionSettings
-from openharness.engine.query_engine import QueryEngine
-from openharness.engine.stream_events import StreamEvent
-from openharness.permissions import PermissionChecker, PermissionMode
 from signal_harness.runtime.tool_registry import (
     SIGNAL_TOOL_ALLOWLIST,
     create_signal_tool_registry,
@@ -28,12 +23,21 @@ class SignalAgentLoop:
     def __init__(
         self,
         *,
-        api_client: SupportsStreamingMessages,
+        api_client: Any,
         cwd: str | Path,
         model: str,
         system_prompt: str = SIGNAL_AGENT_SYSTEM_PROMPT,
         max_turns: int = 8,
     ) -> None:
+        try:
+            from openharness.config.settings import PermissionSettings
+            from openharness.engine.query_engine import QueryEngine
+            from openharness.permissions import PermissionChecker, PermissionMode
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "SignalAgentLoop requires the optional OpenHarness runtime. "
+                "SignalHarness demo/mock-agent modes do not need this integration."
+            ) from exc
         root = Path(cwd).expanduser().resolve()
         self.engine = QueryEngine(
             api_client=api_client,
@@ -64,7 +68,7 @@ class SignalAgentLoop:
             },
         )
 
-    async def submit(self, prompt: str) -> AsyncIterator[StreamEvent]:
+    async def submit(self, prompt: str) -> AsyncIterator[Any]:
         """Submit one prompt to the reused OpenHarness tool-aware loop."""
 
         async for event in self.engine.submit_message(prompt):

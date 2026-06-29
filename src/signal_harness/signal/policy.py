@@ -8,7 +8,7 @@ from typing import Any
 
 import yaml
 
-from openharness.utils.fs import atomic_write_text
+from signal_harness.utils.fs import atomic_write_text
 from signal_harness.signal.schemas import SignalDecision
 
 REQUIRED_SCORE_WEIGHTS = {

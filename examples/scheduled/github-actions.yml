@@ -1,0 +1,29 @@
+name: Scheduled SignalHarness Scan
+
+on:
+  schedule:
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+
+jobs:
+  signalharness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Install
+        run: uv sync --extra dev --locked
+      - name: Offline mock-agent scan
+        run: |
+          uv run signal-harness scan \
+            --fixture examples/signal_harness/sample_events.json \
+            --mode mock-agent
+          uv run signal-harness trace
+          uv run signal-harness dashboard
+          uv run signal-harness digest --period daily
+      - name: Upload local outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: signalharness-outputs
+          path: outputs/
+

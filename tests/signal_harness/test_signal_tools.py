@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from openharness.tools.base import ToolExecutionContext
+from signal_harness.runtime.tools_base import ToolExecutionContext
 from signal_harness.tools.github_signal import GitHubSignalTool
 from signal_harness.tools.rss_signal import RssSignalTool, parse_feed
 from signal_harness.tools.signal_memory import SignalMemoryTool

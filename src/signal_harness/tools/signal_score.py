@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from openharness.tools.base import BaseTool, ToolExecutionContext, ToolResult
+from signal_harness.runtime.tools_base import BaseTool, ToolExecutionContext, ToolResult
 from signal_harness.signal.scorer import score_signal
 from signal_harness.signal.schemas import FeedbackRecord, SignalCategory, SignalEvent
 

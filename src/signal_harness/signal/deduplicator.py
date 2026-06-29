@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterable
 
-from openharness.utils.fs import atomic_write_text
+from signal_harness.utils.fs import atomic_write_text
 from signal_harness.signal.schemas import SignalEvent
 
 if TYPE_CHECKING:

@@ -8,7 +8,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from openharness.tools.base import BaseTool, ToolExecutionContext, ToolResult
+from signal_harness.runtime.tools_base import BaseTool, ToolExecutionContext, ToolResult
 
 
 class WebChangeInput(BaseModel):

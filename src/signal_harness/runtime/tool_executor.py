@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from openharness.tools.base import ToolExecutionContext, ToolRegistry, ToolResult
+from signal_harness.runtime.tools_base import ToolExecutionContext, ToolRegistry, ToolResult
 
 
 class SignalToolExecutor:

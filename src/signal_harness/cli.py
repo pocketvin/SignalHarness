@@ -7,19 +7,19 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import typer
 
-from openharness.utils.fs import atomic_write_text
+from signal_harness.utils.fs import atomic_write_text
 from signal_harness.agent_integration.mode import RunMode
 from signal_harness.agent_integration.runner import LLMAgentTeamRunner
 from signal_harness.agent_integration.schemas import LearningPolicyOutput
 from signal_harness.agent_team.learning_policy import LearningPolicyAgent
 from signal_harness.memory import FeedbackMemory, MemoryBundle
 from signal_harness.memory.replay import evaluate_policy_replay
+from signal_harness.providers.adapter import AgentProvider
 from signal_harness.providers.mock_provider import MockProvider
-from signal_harness.providers.openharness_provider import OpenHarnessProvider
 from signal_harness.runtime.permissions import SignalPermissionGuard
 from signal_harness.runtime.tracing import TraceRecorder
 from signal_harness.runtime.workflow import SignalHarnessWorkflow
@@ -41,6 +41,8 @@ from signal_harness.signal.schemas import (
     SignalEvent,
 )
 from signal_harness.ui.terminal_view import render_assessment_table
+from signal_harness.ui.dashboard import write_dashboard
+from signal_harness.ui.digest import DigestPeriod, write_digest
 from signal_harness.ui.trace_view import render_trace_table, write_trace_summary
 
 app = typer.Typer(
@@ -80,11 +82,13 @@ def _require_agent_key(mode: RunMode) -> None:
         raise typer.Exit(code=2)
 
 
-def _provider_for_mode(mode: RunMode) -> MockProvider | OpenHarnessProvider:
+def _provider_for_mode(mode: RunMode) -> AgentProvider:
     _require_agent_key(mode)
     if mode is RunMode.MOCK_AGENT:
         return MockProvider()
     if mode is RunMode.AGENT:
+        from signal_harness.providers.openharness_provider import OpenHarnessProvider
+
         return OpenHarnessProvider.from_env()
     raise ValueError("demo mode does not use an LLM provider")
 
@@ -234,6 +238,37 @@ def trace(
     render_trace_table(steps)
     summary_path = write_trace_summary(resolved_output, steps)
     typer.echo(f"Trace summary: {summary_path}")
+
+
+@app.command()
+def dashboard(
+    cwd: Path = typer.Option(Path.cwd(), "--cwd", hidden=True),
+    output_dir: Path = typer.Option(Path("outputs"), "--output-dir"),
+) -> None:
+    """Write a static local HTML dashboard from the latest outputs."""
+
+    root = cwd.expanduser().resolve()
+    path = write_dashboard(_resolve(root, output_dir))
+    typer.echo(f"Dashboard: {path}")
+
+
+@app.command()
+def digest(
+    period: str = typer.Option("daily", "--period", help="daily or weekly"),
+    cwd: Path = typer.Option(Path.cwd(), "--cwd", hidden=True),
+    output_dir: Path = typer.Option(Path("outputs"), "--output-dir"),
+) -> None:
+    """Write a local daily or weekly Markdown digest."""
+
+    normalized = period.strip().lower()
+    if normalized not in {"daily", "weekly"}:
+        raise typer.BadParameter("--period must be daily or weekly")
+    root = cwd.expanduser().resolve()
+    path = write_digest(
+        _resolve(root, output_dir),
+        period=cast(DigestPeriod, normalized),
+    )
+    typer.echo(f"Digest: {path}")
 
 
 @app.command()

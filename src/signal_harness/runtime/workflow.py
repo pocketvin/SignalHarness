@@ -11,15 +11,15 @@ from pathlib import Path
 from typing import Any, cast
 from uuid import uuid4
 
-from openharness.utils.fs import atomic_write_text
+from signal_harness.utils.fs import atomic_write_text
 from signal_harness.agent_integration.mode import RunMode
 from signal_harness.agent_integration.runner import LLMAgentTeamRunner
 from signal_harness.agent_integration.schemas import LearningPolicyOutput
+from signal_harness.alerts import AlertPolicy, write_alert_outputs
 from signal_harness.agents import SupervisorAgent
 from signal_harness.memory import MemoryBundle
 from signal_harness.providers.adapter import AgentProvider
 from signal_harness.providers.mock_provider import MockProvider
-from signal_harness.providers.openharness_provider import OpenHarnessProvider
 from signal_harness.runtime.cache import SourceFetchCache
 from signal_harness.runtime.permissions import SignalPermissionGuard
 from signal_harness.runtime.tool_executor import SignalToolExecutor
@@ -44,6 +44,7 @@ from signal_harness.signal.schemas import (
     SourceTask,
     TraceStep,
 )
+from signal_harness.ui.dashboard import write_dashboard
 
 
 @dataclass(frozen=True)
@@ -272,6 +273,7 @@ class SignalHarnessWorkflow:
             events,
             assessments,
             guard=guard,
+            policy=policy,
             failed_sources=collection.failed_sources,
             source_tasks=collection.source_tasks,
         )
@@ -318,6 +320,8 @@ class SignalHarnessWorkflow:
         if self.mode is RunMode.MOCK_AGENT:
             return MockProvider()
         if self.mode is RunMode.AGENT:
+            from signal_harness.providers.openharness_provider import OpenHarnessProvider
+
             return OpenHarnessProvider.from_env()
         raise ValueError("demo mode does not create an LLM provider")
 
@@ -557,6 +561,7 @@ class SignalHarnessWorkflow:
         assessments: list[SignalAssessment],
         *,
         guard: SignalPermissionGuard,
+        policy: dict[str, Any],
         failed_sources: list[str],
         source_tasks: list[SourceTask],
     ) -> None:
@@ -613,3 +618,11 @@ class SignalHarnessWorkflow:
                 update={"status": "error", "detail": result.output}
             )
             raise RuntimeError(result.output)
+        write_alert_outputs(
+            output_dir=self.output_dir,
+            state_dir=self.state_dir,
+            events=events,
+            assessments=assessments,
+            policy=AlertPolicy.from_signal_policy(policy),
+        )
+        write_dashboard(self.output_dir)

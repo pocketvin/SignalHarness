@@ -10,7 +10,7 @@ from typing import Any, Literal
 import httpx
 from pydantic import BaseModel, model_validator
 
-from openharness.tools.base import BaseTool, ToolExecutionContext, ToolResult
+from signal_harness.runtime.tools_base import BaseTool, ToolExecutionContext, ToolResult
 from signal_harness.signal.normalizer import normalize_github_event
 
 

@@ -4,7 +4,7 @@ import asyncio
 import json
 from pathlib import Path
 
-from openharness.tools.base import ToolResult
+from signal_harness.runtime.tools_base import ToolResult
 from typer.testing import CliRunner
 
 from signal_harness.cli import app

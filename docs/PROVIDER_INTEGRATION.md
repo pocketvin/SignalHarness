@@ -1,44 +1,27 @@
 # Provider Integration
 
-OpenHarness is the model-call foundation. SignalHarness does not implement a
-parallel LLM runtime.
+SignalHarness core does not require a live provider. The supported default
+paths are:
 
-`OpenHarnessProvider` reuses:
+- `demo`: deterministic fallback, no LLM provider;
+- `mock-agent`: scripted offline provider, no API key;
+- `agent`: optional real-provider integration.
 
-- `openharness.api.openai_client.OpenAICompatibleClient`
-- `openharness.api.client.ApiMessageRequest`
-- `openharness.api.client.ApiMessageCompleteEvent`
-- `openharness.engine.messages.ConversationMessage`
+`MockProvider` implements the same tiny `AgentProvider` protocol used by the
+runner, so offline evals exercise the real five-Agent routed path without
+network access.
 
-This preserves OpenHarness streaming, retries, provider errors, and message
-conversion. The SignalHarness adapter only translates one domain `AgentCall`
-into that existing protocol and collects final assistant text.
+`OpenHarnessProvider` is kept as an optional compatibility adapter. It is not
+imported by demo or mock-agent mode. If `--mode agent` is used without the
+optional upstream provider runtime, SignalHarness returns a clear error and
+suggests `demo` or `mock-agent`.
 
-`MockProvider` implements the same tiny adapter for offline architecture tests.
-Its default `scripted` strategy generates LLM-like JSON without calling Agent
-fallback methods. The optional `fallback` strategy exists only for compatibility
-tests. Invalid JSON or schema coverage failures trigger deterministic fallback
-inside the runner.
+The real-provider path still asks for structured JSON. SignalHarness does not
+use provider-native function calling: the model returns plans and outputs,
+while Python validates schemas, executes read-only tools, applies budgets,
+records trace, and computes final scores.
 
-`agent_team/` owns domain responsibilities and prompts. `agent_integration/`
-owns schemas, mode selection, orchestration, and trace. The deterministic core
-owns normalization, deduplication, scoring constraints, permissions,
-persistence, replay, reporting, and fallback.
+No `src/signal_harness/llm/` runtime exists. The deterministic core owns
+normalization, deduplication, permissions, scoring constraints, persistence,
+replay, reporting, and fallback.
 
-No `src/signal_harness/llm/` exists, and the OpenHarness query engine is not
-rewritten.
-
-The evidence tool loop is currently controlled by the SignalHarness runner:
-the model proposes requests, while Python performs allowlist, permission,
-execution, cache, and observation handling with the existing OpenHarness tool
-registry. This is an explicit transition design; it does not recreate a
-general-purpose tool runtime.
-
-The current design is not provider-native function calling. The provider
-returns structured JSON plans; the SignalHarness runner validates and executes
-tools, then creates the second prompt. Full handoff-as-tool is intentionally
-out of scope.
-
-OpenHarness remains the sole Agent Harness base. LangGraph, CrewAI, and AutoGen
-are not runtime dependencies. No Redis, Postgres, Celery, VectorDB, or embedding
-store is required.

@@ -150,6 +150,32 @@ class PromptContextBuilder:
         signal = memory.get("signal_memory", {})
         feedback = memory.get("feedback_memory", [])
         previous = signal.get("previous_assessments", [])
+        feedback_items = feedback if isinstance(feedback, list) else []
+        false_positive_patterns = [
+            _clip(str(item.get("note", "")))
+            for item in feedback_items
+            if isinstance(item, dict)
+            and item.get("feedback") in {"false_positive", "not_useful", "too_generic"}
+            and item.get("note")
+        ][-5:]
+        useful_signal_patterns = [
+            _clip(str(item.get("note", "")))
+            for item in feedback_items
+            if isinstance(item, dict)
+            and item.get("feedback") in {"useful", "missed_signal"}
+            and item.get("note")
+        ][-5:]
+        source_reliability_notes = [
+            _clip(
+                f"{item.get('event_id')}: quality={item.get('source_quality')} "
+                f"confidence={item.get('confidence')}"
+            )
+            for item in previous[-10:]
+            if isinstance(item, dict)
+            and (item.get("source_quality") or item.get("confidence") is not None)
+        ][-5:]
+        latest_proposal = policy.get("latest_proposal") if isinstance(policy, dict) else None
+        latest_proposal_dict = latest_proposal if isinstance(latest_proposal, dict) else {}
         return {
             "project_memory_keys": sorted(project.keys()) if isinstance(project, dict) else [],
             "policy_version": (
@@ -157,18 +183,39 @@ class PromptContextBuilder:
                 if isinstance(policy, dict)
                 else None
             ),
-            "seen_signal_count": len(signal.get("seen_signals", []))
-            if isinstance(signal, dict)
-            else 0,
+            "seen_signal_count": (
+                len(signal.get("seen_signals", [])) if isinstance(signal, dict) else 0
+            ),
             "recent_assessment_ids": [
                 str(item.get("event_id"))
                 for item in previous[-10:]
                 if isinstance(item, dict)
             ],
-            "feedback_count": len(feedback) if isinstance(feedback, list) else 0,
+            "feedback_count": len(feedback_items),
             "recent_feedback_notes": [
-                str(item.get("note", ""))[:160]
-                for item in feedback[-5:]
+                _clip(str(item.get("note", "")))
+                for item in feedback_items[-5:]
                 if isinstance(item, dict) and item.get("note")
             ],
+            "recent_feedback_summary": _summarize_feedback(feedback_items),
+            "false_positive_patterns": false_positive_patterns,
+            "useful_signal_patterns": useful_signal_patterns,
+            "source_reliability_notes": source_reliability_notes,
+            "recent_policy_change_summary": _clip(
+                str(latest_proposal_dict.get("reason") or "No recent proposal.")
+            ),
         }
+
+
+def _clip(value: str, limit: int = 160) -> str:
+    return value.strip().replace("\n", " ")[:limit]
+
+
+def _summarize_feedback(feedback: list[Any]) -> dict[str, int]:
+    summary: dict[str, int] = {}
+    for item in feedback[-20:]:
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("feedback", "unknown"))
+        summary[label] = summary.get(label, 0) + 1
+    return dict(sorted(summary.items())[:5])

@@ -4,7 +4,7 @@ import asyncio
 import json
 from pathlib import Path
 
-from openharness.tools.base import ToolResult
+from signal_harness.runtime.tools_base import ToolResult
 from signal_harness.agent_integration.context_builder import PromptContextBuilder
 from signal_harness.agent_integration.mode import RunMode
 from signal_harness.agent_integration.schemas import EvidenceToolPlan, ToolRequest

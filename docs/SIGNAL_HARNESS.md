@@ -1,6 +1,7 @@
 # SignalHarness Product and Architecture
 
-SignalHarness is an LLM-native, project-specific signal intelligence harness.
+SignalHarness is a standalone LLM-enhanced, project-specific signal
+intelligence harness.
 Its primary path uses five LLM Agents; deterministic Python remains the
 guardrail, fallback, permission, score, replay, persistence, and trace layer.
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import shutil
 from pathlib import Path
@@ -8,9 +9,32 @@ import yaml
 from typer.testing import CliRunner
 
 from signal_harness.cli import app
+from signal_harness.agent_integration.mode import RunMode
+from signal_harness.runtime.workflow import SignalHarnessWorkflow
 
 
 runner = CliRunner()
+
+
+def test_demo_mode_scan_does_not_write_learning_observation(
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "outputs"
+    state_dir = tmp_path / "state"
+    fixture = project_root / "examples" / "signal_harness" / "sample_events.json"
+    workflow = SignalHarnessWorkflow(
+        cwd=project_root,
+        output_dir=output_dir,
+        state_dir=state_dir,
+        mode=RunMode.DEMO,
+    )
+
+    result = asyncio.run(workflow.scan(fixture=fixture))
+
+    assert result.assessments
+    assert not (state_dir / "latest_learning_observation.json").exists()
+    assert not (output_dir / "latest_learning_observation.json").exists()
 
 
 def test_fixture_scan_feedback_and_calibration(project_root: Path, tmp_path: Path) -> None:
@@ -38,10 +62,14 @@ def test_fixture_scan_feedback_and_calibration(project_root: Path, tmp_path: Pat
         "impact_scores.json",
         "action_items.json",
         "task_trace.json",
+        "alerts.json",
+        "alerts.md",
+        "dashboard.html",
         "radar_digest.md",
         "run_summary.txt",
     ):
         assert (output_dir / name).exists(), name
+    assert (state_dir / "alert_state.json").exists()
 
     assessments = json.loads((output_dir / "impact_scores.json").read_text(encoding="utf-8"))
     assert any(

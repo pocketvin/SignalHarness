@@ -1,4 +1,4 @@
-"""The fixed five-Agent LLM-native SignalHarness team."""
+"""The fixed five-Agent LLM-enhanced SignalHarness team."""
 
 from signal_harness.agent_team.action_planner import ActionPlannerAgent
 from signal_harness.agent_team.context_evidence import ContextEvidenceAgent

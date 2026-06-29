@@ -1,13 +1,14 @@
 # SignalHarness Agent Guide
 
-SignalHarness is an OpenHarness-based LLM-native signal intelligence harness.
+SignalHarness is a standalone LLM-enhanced routed multi-agent signal
+intelligence harness.
 Keep the fixed five-Agent architecture under `src/signal_harness/agent_team/`.
 
 Key directories:
 
 - `agent_team/`: five domain LLM Agents
 - `agent_integration/`: prompts, schemas, context, runner, trace
-- `providers/`: thin OpenHarness and scripted mock adapters
+- `providers/`: scripted mock adapter and optional provider integration
 - `memory/`: Project, Signal, Feedback, and Policy infrastructure
 - `signal/`: deterministic normalization, noise, clustering, scoring
 - `runtime/`: workflow, cache, permissions, tools, trace
@@ -27,13 +28,12 @@ Rules:
 - Do not describe deterministic fallback as true multi-Agent execution.
 - Memory is infrastructure, not an Agent.
 - `demo` is deterministic fallback; `mock-agent` uses scripted offline LLM-like
-  calls; `agent` uses a real OpenHarness-backed provider.
-- Keep provider adapters thin and use the existing OpenHarness tool registry
-  and permission boundaries.
+  calls; `agent` uses an optional real-provider integration.
+- Keep provider adapters thin; demo and mock-agent must not require upstream
+  OpenHarness imports.
 - Prompt, schema, route, or tool-use changes require matching tests and docs.
-- Public CI must use `mock-agent` / scripted evals only. Real API tests live in
-  `tests/manual/integration_real_api/`, are excluded from default pytest, and
-  require explicit environment variables.
+- Public CI must use `mock-agent` / scripted evals only. Real API smoke tests
+  are documented, manual, and require explicit environment variables.
 - Never commit hardcoded API keys, secret-looking fallback credentials, `.env`,
   runtime outputs, caches, or build artifacts.
 
