@@ -19,6 +19,7 @@ from signal_harness.providers.adapter import AgentCall
 from signal_harness.providers.mock_provider import MockProvider
 from signal_harness.runtime.workflow import SignalHarnessWorkflow
 from signal_harness.signal.schemas import SourceQuality
+from signal_harness.ui.trace_view import write_trace_summary
 
 IMPACT_IDS = ["demo-001", "demo-002", "demo-003", "demo-004"]
 ACTION_IDS = ["demo-001", "demo-002", "demo-004"]
@@ -148,6 +149,21 @@ def test_explicit_impact_to_evidence_repair_executes(
     assert _repair_details(result, "repair_context_evidence")
     assert _repair_details(result, "repair_impact")
     assert sum(call.output_schema == "ImpactOutput" for call in provider.calls) == 2
+    repair_llm_steps = [
+        step
+        for step in result.trace.steps
+        if step.step == "llm_agent_call"
+        and "repair_internal_llm_call=true" in step.detail
+    ]
+    assert repair_llm_steps
+    assert all("summary_step=repair_" in step.detail for step in repair_llm_steps)
+    summary = write_trace_summary(
+        tmp_path / "trace-summary",
+        result.trace.steps,
+    ).read_text(encoding="utf-8")
+    assert "## Agent Repair Pass" in summary
+    assert "## Repair Internal LLM Calls" in summary
+    assert "separate from the repair summary steps above" in summary
 
 
 def test_deterministic_impact_to_evidence_repair_trigger(
@@ -341,3 +357,47 @@ def test_action_deterministic_repair_trigger_and_no_recursive_evidence(
     )
     assert _repair_details(result, "repair_action")
     assert not _repair_details(result, "repair_context_evidence")
+
+
+def test_action_repair_is_blocked_after_impact_repair_uses_single_round(
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    impact_repair = RepairRequest(
+        target_agent="context_evidence",
+        event_ids=["demo-001"],
+        reason="Impact uses the only repair round.",
+    )
+    action_repair = RepairRequest(
+        target_agent="impact",
+        event_ids=["demo-001"],
+        reason="Action repair should be blocked by round budget.",
+    )
+    provider = SequenceProvider(
+        {
+            "ImpactOutput": [
+                _impact_output(repairs=[impact_repair]).model_dump_json(),
+                _impact_output(ids=["demo-001"]).model_dump_json(),
+            ],
+            "ActionOutput": [
+                _action_output(repairs=[action_repair]).model_dump_json(),
+            ],
+        }
+    )
+
+    result = _scan(
+        project_root,
+        tmp_path,
+        provider,
+        limits=AgentLoopLimits(max_repair_rounds_per_run=1),
+    )
+
+    blocked = "\n".join(_repair_details(result, "repair_blocked"))
+    assert "triggered_by=ActionPlannerAgent" in blocked
+    assert "target_agent=impact" in blocked
+    assert "repair_round_budget_exceeded" in blocked
+    assert not any(
+        "Action→Impact" in detail
+        for detail in _repair_details(result, "repair_impact")
+    )
+    assert not _repair_details(result, "repair_action")

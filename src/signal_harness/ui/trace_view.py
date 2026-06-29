@@ -392,6 +392,33 @@ def write_trace_summary(
                 "No repair pass was triggered.",
             ]
         )
+    repair_llm_steps = [
+        step
+        for step in step_list
+        if step.step == "llm_agent_call"
+        and "repair_internal_llm_call=true" in step.detail
+    ]
+    if repair_llm_steps:
+        lines.extend(
+            [
+                "",
+                "## Repair Internal LLM Calls",
+                "",
+                (
+                    "These are ordinary `llm_agent_call` records produced inside "
+                    "a bounded repair pass. They are separate from the repair "
+                    "summary steps above."
+                ),
+                "",
+            ]
+        )
+        lines.extend(
+            (
+                f"- `{step.agent_name or step.agent}` / "
+                f"`{step.output_schema or 'unknown'}`: {step.detail}"
+            )
+            for step in repair_llm_steps
+        )
     skipped_audit_steps = [
         step
         for step in step_list

@@ -174,6 +174,39 @@ def test_low_risk_replay_passed_apply_requires_yes_and_records_change(
     assert applied_log["applied"][0]["proposal_id"] == "proposal-apply"
 
 
+def test_learning_apply_cli_requires_yes(
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    config = _copy_configs(project_root, tmp_path)
+    policy = load_signal_policy(config / "signal_policy.yaml")
+    stage_learning_proposal(
+        state_dir=tmp_path / "state",
+        output_dir=tmp_path / "outputs",
+        learning=_learning(policy, proposal_id="proposal-cli-apply"),
+        replay=_replay(),
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "learning-apply",
+            "--proposal-id",
+            "proposal-cli-apply",
+            "--cwd",
+            str(project_root),
+            "--config-dir",
+            str(config),
+            "--state-dir",
+            str(tmp_path / "state"),
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "learning-apply requires --yes" in result.output
+    assert load_signal_policy(config / "signal_policy.yaml") == policy
+
+
 def test_replay_reject_blocks_apply(
     project_root: Path,
     tmp_path: Path,

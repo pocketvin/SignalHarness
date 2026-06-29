@@ -954,7 +954,11 @@ class LLMAgentTeamRunner:
                 "budget_blocked_count": len(tool_trace["budget_blocked"]),
                 "permission_checks": tool_trace["permission_checks"],
                 "cache_events": tool_trace["cache_events"],
-                "detail": "Repair pass: ImpactAnalystAgent requested ContextEvidenceAgent.",
+                "detail": (
+                    "repair_internal_llm_call=true; "
+                    "repair_phase=impact_to_context_evidence_plan; "
+                    "summary_step=repair_context_evidence"
+                ),
             }
         )
         evidence_call = self.evidence.build_final_call(
@@ -1011,7 +1015,11 @@ class LLMAgentTeamRunner:
                 "tools_executed_count": len(tool_trace["executed"]),
                 "budget_blocked_count": len(tool_trace["budget_blocked"]),
                 "exit_condition": self._evidence_exit_condition(plan, observations),
-                "detail": "Repair pass final evidence synthesis.",
+                "detail": (
+                    "repair_internal_llm_call=true; "
+                    "repair_phase=impact_to_context_evidence_final; "
+                    "summary_step=repair_context_evidence"
+                ),
             }
         )
         merged_evidence = self._merge_context_evidence(evidence, repaired_evidence)
@@ -1055,6 +1063,11 @@ class LLMAgentTeamRunner:
                 clusters,
             ),
             trace_index=impact_trace,
+        )
+        self._mark_repair_llm_trace(
+            impact_trace,
+            phase="context_evidence_to_impact",
+            summary_step="repair_impact",
         )
         merged_impact = self._merge_impact(impact, repaired_impact)
         self.trace.steps.append(
@@ -1183,6 +1196,11 @@ class LLMAgentTeamRunner:
             ),
             trace_index=impact_trace,
         )
+        self._mark_repair_llm_trace(
+            impact_trace,
+            phase="action_to_impact",
+            summary_step="repair_impact",
+        )
         merged_impact = self._merge_impact(impact, repaired_impact)
         action_impact = ImpactOutput(results=repaired_impact.results)
         action_call = self.action.build_call(
@@ -1206,6 +1224,11 @@ class LLMAgentTeamRunner:
             expected_ids=event_id_set,
             fallback=lambda: self.action.fallback(repair_events, action_impact),
             trace_index=action_trace,
+        )
+        self._mark_repair_llm_trace(
+            action_trace,
+            phase="impact_to_action",
+            summary_step="repair_action",
         )
         merged_action = self._merge_action(action, repaired_action)
         self.trace.steps.append(
@@ -1429,6 +1452,23 @@ class LLMAgentTeamRunner:
                     f"event_ids={','.join(event_ids)}; reason={reason}"
                 ),
             )
+        )
+
+    def _mark_repair_llm_trace(
+        self,
+        trace_index: int,
+        *,
+        phase: str,
+        summary_step: str,
+    ) -> None:
+        trace = self.trace.steps[trace_index]
+        self.trace.steps[trace_index] = trace.model_copy(
+            update={
+                "detail": (
+                    "repair_internal_llm_call=true; "
+                    f"repair_phase={phase}; summary_step={summary_step}"
+                )
+            }
         )
 
     @staticmethod

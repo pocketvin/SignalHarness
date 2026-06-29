@@ -126,6 +126,16 @@ def test_model_eval_summary_counts_repair_metrics() -> None:
                 duration_ms=0,
             ),
             TraceStep(
+                step="repair_impact",
+                status="success",
+                duration_ms=0,
+            ),
+            TraceStep(
+                step="repair_action",
+                status="success",
+                duration_ms=0,
+            ),
+            TraceStep(
                 step="repair_blocked",
                 status="success",
                 duration_ms=0,
@@ -139,6 +149,6 @@ def test_model_eval_summary_counts_repair_metrics() -> None:
     )
 
     assert summary.repair_requested_count == 1
-    assert summary.repair_executed_count == 1
+    assert summary.repair_executed_count == 3
     assert summary.repair_blocked_count == 1
     assert summary.repair_fallback_count == 1

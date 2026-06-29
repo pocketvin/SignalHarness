@@ -226,6 +226,37 @@ def test_dashboard_and_trace_summary_show_repair_pass(tmp_path: Path) -> None:
             "output_count": 1,
             "detail": "Executed bounded Impact→ContextEvidence repair; event_ids=demo-001",
         },
+        {
+            "step": "repair_impact",
+            "status": "success",
+            "duration_ms": 0,
+            "agent": "RepairCoordinator",
+            "input_count": 1,
+            "output_count": 1,
+            "detail": "Reran ImpactAnalystAgent after evidence repair; event_ids=demo-001",
+        },
+        {
+            "step": "repair_action",
+            "status": "success",
+            "duration_ms": 0,
+            "agent": "RepairCoordinator",
+            "input_count": 1,
+            "output_count": 1,
+            "detail": "Reran ActionPlannerAgent after impact repair; event_ids=demo-001",
+        },
+        {
+            "step": "repair_blocked",
+            "status": "success",
+            "duration_ms": 0,
+            "agent": "RepairCoordinator",
+            "input_count": 1,
+            "output_count": 0,
+            "fallback_used": True,
+            "detail": (
+                "triggered_by=ActionPlannerAgent; target_agent=impact; "
+                "event_ids=demo-002; reason=repair_round_budget_exceeded"
+            ),
+        },
     ]
     (output_dir / "task_trace.json").write_text(
         json.dumps(trace_payload),
@@ -242,11 +273,18 @@ def test_dashboard_and_trace_summary_show_repair_pass(tmp_path: Path) -> None:
     html = dashboard.read_text(encoding="utf-8")
     text = summary.read_text(encoding="utf-8")
     assert "Agent repair pass" in html
+    assert "repair_requested" in html
+    assert "repair_context_evidence" in html
+    assert "repair_impact" in html
+    assert "repair_action" in html
+    assert "repair_blocked" in html
     assert "Impact→ContextEvidence" in html
     assert "## Agent Repair Pass" in text
     assert "- requested: 1" in text
-    assert "- executed: 1" in text
-    assert "- event_ids: demo-001" in text
+    assert "- executed: 3" in text
+    assert "- blocked: 1" in text
+    assert "- fallback: 1" in text
+    assert "- event_ids: demo-001, demo-002" in text
 
 
 def test_scan_operational_outputs_and_learning_observation_modes(
