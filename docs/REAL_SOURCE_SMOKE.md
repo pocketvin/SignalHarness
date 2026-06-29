@@ -4,8 +4,9 @@ This manual smoke test verifies source collection against configured GitHub,
 RSS, or fixture-backed web-change sources. It is separate from real provider
 smoke testing and is not required for public CI.
 
-Public CI uses fixture events and `mock-agent` scripted evals. No real network,
-API key, GitHub token, or RSS availability is required for CI.
+Public CI uses fixture-safe SignalHarness checks only: `tests/signal_harness`,
+Ruff, mypy, and `uv build`. No real network, API key, GitHub token, or RSS
+availability is required for CI.
 
 ## Before running
 

@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from signal_harness import cli as cli_module
 from signal_harness.agent_integration.schemas import LearningPolicyOutput, ReplayEvaluation
 from signal_harness.cli import app
 from signal_harness.learning import (
@@ -17,7 +18,11 @@ from signal_harness.learning import (
     stage_learning_proposal,
 )
 from signal_harness.signal.policy import load_signal_policy
-from signal_harness.signal.schemas import PolicyUpdateProposal
+from signal_harness.signal.schemas import (
+    FeedbackLabel,
+    FeedbackRecord,
+    PolicyUpdateProposal,
+)
 
 runner = CliRunner()
 
@@ -65,6 +70,20 @@ def _learning(
         or {"requires_approval": True, "suggested_changes": []},
         learning_summary="Stage proposal for review.",
         memory_sections_read=["FeedbackMemory"],
+    )
+
+
+def _write_feedback(state: Path, note: str = "checkpoint memory signal") -> None:
+    state.mkdir(parents=True, exist_ok=True)
+    record = FeedbackRecord(
+        event_id="demo-001",
+        feedback=FeedbackLabel.USEFUL,
+        note=note,
+        created_at="2026-06-29T00:00:00+00:00",
+    )
+    (state / "feedback_memory.json").write_text(
+        json.dumps([record.model_dump(mode="json")]),
+        encoding="utf-8",
     )
 
 
@@ -313,3 +332,86 @@ def test_learning_stage_and_review_cli(
     assert "proposal-cli" in staged.output
     assert reviewed.exit_code == 0, reviewed.output
     assert "risk=low" in reviewed.output
+
+
+def test_calibrate_apply_yes_blocks_replay_rejected_proposal(
+    project_root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _copy_configs(project_root, tmp_path)
+    policy = load_signal_policy(config / "signal_policy.yaml")
+    state = tmp_path / "state"
+    _write_feedback(state)
+    monkeypatch.setattr(
+        cli_module,
+        "evaluate_policy_replay",
+        lambda *args, **kwargs: _replay(recommendation="reject-or-revise"),
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "calibrate",
+            "--apply",
+            "--yes",
+            "--cwd",
+            str(project_root),
+            "--config-dir",
+            str(config),
+            "--state-dir",
+            str(state),
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "Replay gate did not pass" in result.output
+    assert load_signal_policy(config / "signal_policy.yaml") == policy
+
+
+def test_calibrate_apply_yes_blocks_high_risk_proposal(
+    project_root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _copy_configs(project_root, tmp_path)
+    policy = load_signal_policy(config / "signal_policy.yaml")
+    state = tmp_path / "state"
+
+    class HighRiskLearningAgent:
+        def fallback(self, memories: dict[str, object]) -> LearningPolicyOutput:
+            policy_memory = memories["policy_memory"]
+            assert isinstance(policy_memory, dict)
+            active_policy = dict(policy_memory["active_policy"])
+            new_policy = deepcopy(active_policy)
+            new_policy["thresholds"] = {
+                "save": 10,
+                "alert": 20,
+                "action_required": 30,
+            }
+            return _learning(
+                active_policy,
+                new_policy=new_policy,
+                proposal_id="proposal-high-cli",
+            )
+
+    monkeypatch.setattr(cli_module, "LearningPolicyAgent", HighRiskLearningAgent)
+
+    result = runner.invoke(
+        app,
+        [
+            "calibrate",
+            "--apply",
+            "--yes",
+            "--cwd",
+            str(project_root),
+            "--config-dir",
+            str(config),
+            "--state-dir",
+            str(state),
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "Only low-risk proposals can be applied" in result.output
+    assert load_signal_policy(config / "signal_policy.yaml") == policy

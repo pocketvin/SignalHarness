@@ -24,9 +24,12 @@ historical signals and feedback and writes:
 - `recommendation`
 
 All proposals require approval. Calibration does not modify
-`configs/signal_policy.yaml`, skill files, or `configs/watchlist.yaml`. Policy
-application remains a separate, explicit `calibrate --apply` operation guarded
-by user confirmation.
+`configs/signal_policy.yaml`, skill files, or `configs/watchlist.yaml`.
+`calibrate --apply` goes through the same local staging gate as
+`learning-stage` / `learning-review` / `learning-apply`: without `--yes` it
+stages and prints review/apply instructions; with `--yes`, only low-risk
+proposals with a passing replay gate can be applied. High-risk or replay-failed
+proposals remain staged for human review.
 
 Prompt construction never places complete feedback history at the front of the
 system prompt. `PromptContextBuilder` compresses feedback count and recent notes

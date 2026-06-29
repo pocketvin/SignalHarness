@@ -224,6 +224,7 @@ class TraceStep(BaseModel):
     output_count: int | None = Field(default=None, ge=0)
     duration_ms: int = Field(ge=0)
     detail: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
     failed_sources: list[str] = Field(default_factory=list)
     agent_name: str | None = None
     mode: str | None = None

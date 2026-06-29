@@ -124,6 +124,17 @@ def _repair_details(result: Any, step: str) -> list[str]:
     return [item.detail for item in result.trace.steps if item.step == step]
 
 
+def _repair_metadata(result: Any, step: str) -> list[dict[str, Any]]:
+    payloads: list[dict[str, Any]] = []
+    for item in result.trace.steps:
+        if item.step != step:
+            continue
+        repair = item.metadata.get("repair")
+        if isinstance(repair, dict):
+            payloads.append(repair)
+    return payloads
+
+
 def test_explicit_impact_to_evidence_repair_executes(
     project_root: Path,
     tmp_path: Path,
@@ -148,6 +159,11 @@ def test_explicit_impact_to_evidence_repair_executes(
     assert _repair_details(result, "repair_requested")
     assert _repair_details(result, "repair_context_evidence")
     assert _repair_details(result, "repair_impact")
+    requested_metadata = _repair_metadata(result, "repair_requested")[0]
+    assert requested_metadata["triggered_by"] == "ImpactAnalystAgent"
+    assert requested_metadata["target_agent"] == "context_evidence"
+    assert requested_metadata["event_ids"] == ["demo-001"]
+    assert requested_metadata["repair_round"] == 1
     assert sum(call.output_schema == "ImpactOutput" for call in provider.calls) == 2
     repair_llm_steps = [
         step
@@ -157,6 +173,10 @@ def test_explicit_impact_to_evidence_repair_executes(
     ]
     assert repair_llm_steps
     assert all("summary_step=repair_" in step.detail for step in repair_llm_steps)
+    assert all(
+        step.metadata.get("repair", {}).get("internal_llm_call") is True
+        for step in repair_llm_steps
+    )
     summary = write_trace_summary(
         tmp_path / "trace-summary",
         result.trace.steps,
@@ -324,7 +344,10 @@ def test_explicit_action_to_impact_repair_executes(
 
     result = _scan(project_root, tmp_path, provider)
 
-    assert any("Action→Impact" in detail for detail in _repair_details(result, "repair_impact"))
+    assert any(
+        "Action→Impact" in detail
+        for detail in _repair_details(result, "repair_impact")
+    )
     assert _repair_details(result, "repair_action")
 
 
@@ -336,7 +359,11 @@ def test_action_deterministic_repair_trigger_and_no_recursive_evidence(
         {
             "ImpactOutput": [
                 _impact_output(semantic=35, risk="low").model_dump_json(),
-                _impact_output(ids=["demo-001"], semantic=65, risk="medium").model_dump_json(),
+                _impact_output(
+                    ids=["demo-001"],
+                    semantic=65,
+                    risk="medium",
+                ).model_dump_json(),
             ],
             "ActionOutput": [
                 _action_output(requested_actions=["create_github_issue"]).model_dump_json(),
@@ -393,9 +420,14 @@ def test_action_repair_is_blocked_after_impact_repair_uses_single_round(
     )
 
     blocked = "\n".join(_repair_details(result, "repair_blocked"))
+    blocked_metadata = _repair_metadata(result, "repair_blocked")[0]
     assert "triggered_by=ActionPlannerAgent" in blocked
     assert "target_agent=impact" in blocked
     assert "repair_round_budget_exceeded" in blocked
+    assert blocked_metadata["triggered_by"] == "ActionPlannerAgent"
+    assert blocked_metadata["target_agent"] == "impact"
+    assert blocked_metadata["blocked_reason"] == "repair_round_budget_exceeded"
+    assert blocked_metadata["repair_round"] == 2
     assert not any(
         "Action→Impact" in detail
         for detail in _repair_details(result, "repair_impact")

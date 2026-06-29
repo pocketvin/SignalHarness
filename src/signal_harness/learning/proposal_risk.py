@@ -39,10 +39,10 @@ class ProposalRiskClassifier:
         risk = self._raise_if(
             risk,
             "medium",
-            bool(proposal.changed_keywords or proposal.changed_sources),
+            bool(proposal.changed_sources),
         )
         if proposal.changed_keywords:
-            reasons.append("changed_keywords are reviewable low/medium-risk tuning.")
+            reasons.append("changed_keywords are reviewable low-risk tuning.")
         if proposal.changed_sources:
             reasons.append("changed_sources require review before source weighting changes.")
 

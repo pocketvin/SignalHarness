@@ -23,6 +23,16 @@ READ_ONLY_EVAL_TOOLS = {
     "signal_memory",
     "signal_score",
 }
+REPAIR_EXECUTED_STEPS = {
+    "repair_context_evidence",
+    "repair_impact",
+    "repair_action",
+}
+REPAIR_SUMMARY_STEPS = {
+    "repair_requested",
+    *REPAIR_EXECUTED_STEPS,
+    "repair_blocked",
+}
 
 
 class EvalSummary(BaseModel):
@@ -170,25 +180,22 @@ def build_model_eval_summary(
     budget_blocks = sum(step.budget_blocked_count or 0 for step in trace)
     blocked_tool_count = sum(len(step.blocked_tools) for step in trace)
     tool_error_count = sum(len(step.tool_errors) for step in trace)
+    repair_step_names = [_repair_step_name(step) for step in trace]
     repair_requested_count = sum(
-        1 for step in trace if step.step == "repair_requested"
+        1 for name in repair_step_names if name == "repair_requested"
     )
     repair_executed_count = sum(
         1
-        for step in trace
-        if step.step in {"repair_context_evidence", "repair_impact", "repair_action"}
+        for name in repair_step_names
+        if name in REPAIR_EXECUTED_STEPS
     )
-    repair_blocked_count = sum(1 for step in trace if step.step == "repair_blocked")
+    repair_blocked_count = sum(
+        1 for name in repair_step_names if name == "repair_blocked"
+    )
     repair_fallback_count = sum(
         1
-        for step in trace
-        if step.step
-        in {
-            "repair_context_evidence",
-            "repair_impact",
-            "repair_action",
-            "repair_blocked",
-        }
+        for name, step in zip(repair_step_names, trace, strict=True)
+        if name in {*REPAIR_EXECUTED_STEPS, "repair_blocked"}
         and step.fallback_used
     )
     decisions = Counter(item.decision.value for item in assessments)
@@ -276,3 +283,18 @@ def _render_model_eval_markdown(summary: ModelEvalSummary) -> str:
 
 def _rate(numerator: int, denominator: int, *, default: float = 0.0) -> float:
     return round(numerator / denominator, 4) if denominator else default
+
+
+def _repair_step_name(step: TraceStep) -> str:
+    if step.step in REPAIR_SUMMARY_STEPS:
+        return step.step
+    repair = step.metadata.get("repair")
+    if isinstance(repair, dict):
+        if repair.get("internal_llm_call") is True:
+            return step.step
+        summary_step = repair.get("summary_step")
+        if isinstance(summary_step, str) and summary_step in REPAIR_SUMMARY_STEPS:
+            return summary_step
+        if repair.get("blocked_reason"):
+            return "repair_blocked"
+    return step.step

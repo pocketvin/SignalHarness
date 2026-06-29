@@ -216,6 +216,16 @@ def test_dashboard_and_trace_summary_show_repair_pass(tmp_path: Path) -> None:
                 "triggered_by=ImpactAnalystAgent; "
                 "target_agent=context_evidence; event_ids=demo-001; reason=test"
             ),
+            "metadata": {
+                "repair": {
+                    "triggered_by": "ImpactAnalystAgent",
+                    "target_agent": "context_evidence",
+                    "event_ids": ["demo-001"],
+                    "reason": "test",
+                    "repair_round": 1,
+                    "summary_step": "repair_context_evidence",
+                }
+            },
         },
         {
             "step": "repair_context_evidence",
@@ -225,6 +235,16 @@ def test_dashboard_and_trace_summary_show_repair_pass(tmp_path: Path) -> None:
             "input_count": 1,
             "output_count": 1,
             "detail": "Executed bounded Impact→ContextEvidence repair; event_ids=demo-001",
+            "metadata": {
+                "repair": {
+                    "triggered_by": "ImpactAnalystAgent",
+                    "target_agent": "context_evidence",
+                    "event_ids": ["demo-001"],
+                    "reason": "test",
+                    "repair_round": 1,
+                    "summary_step": "repair_context_evidence",
+                }
+            },
         },
         {
             "step": "repair_impact",
@@ -234,6 +254,16 @@ def test_dashboard_and_trace_summary_show_repair_pass(tmp_path: Path) -> None:
             "input_count": 1,
             "output_count": 1,
             "detail": "Reran ImpactAnalystAgent after evidence repair; event_ids=demo-001",
+            "metadata": {
+                "repair": {
+                    "triggered_by": "ContextEvidenceAgent",
+                    "target_agent": "impact",
+                    "event_ids": ["demo-001"],
+                    "reason": "Reran ImpactAnalystAgent after evidence repair.",
+                    "repair_round": 1,
+                    "summary_step": "repair_impact",
+                }
+            },
         },
         {
             "step": "repair_action",
@@ -256,6 +286,15 @@ def test_dashboard_and_trace_summary_show_repair_pass(tmp_path: Path) -> None:
                 "triggered_by=ActionPlannerAgent; target_agent=impact; "
                 "event_ids=demo-002; reason=repair_round_budget_exceeded"
             ),
+            "metadata": {
+                "repair": {
+                    "triggered_by": "ActionPlannerAgent",
+                    "target_agent": "impact",
+                    "event_ids": ["demo-002"],
+                    "blocked_reason": "repair_round_budget_exceeded",
+                    "repair_round": 2,
+                }
+            },
         },
     ]
     (output_dir / "task_trace.json").write_text(
@@ -278,13 +317,20 @@ def test_dashboard_and_trace_summary_show_repair_pass(tmp_path: Path) -> None:
     assert "repair_impact" in html
     assert "repair_action" in html
     assert "repair_blocked" in html
-    assert "Impact→ContextEvidence" in html
+    assert "Triggered by" in html
+    assert "Target" in html
+    assert "Round" in html
+    assert "ImpactAnalystAgent" in html
+    assert "context_evidence" in html
+    assert "repair_round_budget_exceeded" in html
+    assert "Reran ActionPlannerAgent after impact repair" in html
     assert "## Agent Repair Pass" in text
     assert "- requested: 1" in text
     assert "- executed: 3" in text
     assert "- blocked: 1" in text
     assert "- fallback: 1" in text
     assert "- event_ids: demo-001, demo-002" in text
+    assert "triggered_by=ImpactAnalystAgent" in text
 
 
 def test_scan_operational_outputs_and_learning_observation_modes(

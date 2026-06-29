@@ -129,13 +129,7 @@ def _render_dashboard(
         "</li>"
         for step in tool_steps
     ) or "<li>No tool calls recorded.</li>"
-    repair_items = "".join(
-        "<li>"
-        f"{_e(step.get('step'))}: {_e(step.get('detail'))} "
-        f"(input={_e(step.get('input_count'))}, output={_e(step.get('output_count'))})"
-        "</li>"
-        for step in repair_steps
-    ) or "<li>No repair pass was triggered.</li>"
+    repair_items = _repair_table(repair_steps)
     score_items = "".join(
         _score_breakdown_row(item)
         for item in sorted(
@@ -204,7 +198,7 @@ def _render_dashboard(
   <section><h2>Top affected modules</h2><ul>{module_items}</ul></section>
   <section><h2>Model, profile, and limits</h2><ul>{model_items}</ul></section>
   <section><h2>Agent trace and tools</h2><ul>{trace_items}</ul></section>
-  <section><h2>Agent repair pass</h2><ul>{repair_items}</ul></section>
+  <section><h2>Agent repair pass</h2>{repair_items}</section>
   <section>
     <h2>Score breakdown</h2>
     <table><thead><tr><th>Signal</th><th>Final</th><th>Base</th><th>Semantic</th><th>Evidence</th><th>Weights</th></tr></thead><tbody>{score_items}</tbody></table>
@@ -270,6 +264,70 @@ def _score_breakdown_row(assessment: dict[str, Any]) -> str:
         "<td colspan=\"4\">No structured breakdown</td>"
         "</tr>"
     )
+
+
+def _repair_table(repair_steps: list[dict[str, Any]]) -> str:
+    if not repair_steps:
+        return "<p>No repair pass was triggered.</p>"
+    rows = "".join(_repair_row(step) for step in repair_steps)
+    return (
+        "<table>"
+        "<thead><tr>"
+        "<th>Step</th><th>Triggered by</th><th>Target</th><th>Events</th>"
+        "<th>Status</th><th>Round</th><th>Reason / Blocked reason</th>"
+        "</tr></thead>"
+        f"<tbody>{rows}</tbody>"
+        "</table>"
+    )
+
+
+def _repair_row(step: dict[str, Any]) -> str:
+    repair = _repair_info(step)
+    reason = repair.get("blocked_reason") or repair.get("reason") or step.get("detail")
+    events = repair.get("event_ids")
+    if isinstance(events, list):
+        event_text = ", ".join(str(item) for item in events)
+    else:
+        event_text = str(events or "")
+    return (
+        "<tr>"
+        f"<td>{_e(step.get('step'))}</td>"
+        f"<td>{_e(repair.get('triggered_by'))}</td>"
+        f"<td>{_e(repair.get('target_agent'))}</td>"
+        f"<td>{_e(event_text)}</td>"
+        f"<td>{_e(step.get('status'))}</td>"
+        f"<td>{_e(repair.get('repair_round'))}</td>"
+        f"<td>{_e(reason)}</td>"
+        "</tr>"
+    )
+
+
+def _repair_info(step: dict[str, Any]) -> dict[str, Any]:
+    metadata = step.get("metadata")
+    if isinstance(metadata, dict):
+        repair = metadata.get("repair")
+        if isinstance(repair, dict) and repair:
+            return dict(repair)
+    detail = str(step.get("detail") or "")
+    event_ids = _detail_value(detail, "event_ids")
+    return {
+        "triggered_by": _detail_value(detail, "triggered_by"),
+        "target_agent": _detail_value(detail, "target_agent"),
+        "event_ids": [
+            item.strip() for item in event_ids.split(",") if item.strip()
+        ],
+        "repair_round": "",
+        "reason": _detail_value(detail, "reason") or detail,
+        "blocked_reason": "",
+    }
+
+
+def _detail_value(detail: str, key: str) -> str:
+    marker = f"{key}="
+    if marker not in detail:
+        return ""
+    tail = detail.split(marker, 1)[1]
+    return tail.split(";", 1)[0].strip()
 
 
 def _e(value: object) -> str:

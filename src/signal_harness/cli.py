@@ -37,7 +37,6 @@ from signal_harness.signal.feedback import (
     save_policy_proposal,
 )
 from signal_harness.signal.policy import (
-    apply_policy_proposal,
     load_signal_policy,
     render_policy_diff,
 )
@@ -478,7 +477,11 @@ def feedback(
 
 @app.command()
 def calibrate(
-    apply: bool = typer.Option(False, "--apply", help="Apply after explicit confirmation"),
+    apply: bool = typer.Option(
+        False,
+        "--apply",
+        help="Stage through the learning gate; --yes applies only if low-risk and replay-passed",
+    ),
     yes: bool = typer.Option(False, "--yes", help="Confirm policy replacement non-interactively"),
     cwd: Path = typer.Option(Path.cwd(), "--cwd", hidden=True),
     config_dir: Path = typer.Option(Path("configs"), "--config-dir"),
@@ -541,15 +544,38 @@ def calibrate(
     typer.echo(render_policy_diff(proposal.old_policy, proposal.new_policy))
     typer.echo(f"Replay recommendation: {replay.recommendation}")
     if not apply:
-        typer.echo("Review the proposal; rerun with --apply to request policy replacement.")
+        typer.echo(
+            "Review the proposal; use learning-stage, learning-review, and "
+            "learning-apply --yes to request policy replacement."
+        )
         return
-    confirmed = yes or typer.confirm("Apply this proposal to signal_policy.yaml?")
-    SignalPermissionGuard(policy).require(
-        "modify_signal_policy",
-        confirmed=confirmed,
+    staged = stage_learning_proposal(
+        state_dir=state,
+        output_dir=resolved_outputs,
+        learning=learning,
+        replay=replay,
     )
-    apply_policy_proposal(policy_path, proposal.new_policy, approved=confirmed)
-    typer.echo(f"Applied policy proposal to {policy_path}")
+    typer.echo(f"Staged proposal: {staged.proposal_id}")
+    typer.echo(f"Risk: {staged.risk.risk_level}")
+    typer.echo(f"Replay gate passed: {str(staged.risk.replay_gate_passed).lower()}")
+    if not yes:
+        typer.echo(
+            "calibrate --apply now goes through learning staging. "
+            "Review with `signal-harness learning-review`, then apply with "
+            f"`signal-harness learning-apply --proposal-id {staged.proposal_id} --yes`."
+        )
+        typer.echo("Policy, watchlist, and skill changes were not applied.")
+        return
+    try:
+        applied_path = apply_staged_learning(
+            state_dir=state,
+            config_dir=config,
+            proposal_id=staged.proposal_id,
+            yes=True,
+        )
+    except (PermissionError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(f"Applied staged learning proposal to {applied_path}")
 
 
 @app.command("learning-stage")
