@@ -45,6 +45,8 @@ class ModelEvalSummary(BaseModel):
     provider: str
     model: str
     model_profile: str
+    run_state_mode: str
+    isolated_state: bool
     schema_valid_rate: float = Field(ge=0, le=1)
     retry_rate: float = Field(ge=0, le=1)
     fallback_rate: float = Field(ge=0, le=1)
@@ -57,6 +59,10 @@ class ModelEvalSummary(BaseModel):
     action_required_count: int = Field(ge=0)
     alert_count: int = Field(ge=0)
     average_latency_ms: float = Field(ge=0)
+    repair_requested_count: int = Field(ge=0)
+    repair_executed_count: int = Field(ge=0)
+    repair_blocked_count: int = Field(ge=0)
+    repair_fallback_count: int = Field(ge=0)
 
 
 def build_eval_summary(
@@ -135,6 +141,8 @@ def build_model_eval_summary(
     provider: str,
     model: str,
     model_profile: str,
+    run_state_mode: str = "shared",
+    isolated_state: bool = False,
 ) -> ModelEvalSummary:
     """Build simple model-comparison metrics from one or more local runs."""
 
@@ -162,12 +170,35 @@ def build_model_eval_summary(
     budget_blocks = sum(step.budget_blocked_count or 0 for step in trace)
     blocked_tool_count = sum(len(step.blocked_tools) for step in trace)
     tool_error_count = sum(len(step.tool_errors) for step in trace)
+    repair_requested_count = sum(
+        1 for step in trace if step.step == "repair_requested"
+    )
+    repair_executed_count = sum(
+        1
+        for step in trace
+        if step.step in {"repair_context_evidence", "repair_impact", "repair_action"}
+    )
+    repair_blocked_count = sum(1 for step in trace if step.step == "repair_blocked")
+    repair_fallback_count = sum(
+        1
+        for step in trace
+        if step.step
+        in {
+            "repair_context_evidence",
+            "repair_impact",
+            "repair_action",
+            "repair_blocked",
+        }
+        and step.fallback_used
+    )
     decisions = Counter(item.decision.value for item in assessments)
     return ModelEvalSummary(
         runs=runs,
         provider=provider,
         model=model,
         model_profile=model_profile,
+        run_state_mode=run_state_mode,
+        isolated_state=isolated_state,
         schema_valid_rate=_rate(schema_valid_count, len(llm_steps), default=1.0),
         retry_rate=_rate(retry_count, len(llm_steps)),
         fallback_rate=_rate(fallback_count, len(llm_steps)),
@@ -189,6 +220,10 @@ def build_model_eval_summary(
         )
         if llm_steps
         else 0.0,
+        repair_requested_count=repair_requested_count,
+        repair_executed_count=repair_executed_count,
+        repair_blocked_count=repair_blocked_count,
+        repair_fallback_count=repair_fallback_count,
     )
 
 
@@ -218,13 +253,22 @@ def _render_model_eval_markdown(summary: ModelEvalSummary) -> str:
         f"- provider: {summary.provider}",
         f"- model: {summary.model}",
         f"- model_profile: {summary.model_profile}",
+        f"- run_state_mode: {summary.run_state_mode}",
+        f"- isolated_state: {str(summary.isolated_state).lower()}",
         f"- runs: {summary.runs}",
         "",
         "## Metrics",
         "",
     ]
     for key, value in summary.model_dump(mode="json").items():
-        if key in {"provider", "model", "model_profile", "runs"}:
+        if key in {
+            "provider",
+            "model",
+            "model_profile",
+            "run_state_mode",
+            "isolated_state",
+            "runs",
+        }:
             continue
         lines.append(f"- {key}: {value}")
     return "\n".join(lines).rstrip() + "\n"

@@ -67,8 +67,10 @@ and lightweight multi-source clusters.
 This remains a controlled runner loop, not provider-native function calling.
 It also avoids implementing a complete handoff-as-tool protocol.
 `AgentLoopLimits` bounds provider timeouts, schema retries, tool budgets, and
-future repair limits. Provider timeout falls back deterministically and is
-visible in trace as `provider_timeout`.
+bounded repair limits. It separates per-Agent provider call timeout from the
+whole Agent-team run timeout. Provider timeout falls back deterministically and
+is visible in trace as `provider_timeout`; whole-run timeout is visible as
+`agent_team_run_timeout`.
 
 ## Model eval
 
@@ -76,7 +78,9 @@ visible in trace as `provider_timeout`.
 writes `outputs/model_eval_summary.json` plus Markdown. The point is not a
 large benchmark; it is a consistent local comparison across models using
 schema valid rate, retry/fallback rate, timeout count, tool budget blocks,
-blocked tools, tool errors, decisions, and latency.
+blocked tools, tool errors, decisions, repair counts, run-state isolation mode,
+and latency. For `--runs N` greater than one, state is isolated per run under
+`.signal-harness/model-eval/run-001`, `run-002`, and so on.
 
 ## Skipped routes and audit defaults
 
@@ -93,13 +97,36 @@ GitHub Actions, cron, or launchd. A deterministic `AlertPolicy` writes
 `.signal-harness/alert_state.json`; it does not send external notifications.
 `signal-harness dashboard` writes a static `outputs/dashboard.html`, and
 `signal-harness digest --period daily|weekly` writes Markdown review digests.
+The dashboard includes Agent repair pass status, guarded score breakdowns,
+model/profile/limit metadata, and staged learning proposals.
 
 ## Bounded repair boundary
 
-Repair is intentionally bounded. The current build reserves limits for one
-future repair round and a small event cap, but does not enable an open-ended
-ReAct loop. LearningPolicyAgent remains downstream review-only and cannot
-repair upstream Agents or auto-apply policy, watchlist, or skill changes.
+Repair is intentionally bounded and enabled only inside the fixed pipeline.
+`ImpactAnalystAgent` may suggest ContextEvidence repair, and
+`ActionPlannerAgent` may suggest Impact repair. Python enforces repair round
+limits, event caps, and the shared tool budget; budgets do not reset and repair
+does not recurse. This is not provider-native function calling and not a full
+handoff-as-tool system. LearningPolicyAgent remains downstream review-only and
+cannot repair upstream Agents or auto-apply policy, watchlist, or skill
+changes.
+
+## Learning staging
+
+Learning proposals now go through a local staging gate:
+
+```bash
+uv run signal-harness learning-stage
+uv run signal-harness learning-review
+uv run signal-harness learning-apply --proposal-id <id> --yes
+```
+
+The source of truth is `.signal-harness/learning_staging.json`; demo copies are
+written to `outputs/latest_learning_staging.json` and
+`outputs/latest_learning_risk_report.md`. Threshold, permission, tool
+permission, project profile, watchlist deletion, external notification, and
+GitHub issue changes are high risk. Missing or negative replay keeps a proposal
+staged for human review rather than auto-applying it.
 
 ## Engineering choices
 

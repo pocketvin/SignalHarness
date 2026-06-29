@@ -235,6 +235,31 @@ class SignalHarnessWorkflow:
                 tool_executor=self.executor,
                 loop_limits=self.agent_loop_limits,
             )
+            self.trace.steps.append(
+                TraceStep(
+                    step="agent_loop_limits",
+                    status="success",
+                    agent="LLMAgentTeamRunner",
+                    duration_ms=0,
+                    model=provider.model,
+                    detail=(
+                        f"max_schema_retries={runner.loop_limits.max_schema_retries}; "
+                        f"max_agent_call_seconds="
+                        f"{runner.loop_limits.max_agent_call_seconds}; "
+                        f"max_run_seconds={runner.loop_limits.max_run_seconds}; "
+                        f"max_total_tool_requests_per_run="
+                        f"{runner.loop_limits.max_total_tool_requests_per_run}; "
+                        f"max_tool_requests_per_event="
+                        f"{runner.loop_limits.max_tool_requests_per_event}; "
+                        f"max_tool_output_chars="
+                        f"{runner.loop_limits.max_tool_output_chars}; "
+                        f"max_repair_rounds_per_run="
+                        f"{runner.loop_limits.max_repair_rounds_per_run}; "
+                        f"max_repair_events_per_run="
+                        f"{runner.loop_limits.max_repair_events_per_run}"
+                    ),
+                )
+            )
             memory_snapshot = MemoryBundle.from_paths(
                 config_dir=self.config_dir,
                 state_dir=self.state_dir,
@@ -245,22 +270,61 @@ class SignalHarnessWorkflow:
                     agent="LLMAgentTeamRunner",
                     input_count=len(events),
                 ) as state:
-                    assessments, learning_observation = await runner.run_scan(
-                        events,
-                        project_profile=profile,
-                        policy=policy,
-                        memory_snapshot=memory_snapshot,
-                        clusters=clusters,
-                        noise_assessments=noise_assessments,
-                        failed_sources=collection.failed_sources,
-                        run_id=run_id,
-                        seen_hashes=seen_hashes,
-                        feedback_history=feedback_history,
+                    assessments, learning_observation = await asyncio.wait_for(
+                        runner.run_scan(
+                            events,
+                            project_profile=profile,
+                            policy=policy,
+                            memory_snapshot=memory_snapshot,
+                            clusters=clusters,
+                            noise_assessments=noise_assessments,
+                            failed_sources=collection.failed_sources,
+                            run_id=run_id,
+                            seen_hashes=seen_hashes,
+                            feedback_history=feedback_history,
+                        ),
+                        timeout=runner.loop_limits.max_run_seconds,
                     )
                     state["output_count"] = len(assessments)
                     state["detail"] = (
                         "Five LLM Agent calls completed; Python validated schemas, "
                         "scoring, permissions, and fallback."
+                    )
+            except (TimeoutError, asyncio.TimeoutError):
+                detail = (
+                    "agent_team_run_timeout after "
+                    f"{runner.loop_limits.max_run_seconds}s; deterministic fallback "
+                    "generated complete audit assessments."
+                )
+                self.trace.steps.append(
+                    TraceStep(
+                        step="agent_team_run_timeout",
+                        status="success",
+                        agent="LLMAgentTeamRunner",
+                        input_count=len(events),
+                        output_count=len(events),
+                        duration_ms=0,
+                        fallback_used=True,
+                        detail=detail,
+                        error=detail,
+                    )
+                )
+                supervisor = SupervisorAgent(self.executor, trace=self.trace)
+                with self.trace.step(
+                    "deterministic_fallback",
+                    agent=supervisor.name,
+                    input_count=len(events),
+                ) as fallback_state:
+                    assessments = await supervisor.assess_batch(
+                        events,
+                        project_profile=profile,
+                        policy=policy,
+                        seen_hashes=seen_hashes,
+                        feedback_history=feedback_history,
+                    )
+                    fallback_state["output_count"] = len(assessments)
+                    fallback_state["detail"] = (
+                        "Agent team run timeout used deterministic guardrail fallback."
                     )
             finally:
                 if self.provider is None:

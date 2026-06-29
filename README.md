@@ -39,6 +39,8 @@ Memory is infrastructure, not an Agent. The four stores are `ProjectMemory`,
   execution, and observations.
 - `ImpactAnalystAgent` cannot emit the authoritative `final_score`.
 - `LearningPolicyAgent` only creates review-only proposals.
+- Repair is bounded by Python-owned run limits. Agents may suggest only
+  Impact→Evidence or Action→Impact repair; there is no recursive handoff loop.
 - `mock-agent` runs offline with mock-safe tool outputs and no API key.
 
 ## Run modes
@@ -146,6 +148,21 @@ watchlists, or modify skills.
 
 No proposal is applied automatically. `signal_policy.yaml`, skill files, and
 `watchlist.yaml` change only through a separate explicit approval path.
+The staged approval path is:
+
+```bash
+uv run signal-harness learning-stage
+uv run signal-harness learning-review
+uv run signal-harness learning-apply --proposal-id <id> --yes
+```
+
+`learning-stage` writes `.signal-harness/learning_staging.json` and a demo copy
+at `outputs/latest_learning_staging.json`, plus
+`outputs/latest_learning_risk_report.md`. The deterministic risk classifier
+marks threshold, permission, watchlist deletion, external notification, GitHub
+issue, project profile, and tool-permission changes as high risk. A replay gate
+must pass before a low-risk proposal can be applied; missing replay keeps the
+proposal staged for review.
 
 ## Trace and outputs
 
@@ -175,10 +192,12 @@ fallback status, duration, requested and executed tools, budget-blocked tools,
 blocked tools, permission checks, cache events, context hashes, and errors.
 Deterministic stages remain visible alongside
 `llm_agent_call` records.
-`AgentLoopLimits` bounds schema retries, LLM call timeout, tool request budget,
-tool output size, and future repair-pass limits. Provider timeouts are recorded
-in trace as `provider_timeout` schema/error details and trigger deterministic
-fallback.
+`AgentLoopLimits` bounds schema retries, per-Agent provider call timeout, whole
+Agent-team run timeout, tool request budget, tool output size, and bounded
+repair pass limits. Provider timeouts are recorded in trace as
+`provider_timeout` schema/error details. Whole-run timeouts are recorded as
+`agent_team_run_timeout`. Both paths trigger deterministic fallback instead of
+hanging.
 
 ## Operational layer
 
@@ -207,7 +226,11 @@ notifications, and no Slack/Discord/Telegram/Feishu dependency is included.
 `model-eval` writes `outputs/model_eval_summary.json` and
 `outputs/model_eval_summary.md`. It compares models under the same Harness
 metrics: schema valid rate, retry/fallback rate, timeout count, tool budget
-blocks, blocked tools, tool errors, decision counts, and average LLM latency.
+blocks, blocked tools, tool errors, decision counts, repair counts, run-state
+isolation mode, and average LLM latency. When `--runs N` is greater than one,
+each run gets an isolated state directory under
+`.signal-harness/model-eval/run-001`, `run-002`, and so on; the summary remains
+under `outputs/`.
 
 ## Controlled evidence tools and context
 
@@ -224,6 +247,30 @@ ContextEvidenceAgent uses a two-turn controlled loop:
 
 This is controlled orchestration by the SignalHarness runner, not
 provider-native function calling and not a complete handoff-as-tool system.
+
+## Bounded repair pass
+
+SignalHarness keeps the main pipeline fixed:
+
+```text
+Supervisor → Evidence plan/tools/final → Impact
+  → optional Evidence repair → optional Impact rerun
+  → Action → optional Impact repair → optional Action rerun
+  → Learning
+```
+
+Only two repair directions exist:
+
+- `ImpactAnalystAgent` may suggest `target_agent=context_evidence` when evidence
+  is too weak for a high-risk impact claim.
+- `ActionPlannerAgent` may suggest `target_agent=impact` when actions and
+  impact risk appear inconsistent.
+
+Python decides whether repair runs. `max_repair_rounds_per_run`,
+`max_repair_events_per_run`, and the shared tool budget are enforced by the
+runner; budgets do not reset for repair. Repair events are merged back into the
+existing evidence/impact/action outputs. Learning cannot repair upstream Agents,
+and repair never becomes provider-native function calling.
 
 Prompt context is layered as static instructions, stable project/policy
 summary, semi-stable memory summary, dynamic task data, and volatile run
@@ -264,6 +311,14 @@ fallback may still populate evidence, impact, or action-shaped fields so the
 stored assessment remains complete for audit. Those values are audit defaults,
 not downstream LLM Agent execution; the trace marks them as
 `skipped_event_audit_fallback`.
+
+## Dashboard explainability
+
+`signal-harness dashboard` writes a static local HTML file with high-priority
+signals, alerts, source health, top modules, Agent trace/tool controls, Agent
+repair pass status, guarded score breakdowns, model/profile/limit metadata, and
+learning staging status. If no repair pass was triggered, the dashboard says so
+explicitly.
 
 ## Project structure
 
@@ -308,9 +363,12 @@ See:
 - [Demo script](docs/DEMO_SCRIPT.md)
 - [LLM Agent architecture](docs/LLM_AGENT_ARCHITECTURE.md)
 - [Self-improvement loop](docs/SELF_IMPROVEMENT_LOOP.md)
+- [Bounded repair pass](docs/REPAIR_PASS.md)
+- [Model eval results](docs/MODEL_EVAL_RESULTS.md)
 - [Provider integration](docs/PROVIDER_INTEGRATION.md)
 - [Interview guide](docs/INTERVIEW_GUIDE.md)
 - [Real agent-mode smoke test](docs/SMOKE_TEST_AGENT_MODE.md)
+- [Real source smoke test](docs/REAL_SOURCE_SMOKE.md)
 - [Upstream attribution](docs/UPSTREAM_ATTRIBUTION.md)
 - [Example fixtures](examples/signal_harness/README.md)
 

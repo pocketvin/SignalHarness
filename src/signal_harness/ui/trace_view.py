@@ -27,6 +27,11 @@ FLOW_ORDER = (
     "noise_filter",
     "cluster_signals",
     "llm_agent_call",
+    "repair_requested",
+    "repair_context_evidence",
+    "repair_impact",
+    "repair_action",
+    "repair_blocked",
     "skipped_event_audit_fallback",
     "deterministic_fallback",
     "classify",
@@ -61,6 +66,8 @@ def format_trace_summary(steps: Iterable[TraceStep]) -> str:
             )
         if step.error:
             lines.append(f"  error: {step.error}")
+        if step.step.startswith("repair_") and step.detail:
+            lines.append(f"  repair_detail: {step.detail}")
         if step.source_types_observed:
             lines.append(
                 "  source_types_observed: "
@@ -334,6 +341,57 @@ def write_trace_summary(
                 f"- exit_condition: {evidence_final.exit_condition or 'unknown'}",
             ]
         )
+    repair_steps = [
+        step
+        for step in step_list
+        if step.step
+        in {
+            "repair_requested",
+            "repair_context_evidence",
+            "repair_impact",
+            "repair_action",
+            "repair_blocked",
+        }
+    ]
+    if repair_steps:
+        requested = sum(1 for step in repair_steps if step.step == "repair_requested")
+        executed = sum(
+            1
+            for step in repair_steps
+            if step.step
+            in {"repair_context_evidence", "repair_impact", "repair_action"}
+        )
+        blocked = sum(1 for step in repair_steps if step.step == "repair_blocked")
+        fallback = sum(step.fallback_used for step in repair_steps)
+        event_ids = _repair_event_ids(repair_steps)
+        lines.extend(
+            [
+                "",
+                "## Agent Repair Pass",
+                "",
+                f"- requested: {requested}",
+                f"- executed: {executed}",
+                f"- blocked: {blocked}",
+                f"- fallback: {fallback}",
+                f"- event_ids: {', '.join(event_ids) if event_ids else 'none'}",
+                "",
+            ]
+        )
+        lines.extend(
+            (
+                f"- `{step.step}`: {step.detail or 'no detail'}"
+                for step in repair_steps
+            )
+        )
+    else:
+        lines.extend(
+            [
+                "",
+                "## Agent Repair Pass",
+                "",
+                "No repair pass was triggered.",
+            ]
+        )
     skipped_audit_steps = [
         step
         for step in step_list
@@ -357,3 +415,15 @@ def write_trace_summary(
     path = root / "trace_summary.md"
     atomic_write_text(path, "\n".join(lines).rstrip() + "\n")
     return path
+
+
+def _repair_event_ids(steps: Iterable[TraceStep]) -> list[str]:
+    event_ids: list[str] = []
+    for step in steps:
+        marker = "event_ids="
+        if marker not in step.detail:
+            continue
+        tail = step.detail.split(marker, 1)[1]
+        value = tail.split(";", 1)[0]
+        event_ids.extend(item.strip() for item in value.split(",") if item.strip())
+    return list(dict.fromkeys(event_ids))

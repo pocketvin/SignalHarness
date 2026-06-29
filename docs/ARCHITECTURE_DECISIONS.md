@@ -95,15 +95,18 @@ native tool calling.
 
 `signal-harness model-eval` computes local metrics such as schema valid rate,
 retry/fallback rate, timeout count, tool budget blocks, blocked tools, tool
-errors, decision counts, and average latency. It is intentionally local and
-does not depend on Langfuse, Ragas, or any external eval platform.
+errors, decision counts, repair counts, run-state isolation mode, and average
+latency. It is intentionally local and does not depend on Langfuse, Ragas, or
+any external eval platform.
 
 ## Repair boundary
 
 Bounded repair is a limited design direction, not an open-ended ReAct loop.
-The runner exposes limits for one repair round and a small event cap, but
-LearningPolicyAgent cannot repair upstream Agents and cannot apply policy,
-watchlist, permission, or skill changes automatically.
+The runner supports only Impact→ContextEvidence and Action→Impact repair.
+It enforces repair round and event caps, reuses the same tool budget, does not
+reset budgets for repair, and does not allow recursive repair. LearningPolicyAgent
+cannot repair upstream Agents and cannot apply policy, watchlist, permission, or
+skill changes automatically.
 
 ## Learning boundary
 
@@ -111,6 +114,20 @@ watchlist, permission, or skill changes automatically.
 review. SignalHarness saves these artifacts, including
 `latest_learning_observation.json`, but does not automatically apply policy
 changes, edit watchlists, or modify skills.
+
+Learning staging adds a deterministic risk classifier and replay gate before
+any explicit apply. The state source of truth is
+`.signal-harness/learning_staging.json`; `outputs/latest_learning_staging.json`
+and `outputs/latest_learning_risk_report.md` are demo snapshots only.
+
+## Dependency boundary
+
+Some heavy dependency patterns in the repository history came from upstream
+OpenHarness breadth. SignalHarness uses a focused subset: Pydantic schemas,
+Typer CLI, Rich terminal output, PyYAML configuration, `httpx` provider/source
+adapters, and dev-only test/type/lint tooling. It deliberately does not add
+LangGraph, CrewAI, AutoGen, LangChain, Dify, Haystack, Langfuse, Redis,
+Postgres, Celery, vector databases, or external observability platforms.
 
 ## Deterministic scorer remains authoritative
 
@@ -122,7 +139,7 @@ deterministic and policy-controlled.
 
 - Agent mode still depends on structured JSON responses, with one retry before
   deterministic fallback.
-- Bounded repair pass is not enabled in the current default scan path.
+- Bounded repair is deliberately limited to two directions and small event sets.
 - Tool use is runner-controlled, not provider-native function calling.
 - The evidence loop is bounded to two steps.
 - The system is not fully autonomous or self-evolving.

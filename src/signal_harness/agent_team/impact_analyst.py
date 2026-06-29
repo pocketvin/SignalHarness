@@ -42,7 +42,21 @@ class ImpactAnalystAgent:
             "related_clusters": [
                 cluster.model_dump(mode="json") for cluster in clusters or []
             ],
-            "constraint": "Do not emit final_score.",
+            "constraints": [
+                "Do not emit final_score.",
+                (
+                    "repair_requests are suggestions only; Python decides whether "
+                    "a bounded repair pass is allowed."
+                ),
+                (
+                    "If repair is needed, ImpactAnalystAgent may only request "
+                    "target_agent=context_evidence for the relevant event_ids."
+                ),
+                (
+                    "Never request supervisor, action, learning, recursive, or "
+                    "provider-native tool-calling handoff repairs."
+                ),
+            ],
         }
         return build_agent_call(
             agent_name=self.name,

@@ -15,9 +15,11 @@ from signal_harness.signal.schemas import (
     SignalDecision,
     SignalEvent,
     SourceQuality,
+    TraceStep,
 )
 from signal_harness.ui.dashboard import write_dashboard
 from signal_harness.ui.digest import write_digest
+from signal_harness.ui.trace_view import write_trace_summary
 
 
 def _event(event_id: str = "alert-001") -> SignalEvent:
@@ -144,6 +146,34 @@ def test_dashboard_and_digest_outputs_include_expected_sections(tmp_path: Path) 
         ),
         encoding="utf-8",
     )
+    (output_dir / "latest_learning_staging.json").write_text(
+        json.dumps(
+            {
+                "proposals": [
+                    {
+                        "proposal_id": "proposal-1",
+                        "status": "staged",
+                        "risk": {
+                            "risk_level": "low",
+                            "replay_gate_passed": True,
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (output_dir / "model_eval_summary.json").write_text(
+        json.dumps(
+            {
+                "provider": "mock-provider",
+                "model": "mock-model",
+                "model_profile": "mock-agent",
+                "run_state_mode": "shared",
+            }
+        ),
+        encoding="utf-8",
+    )
 
     dashboard = write_dashboard(output_dir)
     daily = write_digest(output_dir, period="daily")
@@ -154,13 +184,69 @@ def test_dashboard_and_digest_outputs_include_expected_sections(tmp_path: Path) 
     assert "High priority signals" in html
     assert "Alerts" in html
     assert "Source health" in html
+    assert "Model, profile, and limits" in html
     assert "Agent trace and tools" in html
+    assert "Agent repair pass" in html
+    assert "No repair pass was triggered." in html
+    assert "Score breakdown" in html
     assert "Learning proposal summary" in html
+    assert "Learning staging" in html
+    assert "proposal-1" in html
     for digest in (daily, weekly):
         text = digest.read_text(encoding="utf-8")
         assert "Major events" in text
         assert "Source health" in text
         assert "Learning proposal summary" in text
+
+
+def test_dashboard_and_trace_summary_show_repair_pass(tmp_path: Path) -> None:
+    output_dir = tmp_path / "outputs"
+    output_dir.mkdir()
+    (output_dir / "signals.json").write_text("[]", encoding="utf-8")
+    (output_dir / "impact_scores.json").write_text("[]", encoding="utf-8")
+    trace_payload = [
+        {
+            "step": "repair_requested",
+            "status": "success",
+            "duration_ms": 0,
+            "agent": "RepairCoordinator",
+            "input_count": 1,
+            "output_count": 1,
+            "detail": (
+                "triggered_by=ImpactAnalystAgent; "
+                "target_agent=context_evidence; event_ids=demo-001; reason=test"
+            ),
+        },
+        {
+            "step": "repair_context_evidence",
+            "status": "success",
+            "duration_ms": 0,
+            "agent": "RepairCoordinator",
+            "input_count": 1,
+            "output_count": 1,
+            "detail": "Executed bounded Impact→ContextEvidence repair; event_ids=demo-001",
+        },
+    ]
+    (output_dir / "task_trace.json").write_text(
+        json.dumps(trace_payload),
+        encoding="utf-8",
+    )
+    (output_dir / "alerts.json").write_text("[]", encoding="utf-8")
+
+    dashboard = write_dashboard(output_dir)
+    summary = write_trace_summary(
+        output_dir,
+        [TraceStep.model_validate(item) for item in trace_payload],
+    )
+
+    html = dashboard.read_text(encoding="utf-8")
+    text = summary.read_text(encoding="utf-8")
+    assert "Agent repair pass" in html
+    assert "Impact→ContextEvidence" in html
+    assert "## Agent Repair Pass" in text
+    assert "- requested: 1" in text
+    assert "- executed: 1" in text
+    assert "- event_ids: demo-001" in text
 
 
 def test_scan_operational_outputs_and_learning_observation_modes(

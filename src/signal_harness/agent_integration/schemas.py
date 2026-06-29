@@ -20,6 +20,8 @@ RequiredAgent: TypeAlias = Literal[
     "learning_observation",
 ]
 
+RepairTarget: TypeAlias = Literal["context_evidence", "impact"]
+
 
 class SupervisorRoute(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -99,6 +101,30 @@ class ContextEvidenceOutput(BaseModel):
     results: list[ContextEvidenceItem]
 
 
+class RepairRequest(BaseModel):
+    """Bounded repair suggestion emitted by downstream Agents.
+
+    This is intentionally not a handoff-as-tool contract. Agents can only
+    suggest two repair targets; Python decides whether a bounded repair pass is
+    allowed by run limits, event caps, and permission/tool budgets.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    target_agent: RepairTarget
+    event_ids: list[str] = Field(min_length=1)
+    reason: str = Field(min_length=1)
+    severity: Literal["low", "medium", "high"] = "medium"
+
+    @field_validator("event_ids")
+    @classmethod
+    def _event_ids_must_be_nonempty(cls, value: list[str]) -> list[str]:
+        normalized = [item.strip() for item in value if item.strip()]
+        if not normalized:
+            raise ValueError("repair requests must name at least one event_id")
+        return list(dict.fromkeys(normalized))
+
+
 class ImpactItem(BaseModel):
     """No final_score field by design; extra score fields fail validation."""
 
@@ -118,6 +144,7 @@ class ImpactOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     results: list[ImpactItem]
+    repair_requests: list[RepairRequest] = Field(default_factory=list)
 
 
 class ActionItem(BaseModel):
@@ -134,6 +161,7 @@ class ActionOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     results: list[ActionItem]
+    repair_requests: list[RepairRequest] = Field(default_factory=list)
 
 
 class ReplayEvaluation(BaseModel):

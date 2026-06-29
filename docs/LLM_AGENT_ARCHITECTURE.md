@@ -62,10 +62,11 @@ schema validation, or an empty response fails, the runner retries once with a
 short schema-correction instruction. A second failure triggers deterministic
 fallback.
 
-`AgentLoopLimits` bounds `max_schema_retries`, provider-call timeout, total
-tool requests, per-event tool requests, tool output size, and future repair
-round/event limits. Provider timeouts are recorded as `provider_timeout` in
-the LLM trace and use deterministic fallback.
+`AgentLoopLimits` bounds `max_schema_retries`, provider-call timeout, whole
+Agent-team run timeout, total tool requests, per-event tool requests, tool
+output size, and bounded repair round/event limits. Provider timeouts are
+recorded as `provider_timeout` in the LLM trace. Whole-run timeouts are
+recorded as `agent_team_run_timeout`. Both use deterministic fallback.
 
 The default real-provider path is `OpenAICompatibleProvider`, configured with
 `LLM_PROVIDER=openai_compatible`, `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`,
@@ -76,9 +77,11 @@ enable native tool calling.
 `model-eval` computes local metrics from trace and assessments so different
 models can be compared under the same SignalHarness constraints.
 
-Bounded repair is not an open ReAct loop. The current implementation reserves
-limits for at most one future repair round over a small event set; learning is
-not allowed to repair upstream Agents or mutate configuration.
+Bounded repair is not an open ReAct loop. The implementation supports only
+Impact→ContextEvidence and Action→Impact repair, enforces
+`max_repair_rounds_per_run` plus `max_repair_events_per_run`, reuses the same
+tool budget, and never lets LearningPolicyAgent repair upstream Agents or
+mutate configuration. Agents suggest repair; Python decides whether to run it.
 
 The older classes in `src/signal_harness/agents/` are deterministic fallback
 specialists. They are not described as the true multi-Agent implementation.

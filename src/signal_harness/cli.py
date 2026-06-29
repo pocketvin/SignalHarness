@@ -14,11 +14,16 @@ import typer
 from signal_harness.utils.fs import atomic_write_text
 from signal_harness.agent_integration.mode import RunMode
 from signal_harness.agent_integration.runner import LLMAgentTeamRunner
-from signal_harness.agent_integration.schemas import LearningPolicyOutput
+from signal_harness.agent_integration.schemas import LearningPolicyOutput, ReplayEvaluation
 from signal_harness.agent_team.learning_policy import LearningPolicyAgent
 from signal_harness.evals import build_model_eval_summary, write_model_eval_summary
 from signal_harness.memory import FeedbackMemory, MemoryBundle
 from signal_harness.memory.replay import evaluate_policy_replay
+from signal_harness.learning import (
+    apply_staged_learning,
+    load_learning_staging,
+    stage_learning_proposal,
+)
 from signal_harness.providers.adapter import AgentProvider
 from signal_harness.providers.factory import provider_from_env
 from signal_harness.providers.mock_provider import MockProvider
@@ -157,6 +162,75 @@ def _save_learning_artifacts(
         watchlist_proposal,
     )
     _write_json(output / "latest_replay_evaluation.json", replay)
+
+
+def _load_latest_learning(
+    state: Path,
+    output: Path,
+) -> LearningPolicyOutput:
+    latest_candidates = [
+        state / "latest_learning_observation.json",
+        output / "latest_learning_observation.json",
+    ]
+    for path in latest_candidates:
+        if not path.exists():
+            continue
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            continue
+        return LearningPolicyOutput(
+            policy_update_proposal=PolicyUpdateProposal.model_validate(
+                payload["policy_update_proposal"]
+            ),
+            skill_update_proposal=str(payload.get("skill_update_proposal", "")),
+            watchlist_update_proposal=dict(
+                payload.get(
+                    "watchlist_update_proposal",
+                    {"requires_approval": True, "suggested_changes": []},
+                )
+            ),
+            learning_summary=str(payload.get("learning_summary", "")),
+            memory_sections_read=[
+                str(item)
+                for item in payload.get("memory_sections_read", [])
+                if isinstance(item, str)
+            ],
+        )
+
+    proposal_path = state / "policy_update_proposal.json"
+    skill_path = state / "skill_update_proposal.md"
+    watchlist_path = state / "watchlist_update_proposal.json"
+    if proposal_path.exists() and skill_path.exists() and watchlist_path.exists():
+        return LearningPolicyOutput(
+            policy_update_proposal=PolicyUpdateProposal.model_validate(
+                json.loads(proposal_path.read_text(encoding="utf-8"))
+            ),
+            skill_update_proposal=skill_path.read_text(encoding="utf-8"),
+            watchlist_update_proposal=json.loads(
+                watchlist_path.read_text(encoding="utf-8")
+            ),
+            learning_summary="Loaded staged learning artifacts from state.",
+            memory_sections_read=[],
+        )
+    raise typer.BadParameter(
+        "No learning proposal found. Run `signal-harness scan --mode mock-agent` "
+        "or `signal-harness calibrate --mode mock-agent` first."
+    )
+
+
+def _load_latest_replay(
+    state: Path,
+    output: Path,
+) -> ReplayEvaluation | None:
+    for path in (
+        state / "replay_evaluation.json",
+        output / "latest_replay_evaluation.json",
+    ):
+        if path.exists():
+            return ReplayEvaluation.model_validate(
+                json.loads(path.read_text(encoding="utf-8"))
+            )
+    return None
 
 
 def parse_since(value: str | None) -> datetime | None:
@@ -312,12 +386,18 @@ def model_eval(
     try:
         assessments: list[SignalAssessment] = []
         trace_steps: list[TraceStep] = []
-        for _ in range(runs):
+        isolated_state = runs > 1
+        for index in range(runs):
+            run_state = (
+                resolved_state / f"run-{index + 1:03d}"
+                if isolated_state
+                else resolved_state
+            )
             workflow = SignalHarnessWorkflow(
                 cwd=root,
                 config_dir=config_dir,
                 output_dir=resolved_output,
-                state_dir=resolved_state,
+                state_dir=run_state,
                 mode=mode,
             )
             result = asyncio.run(
@@ -353,6 +433,8 @@ def model_eval(
             or os.environ.get("LLM_MODEL_PROFILE")
             or ("mock-agent" if mode is RunMode.MOCK_AGENT else "openai_gpt4o_mini")
         ),
+        run_state_mode="isolated_per_run" if runs > 1 else "shared",
+        isolated_state=runs > 1,
     )
     paths = write_model_eval_summary(resolved_output, summary)
     typer.echo(f"Model eval JSON: {paths['json']}")
@@ -468,6 +550,76 @@ def calibrate(
     )
     apply_policy_proposal(policy_path, proposal.new_policy, approved=confirmed)
     typer.echo(f"Applied policy proposal to {policy_path}")
+
+
+@app.command("learning-stage")
+def learning_stage(
+    cwd: Path = typer.Option(Path.cwd(), "--cwd", hidden=True),
+    output_dir: Path = typer.Option(Path("outputs"), "--output-dir"),
+    state_dir: Path = typer.Option(Path(".signal-harness"), "--state-dir"),
+) -> None:
+    """Stage the latest learning proposal for explicit review."""
+
+    root = cwd.expanduser().resolve()
+    state = _resolve(root, state_dir)
+    output = _resolve(root, output_dir)
+    learning = _load_latest_learning(state, output)
+    replay = _load_latest_replay(state, output)
+    staged = stage_learning_proposal(
+        state_dir=state,
+        output_dir=output,
+        learning=learning,
+        replay=replay,
+    )
+    typer.echo(f"Staged proposal: {staged.proposal_id}")
+    typer.echo(f"Status: {staged.status}")
+    typer.echo(f"Risk: {staged.risk.risk_level}")
+    typer.echo("Policy, watchlist, and skill changes were not applied.")
+
+
+@app.command("learning-review")
+def learning_review(
+    cwd: Path = typer.Option(Path.cwd(), "--cwd", hidden=True),
+    state_dir: Path = typer.Option(Path(".signal-harness"), "--state-dir"),
+) -> None:
+    """Print locally staged learning proposals."""
+
+    root = cwd.expanduser().resolve()
+    proposals = load_learning_staging(_resolve(root, state_dir))
+    if not proposals:
+        typer.echo("No staged learning proposals.")
+        return
+    for item in proposals:
+        typer.echo(
+            f"{item.proposal_id}: status={item.status}, "
+            f"risk={item.risk.risk_level}, "
+            f"replay_gate={str(item.risk.replay_gate_passed).lower()}"
+        )
+        for reason in item.risk.reasons:
+            typer.echo(f"  - {reason}")
+
+
+@app.command("learning-apply")
+def learning_apply(
+    proposal_id: str = typer.Option(..., "--proposal-id"),
+    yes: bool = typer.Option(False, "--yes", help="Explicitly approve local apply"),
+    cwd: Path = typer.Option(Path.cwd(), "--cwd", hidden=True),
+    config_dir: Path = typer.Option(Path("configs"), "--config-dir"),
+    state_dir: Path = typer.Option(Path(".signal-harness"), "--state-dir"),
+) -> None:
+    """Apply a gated low-risk staged policy proposal after --yes."""
+
+    root = cwd.expanduser().resolve()
+    try:
+        path = apply_staged_learning(
+            state_dir=_resolve(root, state_dir),
+            config_dir=_resolve(root, config_dir),
+            proposal_id=proposal_id,
+            yes=yes,
+        )
+    except (PermissionError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(f"Applied staged learning proposal to {path}")
 
 
 if __name__ == "__main__":

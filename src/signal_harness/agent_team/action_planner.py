@@ -37,6 +37,20 @@ class ActionPlannerAgent:
                 "send_team_notification",
                 "modify_project_profile",
             ],
+            "repair_constraints": [
+                (
+                    "repair_requests are suggestions only; Python decides whether "
+                    "a bounded repair pass is allowed."
+                ),
+                (
+                    "If repair is needed, ActionPlannerAgent may only request "
+                    "target_agent=impact for the relevant event_ids."
+                ),
+                (
+                    "Never request supervisor, context_evidence, learning, recursive, "
+                    "or provider-native tool-calling handoff repairs."
+                ),
+            ],
         }
         return build_agent_call(
             agent_name=self.name,

@@ -44,12 +44,16 @@ error, retries the Agent once with a repair prompt, and then falls back to the
 deterministic guardrail path if validation still fails.
 If a provider call exceeds `AgentLoopLimits.max_agent_call_seconds`,
 SignalHarness records a `provider_timeout` trace error and falls back.
+If the whole Agent team exceeds `AgentLoopLimits.max_run_seconds`,
+SignalHarness records `agent_team_run_timeout` and uses deterministic audit
+fallback rather than hanging.
 
 The smoke test validates:
 
 - real provider calls through the optional provider integration;
 - structured schema validation and deterministic fallback;
 - LLM timeout handling through `AgentLoopLimits`;
+- bounded repair trace behavior if repair is requested;
 - controlled tool-request validation and observations;
 - prompt and Agent trace fields;
 - deterministic scoring and permission guards.

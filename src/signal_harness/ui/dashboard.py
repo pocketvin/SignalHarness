@@ -20,6 +20,8 @@ def write_dashboard(output_dir: str | Path) -> Path:
     trace = _read_json(root / "task_trace.json", [])
     alerts = _read_json(root / "alerts.json", [])
     learning = _read_json(root / "latest_learning_observation.json", {})
+    learning_staging = _read_json(root / "latest_learning_staging.json", {})
+    model_eval = _read_json(root / "model_eval_summary.json", {})
     source_tasks = [
         task
         for step in trace
@@ -33,6 +35,8 @@ def write_dashboard(output_dir: str | Path) -> Path:
         trace=trace if isinstance(trace, list) else [],
         alerts=alerts if isinstance(alerts, list) else [],
         learning=learning if isinstance(learning, dict) else {},
+        learning_staging=learning_staging if isinstance(learning_staging, dict) else {},
+        model_eval=model_eval if isinstance(model_eval, dict) else {},
         source_tasks=source_tasks,
     )
     path = root / "dashboard.html"
@@ -56,6 +60,8 @@ def _render_dashboard(
     trace: list[dict[str, Any]],
     alerts: list[dict[str, Any]],
     learning: dict[str, Any],
+    learning_staging: dict[str, Any],
+    model_eval: dict[str, Any],
     source_tasks: list[dict[str, Any]],
 ) -> str:
     event_by_id = {str(item.get("event_id")): item for item in signals}
@@ -85,6 +91,14 @@ def _render_dashboard(
         for source in step.get("failed_sources", [])
         if isinstance(source, str)
     ]
+    repair_steps = [
+        step
+        for step in trace
+        if step.get("step")
+        in {"repair_requested", "repair_context_evidence", "repair_impact", "repair_action", "repair_blocked"}
+    ]
+    llm_step = next((step for step in trace if step.get("step") == "llm_agent_call"), {})
+    limit_step = next((step for step in trace if step.get("step") == "agent_loop_limits"), {})
     learning_summary = str(learning.get("learning_summary", "No learning observation."))
     cards = [
         _metric("Signals", len(signals)),
@@ -115,6 +129,40 @@ def _render_dashboard(
         "</li>"
         for step in tool_steps
     ) or "<li>No tool calls recorded.</li>"
+    repair_items = "".join(
+        "<li>"
+        f"{_e(step.get('step'))}: {_e(step.get('detail'))} "
+        f"(input={_e(step.get('input_count'))}, output={_e(step.get('output_count'))})"
+        "</li>"
+        for step in repair_steps
+    ) or "<li>No repair pass was triggered.</li>"
+    score_items = "".join(
+        _score_breakdown_row(item)
+        for item in sorted(
+            assessments,
+            key=lambda value: float(value.get("impact_score", 0)),
+            reverse=True,
+        )[:12]
+    ) or "<tr><td colspan=\"6\">No score breakdowns recorded.</td></tr>"
+    staging_items = "".join(
+        "<li>"
+        f"{_e(item.get('proposal_id'))}: "
+        f"status={_e(item.get('status'))}, "
+        f"risk={_e((item.get('risk') or {}).get('risk_level'))}, "
+        f"replay_gate={_e((item.get('risk') or {}).get('replay_gate_passed'))}"
+        "</li>"
+        for item in learning_staging.get("proposals", [])
+        if isinstance(item, dict)
+    ) or "<li>No staged learning proposals.</li>"
+    model_items = "".join(
+        [
+            f"<li>provider: {_e(model_eval.get('provider') or llm_step.get('mode') or 'n/a')}</li>",
+            f"<li>model: {_e(model_eval.get('model') or llm_step.get('model') or 'n/a')}</li>",
+            f"<li>model_profile: {_e(model_eval.get('model_profile') or 'n/a')}</li>",
+            f"<li>run_state_mode: {_e(model_eval.get('run_state_mode') or 'n/a')}</li>",
+            f"<li>limits: {_e(limit_step.get('detail') or 'n/a')}</li>",
+        ]
+    )
     source_items = "".join(
         f"<li>{_e(task.get('source_type'))}:{_e(task.get('source_name'))} — {_e(task.get('status'))}</li>"
         for task in source_tasks
@@ -154,8 +202,15 @@ def _render_dashboard(
   <section><h2>Alerts</h2><ul>{alert_items}</ul></section>
   <section><h2>Source health</h2><ul>{source_items}</ul><h3>Failed sources</h3><ul>{failed_items}</ul></section>
   <section><h2>Top affected modules</h2><ul>{module_items}</ul></section>
+  <section><h2>Model, profile, and limits</h2><ul>{model_items}</ul></section>
   <section><h2>Agent trace and tools</h2><ul>{trace_items}</ul></section>
+  <section><h2>Agent repair pass</h2><ul>{repair_items}</ul></section>
+  <section>
+    <h2>Score breakdown</h2>
+    <table><thead><tr><th>Signal</th><th>Final</th><th>Base</th><th>Semantic</th><th>Evidence</th><th>Weights</th></tr></thead><tbody>{score_items}</tbody></table>
+  </section>
   <section><h2>Learning proposal summary</h2><p>{_e(learning_summary)}</p></section>
+  <section><h2>Learning staging</h2><ul>{staging_items}</ul></section>
 </body>
 </html>
 """
@@ -181,6 +236,41 @@ def _signal_row(assessment: dict[str, Any], event: dict[str, Any]) -> str:
     )
 
 
+def _score_breakdown_row(assessment: dict[str, Any]) -> str:
+    agent = assessment.get("agent_score_breakdown")
+    if isinstance(agent, dict):
+        return (
+            "<tr>"
+            f"<td>{_e(assessment.get('event_id'))}</td>"
+            f"<td>{float(agent.get('final_score', 0)):.1f}</td>"
+            f"<td>{float(agent.get('deterministic_base_score', 0)):.1f}</td>"
+            f"<td>{float(agent.get('semantic_relevance', 0)):.1f}</td>"
+            f"<td>{float(agent.get('evidence_confidence_score', 0)):.1f}</td>"
+            f"<td>{_e(agent.get('deterministic_weight'))}/"
+            f"{_e(agent.get('semantic_weight'))}/"
+            f"{_e(agent.get('evidence_weight'))}</td>"
+            "</tr>"
+        )
+    deterministic = assessment.get("score_breakdown")
+    if isinstance(deterministic, dict):
+        return (
+            "<tr>"
+            f"<td>{_e(assessment.get('event_id'))}</td>"
+            f"<td>{float(deterministic.get('final_score', 0)):.1f}</td>"
+            f"<td>{float(deterministic.get('project_relevance_score', 0)):.1f}</td>"
+            f"<td>{float(assessment.get('relevance_score', 0)):.1f}</td>"
+            f"<td>{float(assessment.get('confidence', 0)) * 100:.1f}</td>"
+            f"<td>deterministic</td>"
+            "</tr>"
+        )
+    return (
+        "<tr>"
+        f"<td>{_e(assessment.get('event_id'))}</td>"
+        f"<td>{float(assessment.get('impact_score', 0)):.1f}</td>"
+        "<td colspan=\"4\">No structured breakdown</td>"
+        "</tr>"
+    )
+
+
 def _e(value: object) -> str:
     return html.escape(str(value or ""))
-

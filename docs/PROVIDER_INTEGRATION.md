@@ -43,9 +43,12 @@ use provider-native function calling: the model returns plans and outputs,
 while Python validates schemas, executes read-only tools, applies budgets,
 records trace, and computes final scores.
 
-`AgentLoopLimits` controls schema retry count, provider-call timeout, tool
-budget, tool output size, and future repair-pass limits. A provider timeout is
-recorded in trace as `provider_timeout` and uses deterministic fallback.
+`AgentLoopLimits` controls schema retry count, provider-call timeout, whole
+Agent-team run timeout, tool budget, tool output size, and bounded repair-pass
+limits. Provider timeout is recorded in trace as `provider_timeout`; whole-run
+timeout is recorded as `agent_team_run_timeout`. Both use deterministic
+fallback. Repair remains runner-controlled and does not enable native tool
+calling.
 
 `signal-harness model-eval` can compare models through the same local metrics
 without adding an external eval platform:

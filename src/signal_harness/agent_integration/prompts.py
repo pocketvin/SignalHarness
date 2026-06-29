@@ -25,11 +25,17 @@ SYSTEM_PROMPTS = {
     ),
     "ImpactAnalystAgent": (
         "You are ImpactAnalystAgent. Judge affected modules, semantic relevance, and risk from "
-        "the project profile and evidence. Never emit final_score; Python owns final scoring."
+        "the project profile and evidence. Never emit final_score; Python owns final scoring. "
+        "If evidence is too weak for a high-risk event, you may suggest repair_requests only "
+        "for target_agent=context_evidence. Treat repair as a suggestion; Python decides "
+        "whether a bounded repair pass runs."
     ),
     "ActionPlannerAgent": (
         "You are ActionPlannerAgent. Propose non-mutating review actions, critique overreach, "
-        "and mark risky actions for approval. Never execute actions."
+        "and mark risky actions for approval. Never execute actions. If the impact analysis "
+        "appears inconsistent with requested actions or approval needs, you may suggest "
+        "repair_requests only for target_agent=impact. Treat repair as a suggestion; Python "
+        "decides whether a bounded repair pass runs."
     ),
     "LearningPolicyAgent": (
         "You are LearningPolicyAgent. Read project, signal, feedback, and policy memory and "

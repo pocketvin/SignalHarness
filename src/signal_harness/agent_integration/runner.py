@@ -185,6 +185,8 @@ class LLMAgentTeamRunner:
         self.loop_limits = loop_limits or tool_limits or AgentLoopLimits()
         self.tool_limits = self.loop_limits
         self._tool_requests_used = 0
+        self._repair_rounds_used = 0
+        self._repair_events_used = 0
         self.tool_cache = ToolObservationCache()
         self.supervisor = SignalSupervisorAgent()
         self.evidence = ContextEvidenceAgent()
@@ -510,6 +512,17 @@ class LLMAgentTeamRunner:
                 ),
                 trace_index=impact_trace,
             )
+            evidence, impact = await self._maybe_run_impact_evidence_repair(
+                events=impact_events,
+                routes=routes,
+                evidence=evidence,
+                impact=impact,
+                project_profile=project_profile,
+                policy=policy,
+                clusters=active_clusters,
+                memory_snapshot=memory_snapshot,
+                volatile_metadata=volatile,
+            )
         else:
             impact = ImpactOutput(results=[])
         skipped_impact = [event for event in events if event.event_id not in impact_ids]
@@ -554,6 +567,17 @@ class LLMAgentTeamRunner:
                 expected_ids=action_ids,
                 fallback=lambda: self.action.fallback(action_events, action_impact),
                 trace_index=action_trace,
+            )
+            impact, action = await self._maybe_run_action_impact_repair(
+                events=action_events,
+                routes=routes,
+                evidence=evidence,
+                impact=impact,
+                action=action,
+                project_profile=project_profile,
+                policy=policy,
+                clusters=active_clusters,
+                volatile_metadata=volatile,
             )
         else:
             action = ActionOutput(results=[])
@@ -853,6 +877,607 @@ class LLMAgentTeamRunner:
                 )
                 for item in evidence.results
             ]
+        )
+
+    async def _maybe_run_impact_evidence_repair(
+        self,
+        *,
+        events: list[SignalEvent],
+        routes: SupervisorOutput,
+        evidence: ContextEvidenceOutput,
+        impact: ImpactOutput,
+        project_profile: dict[str, Any],
+        policy: dict[str, Any],
+        clusters: list[SignalCluster],
+        memory_snapshot: dict[str, Any],
+        volatile_metadata: dict[str, Any],
+    ) -> tuple[ContextEvidenceOutput, ImpactOutput]:
+        event_ids, reason = self._impact_to_evidence_repair_candidates(
+            events=events,
+            evidence=evidence,
+            impact=impact,
+        )
+        if not event_ids:
+            return evidence, impact
+        event_ids = self._prepare_repair_event_ids(
+            event_ids,
+            valid_ids={event.event_id for event in events},
+            triggered_by="ImpactAnalystAgent",
+            target_agent="context_evidence",
+        )
+        if not event_ids:
+            return evidence, impact
+        self._append_repair_requested(
+            triggered_by="ImpactAnalystAgent",
+            target_agent="context_evidence",
+            event_ids=event_ids,
+            reason=reason,
+            severity="high",
+        )
+        if not self._reserve_repair_round(
+            triggered_by="ImpactAnalystAgent",
+            target_agent="context_evidence",
+            event_ids=event_ids,
+        ):
+            return evidence, impact
+
+        repair_events = [event for event in events if event.event_id in set(event_ids)]
+        plan_call = self.evidence.build_tool_plan_call(
+            repair_events,
+            routes,
+            project_profile=project_profile,
+            policy=policy,
+            clusters=clusters,
+            memory=memory_snapshot,
+            volatile_metadata={
+                **volatile_metadata,
+                "repair_pass": "impact_to_context_evidence",
+            },
+        )
+        plan, plan_trace = await self._invoke(
+            plan_call,
+            EvidenceToolPlan,
+            lambda: self.evidence.fallback_plan(repair_events),
+            event_ids=event_ids,
+        )
+        observations, tool_trace = await self._execute_tool_requests(
+            plan,
+            policy,
+            event_count=len(repair_events),
+        )
+        plan_step = self.trace.steps[plan_trace]
+        self.trace.steps[plan_trace] = plan_step.model_copy(
+            update={
+                "tools_executed": tool_trace["executed"],
+                "tool_errors": tool_trace["errors"],
+                "blocked_tools": tool_trace["blocked"],
+                "budget_blocked_count": len(tool_trace["budget_blocked"]),
+                "permission_checks": tool_trace["permission_checks"],
+                "cache_events": tool_trace["cache_events"],
+                "detail": "Repair pass: ImpactAnalystAgent requested ContextEvidenceAgent.",
+            }
+        )
+        evidence_call = self.evidence.build_final_call(
+            repair_events,
+            routes,
+            plan,
+            observations,
+            project_profile=project_profile,
+            policy=policy,
+            clusters=clusters,
+            memory=memory_snapshot,
+            volatile_metadata={
+                **volatile_metadata,
+                "repair_pass": "impact_to_context_evidence",
+            },
+        )
+        repaired_evidence, evidence_trace = await self._invoke(
+            evidence_call,
+            ContextEvidenceOutput,
+            lambda: self.evidence.fallback(
+                repair_events,
+                plan=plan,
+                observations=observations,
+            ),
+            event_ids=event_ids,
+        )
+        expected_ids = {event.event_id for event in repair_events}
+        repaired_evidence = self._ensure_coverage(
+            repaired_evidence,
+            expected_ids=expected_ids,
+            fallback=lambda: self.evidence.fallback(
+                repair_events,
+                plan=plan,
+                observations=observations,
+            ),
+            trace_index=evidence_trace,
+        )
+        repaired_evidence = self._cap_evidence_after_tool_failures(
+            repaired_evidence,
+            observations,
+        )
+        final_step = self.trace.steps[evidence_trace]
+        self.trace.steps[evidence_trace] = final_step.model_copy(
+            update={
+                "tools_executed": tool_trace["executed"],
+                "tool_errors": tool_trace["errors"],
+                "blocked_tools": tool_trace["blocked"],
+                "permission_checks": tool_trace["permission_checks"],
+                "cache_events": tool_trace["cache_events"],
+                "event_input_count": len(repair_events),
+                "tool_observation_count": len(observations),
+                "source_type_count": len({event.source_type for event in repair_events}),
+                "tools_requested_count": len(plan.tool_requests),
+                "tools_executed_count": len(tool_trace["executed"]),
+                "budget_blocked_count": len(tool_trace["budget_blocked"]),
+                "exit_condition": self._evidence_exit_condition(plan, observations),
+                "detail": "Repair pass final evidence synthesis.",
+            }
+        )
+        merged_evidence = self._merge_context_evidence(evidence, repaired_evidence)
+        repaired_impact_input = ContextEvidenceOutput(
+            results=[
+                item
+                for item in merged_evidence.results
+                if item.event_id in expected_ids
+            ]
+        )
+        impact_call = self.impact.build_call(
+            repair_events,
+            project_profile,
+            routes,
+            repaired_impact_input,
+            clusters=clusters,
+            policy=policy,
+            volatile_metadata={
+                **volatile_metadata,
+                "repair_pass": "context_evidence_to_impact",
+            },
+        )
+        repaired_impact, impact_trace = await self._invoke(
+            impact_call,
+            ImpactOutput,
+            lambda: self.impact.fallback(
+                repair_events,
+                project_profile,
+                policy,
+                clusters,
+            ),
+            event_ids=event_ids,
+        )
+        repaired_impact = self._ensure_coverage(
+            repaired_impact,
+            expected_ids=expected_ids,
+            fallback=lambda: self.impact.fallback(
+                repair_events,
+                project_profile,
+                policy,
+                clusters,
+            ),
+            trace_index=impact_trace,
+        )
+        merged_impact = self._merge_impact(impact, repaired_impact)
+        self.trace.steps.append(
+            TraceStep(
+                step="repair_context_evidence",
+                status="success",
+                agent="RepairCoordinator",
+                input_count=len(event_ids),
+                output_count=len(repaired_evidence.results),
+                duration_ms=0,
+                detail=(
+                    "Executed bounded Impact→ContextEvidence repair; "
+                    f"event_ids={','.join(event_ids)}; reason={reason}"
+                ),
+                tools_requested=[
+                    request.tool_name for request in plan.tool_requests
+                ],
+                tools_executed=tool_trace["executed"],
+                tool_errors=tool_trace["errors"],
+                blocked_tools=tool_trace["blocked"],
+                budget_blocked_count=len(tool_trace["budget_blocked"]),
+                permission_checks=tool_trace["permission_checks"],
+                event_input_count=len(repair_events),
+                tool_observation_count=len(observations),
+                tools_requested_count=len(plan.tool_requests),
+                tools_executed_count=len(tool_trace["executed"]),
+                exit_condition=self._evidence_exit_condition(plan, observations),
+            )
+        )
+        self.trace.steps.append(
+            TraceStep(
+                step="repair_impact",
+                status="success",
+                agent="RepairCoordinator",
+                input_count=len(event_ids),
+                output_count=len(repaired_impact.results),
+                duration_ms=0,
+                detail=(
+                    "Reran ImpactAnalystAgent after evidence repair; "
+                    f"event_ids={','.join(event_ids)}"
+                ),
+            )
+        )
+        return merged_evidence, merged_impact
+
+    async def _maybe_run_action_impact_repair(
+        self,
+        *,
+        events: list[SignalEvent],
+        routes: SupervisorOutput,
+        evidence: ContextEvidenceOutput,
+        impact: ImpactOutput,
+        action: ActionOutput,
+        project_profile: dict[str, Any],
+        policy: dict[str, Any],
+        clusters: list[SignalCluster],
+        volatile_metadata: dict[str, Any],
+    ) -> tuple[ImpactOutput, ActionOutput]:
+        event_ids, reason = self._action_to_impact_repair_candidates(
+            events=events,
+            impact=impact,
+            action=action,
+        )
+        if not event_ids:
+            return impact, action
+        event_ids = self._prepare_repair_event_ids(
+            event_ids,
+            valid_ids={event.event_id for event in events},
+            triggered_by="ActionPlannerAgent",
+            target_agent="impact",
+        )
+        if not event_ids:
+            return impact, action
+        self._append_repair_requested(
+            triggered_by="ActionPlannerAgent",
+            target_agent="impact",
+            event_ids=event_ids,
+            reason=reason,
+            severity="medium",
+        )
+        if not self._reserve_repair_round(
+            triggered_by="ActionPlannerAgent",
+            target_agent="impact",
+            event_ids=event_ids,
+        ):
+            return impact, action
+
+        event_id_set = set(event_ids)
+        repair_events = [event for event in events if event.event_id in event_id_set]
+        repair_evidence = ContextEvidenceOutput(
+            results=[
+                item for item in evidence.results if item.event_id in event_id_set
+            ]
+        )
+        impact_call = self.impact.build_call(
+            repair_events,
+            project_profile,
+            routes,
+            repair_evidence,
+            clusters=clusters,
+            policy=policy,
+            volatile_metadata={
+                **volatile_metadata,
+                "repair_pass": "action_to_impact",
+            },
+        )
+        repaired_impact, impact_trace = await self._invoke(
+            impact_call,
+            ImpactOutput,
+            lambda: self.impact.fallback(
+                repair_events,
+                project_profile,
+                policy,
+                clusters,
+            ),
+            event_ids=event_ids,
+        )
+        repaired_impact = self._ensure_coverage(
+            repaired_impact,
+            expected_ids=event_id_set,
+            fallback=lambda: self.impact.fallback(
+                repair_events,
+                project_profile,
+                policy,
+                clusters,
+            ),
+            trace_index=impact_trace,
+        )
+        merged_impact = self._merge_impact(impact, repaired_impact)
+        action_impact = ImpactOutput(results=repaired_impact.results)
+        action_call = self.action.build_call(
+            repair_events,
+            action_impact,
+            project_profile=project_profile,
+            policy=policy,
+            volatile_metadata={
+                **volatile_metadata,
+                "repair_pass": "impact_to_action",
+            },
+        )
+        repaired_action, action_trace = await self._invoke(
+            action_call,
+            ActionOutput,
+            lambda: self.action.fallback(repair_events, action_impact),
+            event_ids=event_ids,
+        )
+        repaired_action = self._ensure_coverage(
+            repaired_action,
+            expected_ids=event_id_set,
+            fallback=lambda: self.action.fallback(repair_events, action_impact),
+            trace_index=action_trace,
+        )
+        merged_action = self._merge_action(action, repaired_action)
+        self.trace.steps.append(
+            TraceStep(
+                step="repair_impact",
+                status="success",
+                agent="RepairCoordinator",
+                input_count=len(event_ids),
+                output_count=len(repaired_impact.results),
+                duration_ms=0,
+                detail=(
+                    "Executed bounded Action→Impact repair; "
+                    f"event_ids={','.join(event_ids)}; reason={reason}"
+                ),
+            )
+        )
+        self.trace.steps.append(
+            TraceStep(
+                step="repair_action",
+                status="success",
+                agent="RepairCoordinator",
+                input_count=len(event_ids),
+                output_count=len(repaired_action.results),
+                duration_ms=0,
+                detail=(
+                    "Reran ActionPlannerAgent after impact repair; "
+                    f"event_ids={','.join(event_ids)}"
+                ),
+            )
+        )
+        return merged_impact, merged_action
+
+    def _impact_to_evidence_repair_candidates(
+        self,
+        *,
+        events: list[SignalEvent],
+        evidence: ContextEvidenceOutput,
+        impact: ImpactOutput,
+    ) -> tuple[list[str], str]:
+        valid_ids = {event.event_id for event in events}
+        event_ids: list[str] = []
+        reasons: list[str] = []
+        for request in impact.repair_requests:
+            if request.target_agent != "context_evidence":
+                self._append_repair_blocked(
+                    triggered_by="ImpactAnalystAgent",
+                    target_agent=request.target_agent,
+                    event_ids=request.event_ids,
+                    reason="ImpactAnalystAgent may only request context_evidence repair.",
+                )
+                continue
+            event_ids.extend(request.event_ids)
+            reasons.append(request.reason)
+        evidence_by_id = {item.event_id: item for item in evidence.results}
+        for item in impact.results:
+            evidence_item = evidence_by_id.get(item.event_id)
+            if (
+                item.event_id in valid_ids
+                and evidence_item is not None
+                and item.risk_level in {"high", "critical"}
+                and evidence_item.confidence < 0.45
+                and item.semantic_relevance >= 70
+            ):
+                event_ids.append(item.event_id)
+                reasons.append(
+                    "deterministic trigger: high/critical impact with "
+                    "low evidence confidence"
+                )
+        return (
+            list(dict.fromkeys(event_ids)),
+            "; ".join(dict.fromkeys(reasons)) or "Impact requested evidence repair.",
+        )
+
+    def _action_to_impact_repair_candidates(
+        self,
+        *,
+        events: list[SignalEvent],
+        impact: ImpactOutput,
+        action: ActionOutput,
+    ) -> tuple[list[str], str]:
+        valid_ids = {event.event_id for event in events}
+        event_ids: list[str] = []
+        reasons: list[str] = []
+        for request in action.repair_requests:
+            if request.target_agent != "impact":
+                self._append_repair_blocked(
+                    triggered_by="ActionPlannerAgent",
+                    target_agent=request.target_agent,
+                    event_ids=request.event_ids,
+                    reason="ActionPlannerAgent may only request impact repair.",
+                )
+                continue
+            event_ids.extend(request.event_ids)
+            reasons.append(request.reason)
+        impact_by_id = {item.event_id: item for item in impact.results}
+        for item in action.results:
+            impact_item = impact_by_id.get(item.event_id)
+            if impact_item is None or item.event_id not in valid_ids:
+                continue
+            if item.requested_actions and impact_item.semantic_relevance < 50:
+                event_ids.append(item.event_id)
+                reasons.append(
+                    "deterministic trigger: requested actions with low semantic relevance"
+                )
+            if item.approval_required and impact_item.risk_level == "low":
+                event_ids.append(item.event_id)
+                reasons.append(
+                    "deterministic trigger: approval_required with low impact risk"
+                )
+        return (
+            list(dict.fromkeys(event_ids)),
+            "; ".join(dict.fromkeys(reasons)) or "Action requested impact repair.",
+        )
+
+    def _prepare_repair_event_ids(
+        self,
+        event_ids: list[str],
+        *,
+        valid_ids: set[str],
+        triggered_by: str,
+        target_agent: str,
+    ) -> list[str]:
+        invalid = [event_id for event_id in event_ids if event_id not in valid_ids]
+        if invalid:
+            self._append_repair_blocked(
+                triggered_by=triggered_by,
+                target_agent=target_agent,
+                event_ids=invalid,
+                reason="repair event_ids were not in the routed event set",
+            )
+        remaining = max(
+            0,
+            self.loop_limits.max_repair_events_per_run - self._repair_events_used,
+        )
+        prepared = [
+            event_id
+            for event_id in dict.fromkeys(event_ids)
+            if event_id in valid_ids
+        ]
+        if remaining <= 0:
+            self._append_repair_blocked(
+                triggered_by=triggered_by,
+                target_agent=target_agent,
+                event_ids=prepared,
+                reason="repair_event_budget_exceeded",
+            )
+            return []
+        blocked = prepared[remaining:]
+        if blocked:
+            self._append_repair_blocked(
+                triggered_by=triggered_by,
+                target_agent=target_agent,
+                event_ids=blocked,
+                reason="repair_event_cap_truncated",
+            )
+        return prepared[:remaining]
+
+    def _reserve_repair_round(
+        self,
+        *,
+        triggered_by: str,
+        target_agent: str,
+        event_ids: list[str],
+    ) -> bool:
+        if self._repair_rounds_used >= self.loop_limits.max_repair_rounds_per_run:
+            self._append_repair_blocked(
+                triggered_by=triggered_by,
+                target_agent=target_agent,
+                event_ids=event_ids,
+                reason="repair_round_budget_exceeded",
+            )
+            return False
+        self._repair_rounds_used += 1
+        self._repair_events_used += len(event_ids)
+        return True
+
+    def _append_repair_requested(
+        self,
+        *,
+        triggered_by: str,
+        target_agent: str,
+        event_ids: list[str],
+        reason: str,
+        severity: str,
+    ) -> None:
+        self.trace.steps.append(
+            TraceStep(
+                step="repair_requested",
+                status="success",
+                agent="RepairCoordinator",
+                input_count=len(event_ids),
+                output_count=len(event_ids),
+                duration_ms=0,
+                detail=(
+                    f"triggered_by={triggered_by}; target_agent={target_agent}; "
+                    f"severity={severity}; event_ids={','.join(event_ids)}; "
+                    f"reason={reason}"
+                ),
+            )
+        )
+
+    def _append_repair_blocked(
+        self,
+        *,
+        triggered_by: str,
+        target_agent: str,
+        event_ids: list[str],
+        reason: str,
+    ) -> None:
+        self.trace.steps.append(
+            TraceStep(
+                step="repair_blocked",
+                status="success",
+                agent="RepairCoordinator",
+                input_count=len(event_ids),
+                output_count=0,
+                duration_ms=0,
+                fallback_used=True,
+                detail=(
+                    f"triggered_by={triggered_by}; target_agent={target_agent}; "
+                    f"event_ids={','.join(event_ids)}; reason={reason}"
+                ),
+            )
+        )
+
+    @staticmethod
+    def _merge_context_evidence(
+        original: ContextEvidenceOutput,
+        repaired: ContextEvidenceOutput,
+    ) -> ContextEvidenceOutput:
+        replacements = {item.event_id: item for item in repaired.results}
+        merged = [
+            replacements.pop(item.event_id, item)
+            for item in original.results
+        ]
+        merged.extend(replacements.values())
+        return original.model_copy(update={"results": merged})
+
+    @staticmethod
+    def _merge_impact(
+        original: ImpactOutput,
+        repaired: ImpactOutput,
+    ) -> ImpactOutput:
+        replacements = {item.event_id: item for item in repaired.results}
+        merged = [
+            replacements.pop(item.event_id, item)
+            for item in original.results
+        ]
+        merged.extend(replacements.values())
+        return original.model_copy(
+            update={
+                "results": merged,
+                "repair_requests": list(original.repair_requests),
+            }
+        )
+
+    @staticmethod
+    def _merge_action(
+        original: ActionOutput,
+        repaired: ActionOutput,
+    ) -> ActionOutput:
+        replacements = {item.event_id: item for item in repaired.results}
+        merged = [
+            replacements.pop(item.event_id, item)
+            for item in original.results
+        ]
+        merged.extend(replacements.values())
+        return original.model_copy(
+            update={
+                "results": merged,
+                "repair_requests": list(original.repair_requests),
+            }
         )
 
     def _guarded_assessments(
