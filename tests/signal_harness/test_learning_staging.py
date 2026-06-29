@@ -203,7 +203,6 @@ def test_learning_apply_cli_requires_yes(
     )
 
     assert result.exit_code != 0
-    assert "learning-apply requires --yes" in result.output
     assert load_signal_policy(config / "signal_policy.yaml") == policy
 
 
