@@ -6,7 +6,7 @@ tech_stack:
   - Python 3.10+
   - Pydantic
   - Typer
-  - OpenHarness runtime
+  - SignalHarness runtime
 critical_modules:
   - signal normalization
   - evidence verification
@@ -15,7 +15,7 @@ critical_modules:
   - permission control
   - checkpoint persistence
 dependencies:
-  - HKUDS/OpenHarness
+  - langchain-ai/langgraph
   - langgraph
   - pydantic
   - typer

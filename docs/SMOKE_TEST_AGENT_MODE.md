@@ -23,8 +23,7 @@ export LLM_BASE_URL="https://your-provider.example/v1"
 
 `LLM_API_KEY` is required. `LLM_PROVIDER` defaults to `openai_compatible`.
 `LLM_MODEL` defaults to the model in the selected profile, and `LLM_BASE_URL`
-is optional. Use `LLM_PROVIDER=openharness` only for the optional
-OpenHarness-compatible adapter.
+is optional. Unsupported provider values fail clearly.
 
 Available profile names include `openai_gpt4o_mini`, `kimi`, `qwen`, and
 `deepseek`. Profiles describe model capabilities conservatively; they do not
@@ -63,6 +62,16 @@ The smoke test validates:
 Real network calls may fail because of credentials, endpoint compatibility,
 rate limits, model behavior, or provider availability. Such failures do not
 invalidate offline `demo` or scripted `mock-agent` tests.
+
+For a local provider matrix, copy `.env.example` to `.env`, fill provider keys
+locally, and run:
+
+```bash
+bash scripts/model_eval_matrix.sh --providers openai,qwen,deepseek --runs 3
+bash scripts/model_eval_matrix.sh --providers kimi --runs 1 --sleep 10
+```
+
+The script does not print API keys and writes only local ignored outputs.
 
 SignalHarness currently uses a runner-controlled two-turn tool loop. It does
 not use provider-native function calling and does not implement full

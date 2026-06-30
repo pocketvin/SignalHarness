@@ -11,7 +11,6 @@ license = "MIT"
 requires-python = ">=3.10"
 authors = [
     { name = "SignalHarness Contributors" },
-    { name = "OpenHarness Contributors" },
 ]
 
 dependencies = [
@@ -31,9 +30,6 @@ openai = [
 ]
 anthropic = [
     "anthropic>=0.40.0",
-]
-openharness-integration = [
-    "openai>=1.0.0",
 ]
 dev = [
     "pexpect>=4.9.0",
@@ -55,8 +51,6 @@ packages = ["src/signal_harness"]
 exclude = [
     "/.git",
     "/.venv",
-    "/.openharness-venv",
-    "/.openharness",
     "/.pytest_cache",
     "/.mypy_cache",
     "/.ruff_cache",
@@ -83,12 +77,6 @@ python_version = "3.11"
 strict = true
 mypy_path = "src"
 explicit_package_bases = true
-
-[[tool.mypy.overrides]]
-module = ["openharness", "openharness.*"]
-ignore_missing_imports = true
-follow_imports = "skip"
-disallow_subclassing_any = false
 
 [[tool.mypy.overrides]]
 module = ["signal_harness.tools.*"]

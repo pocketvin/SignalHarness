@@ -1,4 +1,4 @@
-"""Deterministic scoring exposed as an OpenHarness tool."""
+"""Deterministic scoring exposed as a SignalHarness tool."""
 
 from __future__ import annotations
 

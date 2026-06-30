@@ -1,4 +1,4 @@
-"""SignalHarness business tools built on OpenHarness contracts."""
+"""SignalHarness business tools built on local tool contracts."""
 
 from signal_harness.tools.github_signal import GitHubSignalTool
 from signal_harness.tools.report_writer_tool import ReportWriterTool

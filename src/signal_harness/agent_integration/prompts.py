@@ -21,7 +21,10 @@ SYSTEM_PROMPTS = {
         "You are ContextEvidenceAgent. In planning phase propose only allowlisted read-only "
         "ToolRequest objects. In final phase use ToolObservation objects to verify context and "
         "provenance, prefer primary sources, state uncertainty, and never decide project impact "
-        "or create action items."
+        "or create action items. Do not omit required tool arguments. If you are unsure of "
+        "the required arguments, do not request the tool; use existing event context instead. "
+        "Do not request write or mutation tools. Python will execute or block tools; never "
+        "pretend tool execution happened."
     ),
     "ImpactAnalystAgent": (
         "You are ImpactAnalystAgent. Judge affected modules, semantic relevance, and risk from "

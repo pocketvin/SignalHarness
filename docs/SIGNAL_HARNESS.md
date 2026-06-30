@@ -18,9 +18,10 @@ guardrail, fallback, permission, score, replay, persistence, and trace layer.
 
 ## Runtime foundation
 
-SignalHarness reuses OpenHarness model clients, streaming message types, domain
-tool primitives, skill loading, plugin agents, permission patterns, and atomic
-storage. `providers/` is a thin adapter; it is not a replacement runtime.
+SignalHarness uses local tool contracts, a small provider protocol, permission
+guards, deterministic persistence, and explicit trace records. `providers/` is
+a thin adapter layer around the mock provider and the OpenAI-compatible HTTP
+provider; it is not a replacement runtime for a general Agent framework.
 
 ## Commands
 

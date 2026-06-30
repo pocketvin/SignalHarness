@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from signal_harness.runtime.tools_base import ToolExecutionContext
-from signal_harness.tools.github_signal import GitHubSignalTool
+from signal_harness.tools.github_signal import GitHubSignalTool, _github_authorization_header
 from signal_harness.tools.rss_signal import RssSignalTool, parse_feed
 from signal_harness.tools.signal_memory import SignalMemoryTool
 from signal_harness.tools.web_change import WebChangeTool
@@ -72,6 +72,12 @@ async def test_github_tool_normalizes_without_network(tmp_path: Path) -> None:
 
     assert result.is_error is False
     assert json.loads(result.output)["source_type"] == "github_release"
+
+
+def test_github_authorization_header_skips_non_ascii_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "本地占位符")
+
+    assert _github_authorization_header() == ""
 
 
 @pytest.mark.asyncio

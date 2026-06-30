@@ -1,8 +1,7 @@
 """Minimal local tool interfaces used by SignalHarness core.
 
-These mirror the small OpenHarness tool surface SignalHarness needs for its
-offline demo, mock-agent, and local source tools. Keeping them local lets the
-core package run without importing the full upstream OpenHarness runtime.
+These interfaces are intentionally small and local so offline demo,
+mock-agent, and source tools do not depend on an external agent framework.
 """
 
 from __future__ import annotations

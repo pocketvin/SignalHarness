@@ -1,4 +1,4 @@
-"""Thin provider adapters backed by OpenHarness model clients."""
+"""Thin provider adapters for SignalHarness agent mode."""
 
 from signal_harness.providers.adapter import AgentCall, AgentProvider
 

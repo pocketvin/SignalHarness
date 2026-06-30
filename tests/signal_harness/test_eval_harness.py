@@ -100,12 +100,13 @@ def test_default_mock_agent_requests_multisource_tools(
     project_root: Path,
     tmp_path: Path,
 ) -> None:
+    provider = MockProvider(strategy="scripted")
     workflow = SignalHarnessWorkflow(
         cwd=project_root,
         output_dir=tmp_path / "outputs",
         state_dir=tmp_path / "state",
         mode=RunMode.MOCK_AGENT,
-        provider=MockProvider(strategy="scripted"),
+        provider=provider,
     )
     result = asyncio.run(
         workflow.scan(
@@ -140,6 +141,16 @@ def test_default_mock_agent_requests_multisource_tools(
     assert len(plan_trace.permission_checks) == 5
     assert final_trace.tool_observation_count == 5
     assert final_trace.exit_condition == "evidence_complete"
+    plan_call = next(
+        call for call in provider.calls if call.output_schema == "EvidenceToolPlan"
+    )
+    contract = plan_call.input_payload["tool_request_contract"]
+    assert contract["github_signal"]["required"] == ["action"]
+    assert "fetch_repo_releases" in contract["github_signal"]["common_valid_actions"]
+    assert contract["rss_signal"]["required_when_applicable"] == ["url"]
+    assert contract["web_change"]["required_when_applicable"] == ["fixture"]
+    assert contract["signal_memory"]["valid_action_rule"] == "action must start with load_"
+    assert "Do not omit required arguments." in plan_call.input_payload["tool_planning_rules"]
 
 
 def test_evidence_tool_loop_executes_blocks_and_reprompts(

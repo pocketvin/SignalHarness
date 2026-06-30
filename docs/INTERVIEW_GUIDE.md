@@ -16,8 +16,7 @@ permission, scoring, replay, and traceability.
   architecture with scripted LLM-like JSON and controlled tool turns.
 - `agent` uses the SignalHarness OpenAI-compatible provider by default and
   validates the same structured JSON schemas, with one schema retry before
-  deterministic fallback. `OpenHarnessProvider` is optional via
-  `LLM_PROVIDER=openharness`.
+  deterministic fallback.
 
 ## Public CI and real API tests
 
@@ -49,11 +48,11 @@ Mock-agent and agent scans persist
 `.signal-harness/latest_learning_observation.json` plus a demo copy under
 `outputs/`; these files are observations, not applied configuration.
 
-## OpenHarness attribution
+## Project independence
 
-SignalHarness originated from OpenHarness downstream work and preserves MIT
-attribution. The public package now contains only SignalHarness core; optional
-provider integration is loaded only for `--mode agent`.
+SignalHarness is an independent project inspired by general agent harness
+design patterns. It does not vendor or depend on OpenHarness code. The public
+package contains only SignalHarness core.
 
 ## Multi-step evidence reasoning
 

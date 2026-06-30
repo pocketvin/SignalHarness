@@ -23,6 +23,15 @@ READ_ONLY_EVAL_TOOLS = {
     "signal_memory",
     "signal_score",
 }
+PROVIDER_ERROR_CLASSES = {
+    "rate_limited",
+    "timeout",
+    "http_error",
+    "schema_error",
+    "json_parse_error",
+    "coverage_error",
+    "unknown_error",
+}
 REPAIR_EXECUTED_STEPS = {
     "repair_context_evidence",
     "repair_impact",
@@ -65,6 +74,12 @@ class ModelEvalSummary(BaseModel):
     tool_budget_block_rate: float = Field(ge=0, le=1)
     blocked_tool_count: int = Field(ge=0)
     tool_error_count: int = Field(ge=0)
+    tool_validation_error_count: int = Field(ge=0)
+    tool_blocked_count: int = Field(ge=0)
+    tool_budget_error_count: int = Field(ge=0)
+    tool_runtime_error_count: int = Field(ge=0)
+    total_tool_error_count: int = Field(ge=0)
+    provider_error_classes: dict[str, int] = Field(default_factory=dict)
     decision_counts: dict[str, int]
     action_required_count: int = Field(ge=0)
     alert_count: int = Field(ge=0)
@@ -180,6 +195,28 @@ def build_model_eval_summary(
     budget_blocks = sum(step.budget_blocked_count or 0 for step in trace)
     blocked_tool_count = sum(len(step.blocked_tools) for step in trace)
     tool_error_count = sum(len(step.tool_errors) for step in trace)
+    tool_validation_errors = sum(
+        1
+        for step in trace
+        for error in step.tool_errors
+        if _is_tool_validation_error(error)
+    )
+    tool_runtime_errors = max(0, tool_error_count - tool_validation_errors)
+    tool_blocked_count = max(0, blocked_tool_count - budget_blocks)
+    total_tool_error_count = (
+        tool_validation_errors
+        + tool_blocked_count
+        + budget_blocks
+        + tool_runtime_errors
+    )
+    provider_error_classes: Counter[str] = Counter()
+    for step in llm_steps:
+        for message in (step.schema_error, step.error):
+            if not message:
+                continue
+            error_class = _provider_error_class(message)
+            if error_class is not None:
+                provider_error_classes[error_class] += 1
     repair_step_names = [_repair_step_name(step) for step in trace]
     repair_requested_count = sum(
         1 for name in repair_step_names if name == "repair_requested"
@@ -218,6 +255,12 @@ def build_model_eval_summary(
         tool_budget_block_rate=_rate(budget_blocks, total_tool_requests),
         blocked_tool_count=blocked_tool_count,
         tool_error_count=tool_error_count,
+        tool_validation_error_count=tool_validation_errors,
+        tool_blocked_count=tool_blocked_count,
+        tool_budget_error_count=budget_blocks,
+        tool_runtime_error_count=tool_runtime_errors,
+        total_tool_error_count=total_tool_error_count,
+        provider_error_classes=dict(sorted(provider_error_classes.items())),
         decision_counts=dict(sorted(decisions.items())),
         action_required_count=decisions["action_required"],
         alert_count=decisions["alert"],
@@ -278,11 +321,93 @@ def _render_model_eval_markdown(summary: ModelEvalSummary) -> str:
         }:
             continue
         lines.append(f"- {key}: {value}")
+    lines.extend(
+        [
+            "",
+            "## Tool error breakdown",
+            "",
+            f"- validation: {summary.tool_validation_error_count}",
+            f"- harmless guard block: {summary.tool_blocked_count}",
+            f"- budget: {summary.tool_budget_error_count}",
+            f"- runtime: {summary.tool_runtime_error_count}",
+            f"- total: {summary.total_tool_error_count}",
+            "",
+            (
+                "Validation errors usually mean a model tool argument adherence issue "
+                "(for example missing `action`, `repo`, `url`, or `fixture`)."
+            ),
+            (
+                "Blocked tool entries are normal guardrail behavior when Python rejects "
+                "non-allowlisted or non-read-only requests."
+            ),
+        ]
+    )
     return "\n".join(lines).rstrip() + "\n"
 
 
 def _rate(numerator: int, denominator: int, *, default: float = 0.0) -> float:
     return round(numerator / denominator, 4) if denominator else default
+
+
+def _is_tool_validation_error(message: str) -> bool:
+    normalized = message.lower()
+    validation_markers = (
+        "invalid input for",
+        "field required",
+        "missing",
+        "repo must use owner/name format",
+        "url must be http or https",
+        "raw is required",
+    )
+    return any(marker in normalized for marker in validation_markers)
+
+
+def _provider_error_class(message: str) -> str | None:
+    normalized = message.lower()
+    if not normalized:
+        return None
+    if (
+        "429 too many" in normalized
+        or "http 429" in normalized
+        or "status code 429" in normalized
+        or "error code: 429" in normalized
+        or "too many requests" in normalized
+        or "rate limit" in normalized
+    ):
+        return "rate_limited"
+    if "provider_timeout" in normalized or "timed out" in normalized or "timeout" in normalized:
+        return "timeout"
+    if (
+        "httpstatuserror" in normalized
+        or "client error" in normalized
+        or "server error" in normalized
+        or "bad gateway" in normalized
+        or "service unavailable" in normalized
+    ):
+        return "http_error"
+    if "coverage" in normalized:
+        return "coverage_error"
+    if (
+        "jsondecodeerror" in normalized
+        or "expecting value" in normalized
+        or "expecting property name" in normalized
+        or "agent response was empty" in normalized
+        or "agent response must be a json object" in normalized
+        or "invalid json" in normalized
+    ):
+        return "json_parse_error"
+    if (
+        "validation error" in normalized
+        or "schema validation" in normalized
+        or "field required" in normalized
+        or "extra inputs" in normalized
+    ):
+        return "schema_error"
+    if any(marker in normalized for marker in PROVIDER_ERROR_CLASSES):
+        for marker in PROVIDER_ERROR_CLASSES:
+            if marker in normalized:
+                return marker
+    return "unknown_error"
 
 
 def _repair_step_name(step: TraceStep) -> str:

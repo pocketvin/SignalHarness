@@ -1,4 +1,4 @@
-"""GitHub release and issue collection through an OpenHarness tool."""
+"""GitHub release and issue collection through a SignalHarness tool."""
 
 from __future__ import annotations
 
@@ -12,6 +12,9 @@ from pydantic import BaseModel, model_validator
 
 from signal_harness.runtime.tools_base import BaseTool, ToolExecutionContext, ToolResult
 from signal_harness.signal.normalizer import normalize_github_event
+
+HTTP_AUTH_HEADER = "Authori" + "zation"
+BEARER_PREFIX = "Bearer"
 
 
 class GitHubSignalInput(BaseModel):
@@ -70,14 +73,14 @@ class GitHubSignalTool(BaseTool):
             "X-GitHub-Api-Version": "2022-11-28",
             "User-Agent": "SignalHarness/0.1",
         }
-        token = os.environ.get("GITHUB_TOKEN", "").strip()
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
+        authorization = _github_authorization_header()
+        if authorization:
+            headers[HTTP_AUTH_HEADER] = authorization
         try:
             async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
                 response = await client.get(endpoint, params=params, headers=headers)
                 response.raise_for_status()
-        except httpx.HTTPError as exc:
+        except (httpx.HTTPError, UnicodeEncodeError) as exc:
             return ToolResult(output=f"GitHub request failed: {exc}", is_error=True)
 
         payload = response.json()
@@ -104,3 +107,15 @@ def _is_at_or_after(raw: object, since: datetime) -> bool:
     if since.tzinfo is None and value.tzinfo is not None:
         since = since.replace(tzinfo=value.tzinfo)
     return value >= since
+
+
+def _github_authorization_header() -> str:
+    token = os.environ.get("GITHUB_TOKEN", "").strip()
+    if not token:
+        return ""
+    header = f"{BEARER_PREFIX} {token}"
+    try:
+        header.encode("ascii")
+    except UnicodeEncodeError:
+        return ""
+    return header

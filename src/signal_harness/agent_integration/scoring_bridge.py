@@ -102,7 +102,7 @@ def guarded_assessments(
             and not action_item.requested_actions
         ):
             permission_checks.append(
-                f"{event.event_id}:no-high-risk-actions-requested"
+                f"{event.event_id}:no_high_risk_actions_requested"
             )
         for requested in action_item.requested_actions:
             permission = guard.evaluate(requested)
