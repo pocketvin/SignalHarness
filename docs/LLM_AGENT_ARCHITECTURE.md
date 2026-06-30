@@ -70,8 +70,7 @@ recorded as `agent_team_run_timeout`. Both use deterministic fallback.
 
 The default real-provider path is `OpenAICompatibleProvider`, configured with
 `LLM_PROVIDER=openai_compatible`, `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`,
-and `LLM_MODEL_PROFILE`. `OpenHarnessProvider` remains an optional
-compatibility integration. `ModelProfile` documents capabilities but does not
+and `LLM_MODEL_PROFILE`. `ModelProfile` documents capabilities but does not
 enable native tool calling.
 
 `model-eval` computes local metrics from trace and assessments so different

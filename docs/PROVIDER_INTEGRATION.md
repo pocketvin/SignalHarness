@@ -34,9 +34,9 @@ tool_strategy: controlled_tool_request
 supports_native_tool_calling: false
 ```
 
-`OpenHarnessProvider` is kept as an optional compatibility adapter. It is not
-imported by demo or mock-agent mode. Set `LLM_PROVIDER=openharness` only when
-intentionally using that optional upstream runtime.
+No upstream framework compatibility provider is shipped. Unsupported
+`LLM_PROVIDER` values fail clearly; use `openai_compatible` for real-provider
+smoke tests.
 
 The real-provider path still asks for structured JSON. SignalHarness does not
 use provider-native function calling: the model returns plans and outputs,

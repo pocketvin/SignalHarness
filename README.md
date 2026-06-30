@@ -13,10 +13,8 @@ self-evolving system, not a fully conversational multi-agent debate runtime,
 and not a LangGraph/CrewAI/AutoGen wrapper. The LLM never directly executes
 tools or applies configuration changes.
 
-The project originated as OpenHarness downstream work and keeps MIT attribution
-for reused or adapted ideas/code. OpenHarness is no longer the public identity
-of this repository; optional OpenHarness-compatible provider integration lives
-behind the `agent` mode path.
+SignalHarness is an independent project inspired by general agent harness
+design patterns. It does not vendor or depend on OpenHarness code.
 
 ## Core architecture
 
@@ -69,8 +67,7 @@ reads controlled observations before producing final evidence.
 
 Optional real-provider environment variables:
 
-- `LLM_PROVIDER` (default: `openai_compatible`; use `openharness` only for the
-  optional compatibility adapter)
+- `LLM_PROVIDER` (default: `openai_compatible`)
 - `LLM_API_KEY`
 - `LLM_MODEL` (default: `gpt-4o-mini`)
 - `LLM_BASE_URL` for an OpenAI-compatible endpoint
@@ -95,6 +92,21 @@ Hardcoded API keys and secret-looking fallback credentials are forbidden. Use
 environment variables such as `LLM_API_KEY` or `ANTHROPIC_API_KEY` for manual
 smoke tests, and keep `.env`, runtime outputs, caches, and build artifacts out
 of git.
+
+For local real-provider evaluation, copy `.env.example` to `.env` and fill only
+local keys. The `.env` file is ignored by git and must not be committed.
+
+```bash
+cp .env.example .env
+bash scripts/model_eval_matrix.sh --providers openai,qwen,deepseek --runs 3
+bash scripts/model_eval_matrix.sh --providers kimi --runs 1 --sleep 10
+```
+
+The matrix script sources `.env`, maps provider-specific keys into
+`LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` / `LLM_MODEL_PROFILE`, and writes
+per-provider local outputs. It does not print keys. See
+[`docs/MODEL_EVAL_REPORT.md`](docs/MODEL_EVAL_REPORT.md) and
+[`docs/AGENT_HARNESS_REVIEW.md`](docs/AGENT_HARNESS_REVIEW.md).
 
 ## Guarded score
 
@@ -304,10 +316,8 @@ real-provider path for `--mode agent`. It uses the existing `httpx` dependency
 and standard `/v1/chat/completions`-style assistant text. That text is still
 parsed by the existing schema retry/fallback path.
 
-`src/signal_harness/providers/openharness_provider.py` is deliberately optional.
-Demo and mock-agent modes do not import or require the upstream OpenHarness
-runtime. Set `LLM_PROVIDER=openharness` only when intentionally using that
-compatibility path.
+SignalHarness does not ship an upstream framework compatibility provider. The
+real-provider path is the SignalHarness-native OpenAI-compatible HTTP adapter.
 
 The deterministic layer retains normalization, deduplication, base scoring,
 schema validation, permission enforcement, reporting, persistence, replay
@@ -333,7 +343,7 @@ explicitly.
 src/signal_harness/
 ├── agent_team/         # The fixed five LLM Agents
 ├── agent_integration/  # Prompts, schemas, mode, runner, LLM trace
-├── providers/          # Mock adapter and optional provider integration
+├── providers/          # Mock adapter and OpenAI-compatible provider integration
 ├── memory/             # Four memory stores and replay evaluation
 ├── agents/             # Legacy deterministic fallback specialists
 ├── runtime/            # Workflow, permission, tools, trace
@@ -372,15 +382,16 @@ See:
 - [Self-improvement loop](docs/SELF_IMPROVEMENT_LOOP.md)
 - [Bounded repair pass](docs/REPAIR_PASS.md)
 - [Model eval results](docs/MODEL_EVAL_RESULTS.md)
+- [Current real model eval report](docs/MODEL_EVAL_REPORT.md)
+- [Agent harness review](docs/AGENT_HARNESS_REVIEW.md)
 - [Provider integration](docs/PROVIDER_INTEGRATION.md)
 - [Interview guide](docs/INTERVIEW_GUIDE.md)
 - [Real agent-mode smoke test](docs/SMOKE_TEST_AGENT_MODE.md)
 - [Real source smoke test](docs/REAL_SOURCE_SMOKE.md)
-- [Upstream attribution](docs/UPSTREAM_ATTRIBUTION.md)
 - [Example fixtures](examples/signal_harness/README.md)
 
-## Attribution
+## Independence
 
-SignalHarness includes modified components derived from
-[HKUDS/OpenHarness](https://github.com/HKUDS/OpenHarness). The MIT license and
-attribution are preserved in [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md).
+SignalHarness is an independent project inspired by general agent harness
+design patterns. It does not vendor or depend on OpenHarness code. See
+[NOTICE.md](NOTICE.md) for the concise project notice.

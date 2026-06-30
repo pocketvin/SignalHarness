@@ -31,6 +31,89 @@ class ContextEvidenceAgent:
         "signal_memory",
         "signal_score",
     )
+    tool_request_contract = {
+        "github_signal": {
+            "required": ["action"],
+            "common_valid_actions": ["fetch_repo_releases", "fetch_repo_issues"],
+            "required_when_applicable": ["repo"],
+            "minimal_examples": [
+                {
+                    "tool_name": "github_signal",
+                    "arguments": {
+                        "action": "fetch_repo_releases",
+                        "repo": "owner/name",
+                    },
+                    "reason": "Read recent official releases for an observed repository signal.",
+                },
+                {
+                    "tool_name": "github_signal",
+                    "arguments": {
+                        "action": "fetch_repo_issues",
+                        "repo": "owner/name",
+                    },
+                    "reason": "Read official issues for an observed repository signal.",
+                },
+            ],
+        },
+        "rss_signal": {
+            "required": ["action"],
+            "common_valid_actions": ["fetch_feed"],
+            "required_when_applicable": ["url"],
+            "minimal_examples": [
+                {
+                    "tool_name": "rss_signal",
+                    "arguments": {
+                        "action": "fetch_feed",
+                        "url": "https://example.com/feed.xml",
+                    },
+                    "reason": "Read the observed feed for source corroboration.",
+                }
+            ],
+        },
+        "web_change": {
+            "required": ["action"],
+            "common_valid_actions": ["load_fixture"],
+            "required_when_applicable": ["fixture"],
+            "minimal_examples": [
+                {
+                    "tool_name": "web_change",
+                    "arguments": {
+                        "action": "load_fixture",
+                        "fixture": "examples/signal_harness/sample_events.json",
+                    },
+                    "reason": "Read a local fixture-backed web-change source.",
+                }
+            ],
+        },
+        "signal_memory": {
+            "required": ["action"],
+            "valid_action_rule": "action must start with load_",
+            "minimal_examples": [
+                {
+                    "tool_name": "signal_memory",
+                    "arguments": {"action": "load_project_profile"},
+                    "reason": "Read stable project context.",
+                },
+                {
+                    "tool_name": "signal_memory",
+                    "arguments": {"action": "load_signal_policy"},
+                    "reason": "Read scoring and permission policy.",
+                },
+                {
+                    "tool_name": "signal_memory",
+                    "arguments": {"action": "load_watchlist"},
+                    "reason": "Read configured watched sources.",
+                },
+            ],
+        },
+    }
+    tool_planning_rules = [
+        "Do not omit required arguments.",
+        "If you are unsure of the required arguments, do not request the tool.",
+        "Use existing event context instead of emitting invalid tool calls.",
+        "Do not request write or mutation tools.",
+        "Python runtime executes or blocks tools; do not pretend execution happened.",
+    ]
 
     def build_tool_plan_call(
         self,
@@ -51,6 +134,8 @@ class ContextEvidenceAgent:
             ],
             "source_diversity": sorted({event.source_type for event in events}),
             "available_tools": list(self.available_tools),
+            "tool_request_contract": self.tool_request_contract,
+            "tool_planning_rules": self.tool_planning_rules,
             "phase": "tool_planning",
         }
         return build_agent_call(

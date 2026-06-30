@@ -10,7 +10,7 @@ from signal_harness.runtime.tools_base import ToolExecutionContext, ToolRegistry
 
 
 class SignalToolExecutor:
-    """Resolve, validate, and execute allowlisted OpenHarness tools."""
+    """Resolve, validate, and execute allowlisted SignalHarness tools."""
 
     def __init__(
         self,

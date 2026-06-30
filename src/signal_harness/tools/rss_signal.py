@@ -1,4 +1,4 @@
-"""RSS and Atom feed collection through an OpenHarness tool."""
+"""RSS and Atom feed collection through a SignalHarness tool."""
 
 from __future__ import annotations
 

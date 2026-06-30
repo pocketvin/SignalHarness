@@ -29,8 +29,8 @@ Rules:
 - Memory is infrastructure, not an Agent.
 - `demo` is deterministic fallback; `mock-agent` uses scripted offline LLM-like
   calls; `agent` uses an optional real-provider integration.
-- Keep provider adapters thin; demo and mock-agent must not require upstream
-  OpenHarness imports.
+- Keep provider adapters thin; demo, mock-agent, and public CI must not require
+  upstream framework imports.
 - Prompt, schema, route, or tool-use changes require matching tests and docs.
 - Public CI must stay SignalHarness-focused and offline: pytest
   `tests/signal_harness`, Ruff, mypy, and `uv build` only. It must not require

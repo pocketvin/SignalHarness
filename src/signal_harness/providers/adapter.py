@@ -1,4 +1,4 @@
-"""Small domain adapter over the OpenHarness streaming-message protocol."""
+"""Small domain adapter over a single structured-completion provider call."""
 
 from __future__ import annotations
 

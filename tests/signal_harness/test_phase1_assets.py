@@ -38,7 +38,8 @@ def test_sample_events_match_signal_event_schema() -> None:
     assert any(event.event_id == "demo-001" for event in events)
 
 
-def test_notice_preserves_openharness_attribution() -> None:
+def test_notice_describes_independent_harness_identity() -> None:
     notice = (ROOT / "NOTICE.md").read_text(encoding="utf-8")
-    assert "HKUDS/OpenHarness" in notice
-    assert (ROOT / "LICENSE").exists()
+    assert "independent project inspired by general agent harness design patterns" in notice
+    assert "does not vendor or depend on OpenHarness code" in notice
+    assert not (ROOT / "LICENSE").exists()

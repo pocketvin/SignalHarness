@@ -27,7 +27,6 @@ from signal_harness.memory import (
 from signal_harness.memory.replay import evaluate_policy_replay
 from signal_harness.providers.adapter import AgentCall
 from signal_harness.providers.mock_provider import MockProvider
-from signal_harness.providers.openharness_provider import OpenHarnessProvider
 from signal_harness.runtime.workflow import SignalHarnessWorkflow
 from signal_harness.signal.feedback import create_feedback_record
 from signal_harness.signal.normalizer import normalize_event
@@ -450,43 +449,6 @@ def test_memory_is_named_as_infrastructure() -> None:
     }
 
 
-def test_openharness_provider_is_a_thin_native_client_adapter(
-    project_root: Path,
-) -> None:
-    class FakeMessage:
-        text = '{"ok": true}'
-
-    class FakeEvent:
-        message = FakeMessage()
-
-    class FakeOpenHarnessClient:
-        async def stream_message(self, request):
-            assert request.model == "test-model"
-            yield FakeEvent()
-
-    provider = OpenHarnessProvider(
-        api_key="unused",
-        model="test-model",
-        client=FakeOpenHarnessClient(),
-    )
-    output = asyncio.run(
-        provider.complete(
-            AgentCall(
-                agent_name="TestAgent",
-                system_prompt="system",
-                user_prompt="user",
-                prompt_version="v1",
-                output_schema="TestOutput",
-                input_payload={},
-            )
-        )
-    )
-    source = (
-        project_root
-        / "src/signal_harness/providers/openharness_provider.py"
-    ).read_text(encoding="utf-8")
-
-    assert output == '{"ok": true}'
-    assert "OpenAICompatibleClient" in source
-    assert "ProviderRequest" in source
-    assert "QueryEngine" not in source
+def test_no_openharness_provider_dependency(project_root: Path) -> None:
+    assert not (project_root / "src/signal_harness/providers/openharness_provider.py").exists()
+    assert not (project_root / "src/signal_harness/runtime/agent_loop.py").exists()

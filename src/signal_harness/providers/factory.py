@@ -25,10 +25,6 @@ def provider_from_env(
     provider_name = os.environ.get("LLM_PROVIDER", "openai_compatible").strip().lower()
     if provider_name in {"openai_compatible", "openai-compatible", "openai"}:
         return OpenAICompatibleProvider.from_env(config_dir=config_dir)
-    if provider_name == "openharness":
-        from signal_harness.providers.openharness_provider import OpenHarnessProvider
-
-        return OpenHarnessProvider.from_env()
     raise ValueError(
-        "Unsupported LLM_PROVIDER. Use openai_compatible or openharness."
+        "Unsupported LLM_PROVIDER. Use openai_compatible."
     )

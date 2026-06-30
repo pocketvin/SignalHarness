@@ -1,4 +1,4 @@
-"""SignalHarness-specific OpenHarness ToolRegistry assembly."""
+"""SignalHarness-specific tool registry assembly."""
 
 from __future__ import annotations
 

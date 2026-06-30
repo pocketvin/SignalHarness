@@ -46,6 +46,11 @@ def test_model_eval_mock_agent_writes_summary(
     assert summary["run_state_mode"] == "shared"
     assert summary["isolated_state"] is False
     assert "repair_requested_count" in summary
+    assert "tool_validation_error_count" in summary
+    assert "tool_blocked_count" in summary
+    assert "tool_budget_error_count" in summary
+    assert "tool_runtime_error_count" in summary
+    assert "total_tool_error_count" in summary
 
 
 def test_model_eval_agent_without_key_is_not_default_real_api(
@@ -168,3 +173,67 @@ def test_model_eval_summary_counts_repair_metrics() -> None:
     assert summary.repair_executed_count == 3
     assert summary.repair_blocked_count == 1
     assert summary.repair_fallback_count == 1
+
+
+def test_model_eval_summary_breaks_down_tool_errors() -> None:
+    summary = build_model_eval_summary(
+        assessments=[],
+        trace=[
+            TraceStep(
+                step="llm_agent_call",
+                status="success",
+                duration_ms=10,
+                output_schema="EvidenceToolPlan",
+                schema_valid=True,
+                tool_errors=[
+                    "github_signal: Invalid input for github_signal: action Field required",
+                    "rss_signal: RSS request failed: boom",
+                ],
+                blocked_tools=["bash", "signal_memory"],
+                budget_blocked_count=1,
+            ),
+        ],
+        runs=1,
+        provider="mock-provider",
+        model="mock-model",
+        model_profile="mock-agent",
+    )
+
+    assert summary.tool_validation_error_count == 1
+    assert summary.tool_runtime_error_count == 1
+    assert summary.tool_blocked_count == 1
+    assert summary.tool_budget_error_count == 1
+    assert summary.total_tool_error_count == 4
+
+
+def test_model_eval_summary_classifies_provider_errors() -> None:
+    summary = build_model_eval_summary(
+        assessments=[],
+        trace=[
+            TraceStep(
+                step="llm_agent_call",
+                status="success",
+                duration_ms=10,
+                schema_valid=False,
+                fallback_used=True,
+                schema_error="Client error '429 Too Many Requests'",
+            ),
+            TraceStep(
+                step="llm_agent_call",
+                status="success",
+                duration_ms=10,
+                schema_valid=False,
+                fallback_used=True,
+                schema_error="JSONDecodeError: Expecting value",
+            ),
+        ],
+        runs=1,
+        provider="mock-provider",
+        model="mock-model",
+        model_profile="mock-agent",
+    )
+
+    assert summary.provider_error_classes == {
+        "json_parse_error": 1,
+        "rate_limited": 1,
+    }

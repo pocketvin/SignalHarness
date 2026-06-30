@@ -1,4 +1,4 @@
-"""Configuration and feedback memory access through an OpenHarness tool."""
+"""Configuration and feedback memory access through a SignalHarness tool."""
 
 from __future__ import annotations
 

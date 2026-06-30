@@ -1,4 +1,4 @@
-"""Report generation exposed through the OpenHarness tool protocol."""
+"""Report generation exposed through the local SignalHarness tool protocol."""
 
 from __future__ import annotations
 

@@ -16,10 +16,10 @@
   {
     "event_id": "demo-002",
     "source_type": "github_issue",
-    "source_name": "HKUDS/OpenHarness",
+    "source_name": "langchain-ai/langgraph",
     "title": "Proposal to restrict tools with a runtime allowlist",
     "content": "The issue discusses exposing only explicitly enabled tools to an agent.",
-    "url": "https://github.com/HKUDS/OpenHarness/issues/200",
+    "url": "https://github.com/langchain-ai/langgraph/issues/200",
     "published_at": "2026-06-19T14:00:00Z",
     "raw_payload": {
       "state": "open",
@@ -30,10 +30,10 @@
   {
     "event_id": "demo-003",
     "source_type": "rss",
-    "source_name": "Example Expert Feed",
+    "source_name": "Simon Willison",
     "title": "Why evidence trails matter in multi-agent systems",
     "content": "An expert argues that structured evidence and trace records reduce unsupported conclusions.",
-    "url": "https://example.com/evidence-trails",
+    "url": "https://simonwillison.net/atom/everything/",
     "published_at": "2026-06-18T08:00:00Z",
     "raw_payload": {
       "author": "Demo Expert"

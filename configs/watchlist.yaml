@@ -1,9 +1,5 @@
 github:
   repositories:
-    - repo: HKUDS/OpenHarness
-      events:
-        - releases
-        - issues
     - repo: langchain-ai/langgraph
       events:
         - releases

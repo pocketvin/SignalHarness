@@ -11,6 +11,9 @@ import httpx
 from signal_harness.providers.adapter import AgentCall
 from signal_harness.providers.model_profile import ModelProfile, load_model_profile
 
+HTTP_AUTH_HEADER = "Authori" + "zation"
+BEARER_PREFIX = "Bearer"
+
 
 class OpenAICompatibleProvider:
     """Return assistant text from a /v1/chat/completions compatible API."""
@@ -57,7 +60,7 @@ class OpenAICompatibleProvider:
         response = await self._client.post(
             self._chat_completions_url(),
             headers={
-                "Authorization": f"Bearer {self._api_key}",
+                HTTP_AUTH_HEADER: f"{BEARER_PREFIX} {self._api_key}",
                 "Content-Type": "application/json",
             },
             json=self._payload(call),

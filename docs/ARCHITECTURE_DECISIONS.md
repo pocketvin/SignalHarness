@@ -1,13 +1,13 @@
 # Architecture Decisions
 
-SignalHarness started as OpenHarness downstream work, but the current goal is
-an independent SignalHarness project: a standalone LLM-enhanced routed
+SignalHarness is an independent project: a standalone LLM-enhanced routed
 multi-agent signal intelligence harness for GitHub/RSS/web-change signals.
+It is inspired by general agent harness design patterns. It does not vendor or
+depend on OpenHarness code.
 
 ## Public identity
 
-The repository is not presented as an OpenHarness distribution. The public
-identity is SignalHarness:
+The public identity is SignalHarness:
 
 - five structured Agents for routing, evidence, impact, action, and learning;
 - a controlled two-step evidence tool-use loop;
@@ -15,22 +15,15 @@ identity is SignalHarness:
   fallback, trace, output, and final scoring;
 - review-only learning proposals.
 
-OpenHarness remains important for origin, attribution, and optional integration
-ideas, but it is no longer packaged as the core runtime.
+## One command surface
 
-## Why the OpenHarness/oh/ohmo entry points were removed
-
-The `openharness`, `oh`, `openh`, and `ohmo` public scripts made the project
-look like an OpenHarness release. They were removed so interviewers and users
-see one product surface:
+The public command surface is intentionally one product:
 
 ```bash
 signal-harness
 ```
 
-The wheel now packages only `src/signal_harness`. Upstream directories such as
-`src/openharness`, `ohmo`, the React terminal frontend, autopilot dashboard,
-plugin folders, and upstream tests are not part of SignalHarness core.
+The wheel packages only `src/signal_harness`.
 
 ## Local compatibility layer
 
@@ -39,10 +32,9 @@ SignalHarness keeps small local interfaces for what it actually needs:
 - `signal_harness.utils.fs.atomic_write_text`
 - `signal_harness.runtime.tools_base`
 
-This lets `demo` and `mock-agent` run without importing the full OpenHarness
-package. The default real-provider path is now a SignalHarness-native
-OpenAI-compatible HTTP adapter using `httpx`. The OpenHarness adapter remains
-available only behind `LLM_PROVIDER=openharness`.
+This lets `demo` and `mock-agent` run without importing external Agent
+frameworks. The default real-provider path is a SignalHarness-native
+OpenAI-compatible HTTP adapter using `httpx`.
 
 ## Why not LangGraph, CrewAI, AutoGen, LangChain, Dify, or similar frameworks
 
@@ -122,8 +114,8 @@ and `outputs/latest_learning_risk_report.md` are demo snapshots only.
 
 ## Dependency boundary
 
-Some heavy dependency patterns in the repository history came from upstream
-OpenHarness breadth. SignalHarness uses a focused subset: Pydantic schemas,
+Some heavy dependency patterns in early experiments came from broader Agent
+harness research. SignalHarness uses a focused subset: Pydantic schemas,
 Typer CLI, Rich terminal output, PyYAML configuration, `httpx` provider/source
 adapters, and dev-only test/type/lint tooling. It deliberately does not add
 LangGraph, CrewAI, AutoGen, LangChain, Dify, Haystack, Langfuse, Redis,

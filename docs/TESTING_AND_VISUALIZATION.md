@@ -19,7 +19,7 @@ Coverage includes:
 - four memory stores and LearningPolicyAgent naming;
 - policy, skill, and watchlist proposals;
 - replay comparison and no automatic configuration mutation;
-- OpenHarness provider-client reuse and thin adapter boundaries.
+- provider-client isolation and thin adapter boundaries.
 
 ## Compatibility regression
 

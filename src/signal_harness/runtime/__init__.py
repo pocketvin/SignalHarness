@@ -1,4 +1,4 @@
-"""OpenHarness-backed runtime assembly for SignalHarness."""
+"""Runtime assembly for SignalHarness workflows."""
 
 from signal_harness.runtime.tool_executor import SignalToolExecutor
 from signal_harness.runtime.tool_registry import SIGNAL_TOOL_ALLOWLIST, create_signal_tool_registry

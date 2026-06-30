@@ -45,18 +45,18 @@ def test_same_github_repo_unrelated_issues_do_not_cluster() -> None:
         _event(
             "issue-1",
             source_type="github_issue",
-            source_name="HKUDS/OpenHarness",
+            source_name="ExampleOrg/SignalRuntime",
             title="Terminal theme preference bug",
             content="Dark mode color contrast in the terminal footer.",
-            url="https://github.com/HKUDS/OpenHarness/issues/1",
+            url="https://github.com/ExampleOrg/SignalRuntime/issues/1",
         ),
         _event(
             "issue-2",
             source_type="github_issue",
-            source_name="HKUDS/OpenHarness",
+            source_name="ExampleOrg/SignalRuntime",
             title="OAuth callback timeout",
             content="Login redirect occasionally stalls after browser authentication.",
-            url="https://github.com/HKUDS/OpenHarness/issues/2",
+            url="https://github.com/ExampleOrg/SignalRuntime/issues/2",
         ),
     ]
 
@@ -91,26 +91,26 @@ def test_cross_source_same_topic_clusters_when_time_and_tokens_match() -> None:
         _event(
             "release",
             source_type="github_release",
-            source_name="HKUDS/OpenHarness",
+            source_name="ExampleOrg/SignalRuntime",
             title="Checkpoint persistence release",
             content="Durable checkpoint persistence and recovery landed.",
-            url="https://github.com/HKUDS/OpenHarness/releases/tag/v2",
+            url="https://github.com/ExampleOrg/SignalRuntime/releases/tag/v2",
         ),
         _event(
             "rss",
             source_type="rss",
             source_name="Independent Agent Engineering",
             title="Reviewing checkpoint persistence",
-            content="Commentary on durable checkpoint recovery in OpenHarness.",
+            content="Commentary on durable checkpoint recovery in SignalRuntime.",
             url="https://engineering.example.com/checkpoint-persistence",
         ),
         _event(
             "web",
             source_type="web_change",
-            source_name="OpenHarness product page",
+            source_name="SignalRuntime product page",
             title="Checkpoint persistence docs update",
             content="Product page now describes durable checkpoint recovery.",
-            url="https://openharness.example.com/checkpoint",
+            url="https://signalruntime.example.com/checkpoint",
         ),
     ]
 
@@ -122,10 +122,10 @@ def test_missing_published_at_does_not_relax_clustering() -> None:
         _event(
             "undated-1",
             source_type="github_issue",
-            source_name="HKUDS/OpenHarness",
+            source_name="ExampleOrg/SignalRuntime",
             title="Checkpoint persistence recovery",
             content="Durable checkpoint recovery discussion.",
-            url="https://github.com/HKUDS/OpenHarness/issues/10",
+            url="https://github.com/ExampleOrg/SignalRuntime/issues/10",
             published_at=None,
         ),
         _event(
@@ -146,18 +146,18 @@ def test_source_name_alone_does_not_cluster_events() -> None:
         _event(
             "release-note",
             source_type="github_release",
-            source_name="HKUDS/OpenHarness",
+            source_name="ExampleOrg/SignalRuntime",
             title="Checkpoint persistence release",
             content="Durable checkpoint recovery helpers shipped.",
-            url="https://github.com/HKUDS/OpenHarness/releases/tag/v2",
+            url="https://github.com/ExampleOrg/SignalRuntime/releases/tag/v2",
         ),
         _event(
             "community-issue",
             source_type="github_issue",
-            source_name="HKUDS/OpenHarness",
+            source_name="ExampleOrg/SignalRuntime",
             title="Terminal keyboard shortcut request",
             content="Users want a quicker shortcut for toggling the terminal panel.",
-            url="https://github.com/HKUDS/OpenHarness/issues/99",
+            url="https://github.com/ExampleOrg/SignalRuntime/issues/99",
         ),
     ]
 

@@ -12,18 +12,6 @@ from signal_harness.providers.factory import provider_from_env
 from signal_harness.providers.mock_provider import MockProvider
 from signal_harness.providers.model_profile import ModelProfile, load_model_profile
 from signal_harness.providers.openai_compatible_provider import OpenAICompatibleProvider
-from signal_harness.providers.openharness_provider import OpenHarnessProvider
-
-
-class _FakeProvider:
-    name = "fake-openharness"
-    model = "fake"
-
-    async def complete(self, call: AgentCall) -> str:
-        return "{}"
-
-    async def close(self) -> None:
-        return None
 
 
 def _call() -> AgentCall:
@@ -123,17 +111,17 @@ def test_provider_factory_defaults_to_openai_compatible(
     asyncio.run(provider.close())
 
 
-def test_provider_factory_openharness_remains_optional(monkeypatch) -> None:
-    fake = _FakeProvider()
+def test_provider_factory_rejects_unsupported_provider(monkeypatch) -> None:
     monkeypatch.setenv("LLM_API_KEY", "test-key")
-    monkeypatch.setenv("LLM_PROVIDER", "openharness")
-    monkeypatch.setattr(
-        OpenHarnessProvider,
-        "from_env",
-        classmethod(lambda cls: fake),
-    )
+    monkeypatch.setenv("LLM_PROVIDER", "unsupported-provider")
 
-    assert provider_from_env(RunMode.AGENT) is fake
+    try:
+        provider_from_env(RunMode.AGENT)
+    except ValueError as exc:
+        assert "Unsupported LLM_PROVIDER" in str(exc)
+        assert "openai_compatible" in str(exc)
+    else:
+        raise AssertionError("unsupported provider should fail clearly")
 
 
 def test_mock_provider_needs_no_llm_api_key(monkeypatch) -> None:
