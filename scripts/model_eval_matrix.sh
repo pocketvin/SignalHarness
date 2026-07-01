@@ -17,6 +17,7 @@ STATE_ROOT="${MODEL_EVAL_STATE_ROOT:-".signal-harness/model-eval-matrix"}"
 STRICT="${MODEL_EVAL_STRICT:-0}"
 PROVIDERS_CSV="${MODEL_EVAL_PROVIDERS:-"openai,qwen,kimi,deepseek"}"
 SLEEP_SECONDS="${MODEL_EVAL_SLEEP_SECONDS:-0}"
+REQUEST_SLEEP_SECONDS="${MODEL_EVAL_REQUEST_SLEEP_SECONDS:-}"
 
 usage() {
   cat <<'EOF'
@@ -25,7 +26,9 @@ Usage: scripts/model_eval_matrix.sh [options]
 Options:
   --providers CSV   Providers to run, comma-separated (default: openai,qwen,kimi,deepseek)
   --runs N          Number of runs per provider (default: MODEL_EVAL_RUNS or 1)
-  --sleep N         Seconds to sleep before each provider run (default: 0)
+  --sleep N         Seconds to sleep before each provider run (default: 0);
+                    also enables 1s provider request pacing unless
+                    MODEL_EVAL_REQUEST_SLEEP_SECONDS is set
   --fixture PATH    Fixture path (default: examples/signal_harness/sample_events.json)
   --output-root DIR Matrix output root (default: outputs/model-eval-matrix)
   --state-root DIR  Matrix state root (default: .signal-harness/model-eval-matrix)
@@ -108,6 +111,13 @@ fi
 if ! [[ "${SLEEP_SECONDS}" =~ ^[0-9]+$ ]]; then
   echo "--sleep must be a non-negative integer" >&2
   exit 2
+fi
+
+if [[ -z "${REQUEST_SLEEP_SECONDS}" ]]; then
+  REQUEST_SLEEP_SECONDS="0"
+  if [[ "${SLEEP_SECONDS}" -gt 0 ]]; then
+    REQUEST_SLEEP_SECONDS="1"
+  fi
 fi
 
 if [[ ! -f "${ENV_FILE}" ]]; then
@@ -253,6 +263,7 @@ run_eval() {
   export LLM_BASE_URL="${!base_var:-${default_base_url}}"
   export LLM_MODEL="${!model_var:-${default_model}}"
   export LLM_MODEL_PROFILE="${profile}"
+  export LLM_REQUEST_SLEEP_SECONDS="${REQUEST_SLEEP_SECONDS}"
 
   if [[ "${SLEEP_SECONDS}" -gt 0 ]]; then
     echo "Sleeping ${SLEEP_SECONDS}s before ${label} run..."

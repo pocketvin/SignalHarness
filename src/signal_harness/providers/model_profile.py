@@ -11,6 +11,7 @@ import yaml
 
 SchemaStrategy = Literal["prompt_json_retry"]
 ToolStrategy = Literal["controlled_tool_request"]
+OutputTokenParameter = Literal["max_tokens", "max_completion_tokens"]
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,7 @@ class ModelProfile:
     recommended_temperature: float = 0.0
     schema_strategy: SchemaStrategy = "prompt_json_retry"
     tool_strategy: ToolStrategy = "controlled_tool_request"
+    output_token_parameter: OutputTokenParameter = "max_tokens"
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "ModelProfile":
@@ -54,6 +56,9 @@ class ModelProfile:
             ),
             schema_strategy=_schema_strategy(payload.get("schema_strategy")),
             tool_strategy=_tool_strategy(payload.get("tool_strategy")),
+            output_token_parameter=_output_token_parameter(
+                payload.get("output_token_parameter")
+            ),
         )
         if not profile.model:
             raise ValueError("Model profile requires a non-empty model")
@@ -79,6 +84,7 @@ class ModelProfile:
             recommended_temperature=self.recommended_temperature,
             schema_strategy=self.schema_strategy,
             tool_strategy=self.tool_strategy,
+            output_token_parameter=self.output_token_parameter,
         )
 
 
@@ -121,3 +127,11 @@ def _tool_strategy(value: object) -> ToolStrategy:
     if value in (None, "controlled_tool_request"):
         return "controlled_tool_request"
     raise ValueError(f"Unsupported tool_strategy: {value}")
+
+
+def _output_token_parameter(value: object) -> OutputTokenParameter:
+    if value in (None, "max_tokens"):
+        return "max_tokens"
+    if value == "max_completion_tokens":
+        return "max_completion_tokens"
+    raise ValueError(f"Unsupported output_token_parameter: {value}")
