@@ -65,6 +65,44 @@ LLM_API_KEY=... uv run signal-harness scan \
 multiple turns: ContextEvidenceAgent first proposes tool requests and then
 reads controlled observations before producing final evidence.
 
+## Demo paths
+
+Use the fixture path when you need a stable offline demo or CI-safe run:
+
+```bash
+uv run signal-harness scan \
+  --fixture examples/signal_harness/sample_events.json \
+  --mode mock-agent
+```
+
+`examples/signal_harness/sample_events.json` is intentionally fixture-backed
+and may contain demo links. `configs/watchlist_demo.yaml` preserves a
+fixture-backed watchlist variant for local demo experiments.
+
+For a live OpenAI showcase, do not pass `--fixture`. The default
+`configs/watchlist.yaml` is the live watchlist and no longer includes the
+fixture-backed `sample-product-changelog` source:
+
+```bash
+SINCE="$(python - <<'PY'
+from datetime import datetime, timedelta, timezone
+print((datetime.now(timezone.utc) - timedelta(days=14)).replace(microsecond=0).isoformat().replace("+00:00", "Z"))
+PY
+)"
+
+uv run signal-harness scan \
+  --mode agent \
+  --since "$SINCE" \
+  --max-events 20 \
+  --max-events-per-source 8 \
+  --output-dir outputs/openai-live-showcase \
+  --state-dir .signal-harness/openai-live-showcase
+```
+
+Live provider runs can hit context limits, rate limits, schema retries, or
+timeouts. The dashboard now makes fallback/retry/timeout health explicit and
+labels deterministic fallback audit output when it is used.
+
 Optional real-provider environment variables:
 
 - `LLM_PROVIDER` (default: `openai_compatible`)

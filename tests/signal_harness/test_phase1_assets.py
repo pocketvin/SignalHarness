@@ -13,10 +13,25 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_versioned_configs_are_parseable() -> None:
-    for name in ("project_profile.yaml", "watchlist.yaml", "signal_policy.yaml"):
+    for name in (
+        "project_profile.yaml",
+        "watchlist.yaml",
+        "watchlist_demo.yaml",
+        "signal_policy.yaml",
+    ):
         payload = yaml.safe_load((ROOT / "configs" / name).read_text(encoding="utf-8"))
         assert isinstance(payload, dict)
         assert payload
+
+
+def test_live_watchlist_does_not_use_sample_fixture() -> None:
+    live = yaml.safe_load((ROOT / "configs/watchlist.yaml").read_text(encoding="utf-8"))
+    demo = yaml.safe_load(
+        (ROOT / "configs/watchlist_demo.yaml").read_text(encoding="utf-8")
+    )
+
+    assert "sample_events.json" not in json.dumps(live)
+    assert "sample_events.json" in json.dumps(demo)
 
 
 def test_score_weights_sum_to_one() -> None:

@@ -255,6 +255,18 @@ def parse_since(value: str | None) -> datetime | None:
 def scan(
     fixture: Path | None = typer.Option(None, "--fixture", help="Local JSON event fixture"),
     since: str | None = typer.Option(None, "--since", help="Collect events after ISO time"),
+    max_events: int | None = typer.Option(
+        None,
+        "--max-events",
+        min=1,
+        help="Deterministically keep at most N collected events before Agent execution",
+    ),
+    max_events_per_source: int | None = typer.Option(
+        None,
+        "--max-events-per-source",
+        min=1,
+        help="Deterministically keep at most N events from each source before Agent execution",
+    ),
     cwd: Path = typer.Option(Path.cwd(), "--cwd", hidden=True),
     config_dir: Path = typer.Option(Path("configs"), "--config-dir"),
     output_dir: Path = typer.Option(Path("outputs"), "--output-dir"),
@@ -276,7 +288,14 @@ def scan(
         state_dir=state_dir,
         mode=mode,
     )
-    result = asyncio.run(workflow.scan(fixture=fixture, since=parse_since(since)))
+    result = asyncio.run(
+        workflow.scan(
+            fixture=fixture,
+            since=parse_since(since),
+            max_events=max_events,
+            max_events_per_source=max_events_per_source,
+        )
+    )
     render_assessment_table(result.signals, result.assessments)
     typer.echo(f"Generated SignalHarness outputs in {result.output_dir}")
 

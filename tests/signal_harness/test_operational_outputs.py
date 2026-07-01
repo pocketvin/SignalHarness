@@ -106,6 +106,10 @@ def test_dashboard_and_digest_outputs_include_expected_sections(tmp_path: Path) 
                     "status": "success",
                     "duration_ms": 10,
                     "agent_name": "ContextEvidenceAgent",
+                    "schema_valid": False,
+                    "fallback_used": True,
+                    "retry_count": 1,
+                    "schema_error": "provider_timeout after 45s",
                     "tools_requested": ["github_signal"],
                     "tools_executed": ["github_signal"],
                     "blocked_tools": [],
@@ -181,15 +185,26 @@ def test_dashboard_and_digest_outputs_include_expected_sections(tmp_path: Path) 
 
     html = dashboard.read_text(encoding="utf-8")
     assert "SignalHarness Dashboard" in html
+    assert "信号总览 / Executive Summary" in html
+    assert "LLM fallback health notice" in html
     assert "High priority signals" in html
+    assert "[Release] example/project: Security-sensitive provider release" in html
+    assert "core-provider-permission" in html
+    assert "Grouped dependency updates" in html
     assert "Alerts" in html
     assert "Source health" in html
     assert "Model, profile, and limits" in html
+    assert "llm_agent_call_count: 1" in html
+    assert "schema_failures: 1" in html
+    assert "fallback_count: 1" in html
+    assert "retry_total: 1" in html
     assert "Agent trace and tools" in html
     assert "Agent repair pass" in html
     assert "No repair pass was triggered." in html
     assert "Score breakdown" in html
     assert "Learning proposal summary" in html
+    assert "Learning proposals are review-only" in html
+    assert "本次未自动应用学习结果" in html
     assert "Learning staging" in html
     assert "proposal-1" in html
     for digest in (daily, weekly):

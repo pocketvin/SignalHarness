@@ -59,6 +59,40 @@ The smoke test validates:
 - prompt and Agent trace fields;
 - deterministic scoring and permission guards.
 
+## Live OpenAI showcase smoke
+
+For a more realistic interview showcase, do not pass `--fixture`. This makes
+SignalHarness collect from `configs/watchlist.yaml` rather than the local
+sample fixture. Keep the batch small so the provider has room for structured
+Agent calls:
+
+```bash
+SINCE="$(python - <<'PY'
+from datetime import datetime, timedelta, timezone
+print((datetime.now(timezone.utc) - timedelta(days=14)).replace(microsecond=0).isoformat().replace("+00:00", "Z"))
+PY
+)"
+
+uv run signal-harness scan \
+  --mode agent \
+  --since "$SINCE" \
+  --max-events 20 \
+  --max-events-per-source 8 \
+  --output-dir outputs/openai-live-showcase \
+  --state-dir .signal-harness/openai-live-showcase
+
+uv run signal-harness dashboard --output-dir outputs/openai-live-showcase
+uv run signal-harness trace --output-dir outputs/openai-live-showcase
+```
+
+`configs/watchlist.yaml` is the live default watchlist. The fixture-backed
+variant is kept separately as `configs/watchlist_demo.yaml`, and the stable
+offline fixture remains `examples/signal_harness/sample_events.json`.
+
+Real provider calls can still hit context limits, rate limits, schema retries,
+or timeouts. The dashboard shows LLM fallback/retry/timeout health and explains
+when deterministic fallback audit output was used.
+
 Real network calls may fail because of credentials, endpoint compatibility,
 rate limits, model behavior, or provider availability. Such failures do not
 invalidate offline `demo` or scripted `mock-agent` tests.

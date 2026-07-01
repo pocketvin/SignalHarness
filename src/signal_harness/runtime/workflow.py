@@ -66,6 +66,12 @@ class CollectionBatch:
 
 
 @dataclass(frozen=True)
+class EventLimitResult:
+    events: list[dict[str, Any]]
+    metadata: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class SourceJob:
     tool_name: str
     arguments: dict[str, Any]
@@ -120,7 +126,13 @@ class SignalHarnessWorkflow:
         *,
         fixture: str | Path | None = None,
         since: datetime | None = None,
+        max_events: int | None = None,
+        max_events_per_source: int | None = None,
     ) -> ScanResult:
+        if max_events is not None and max_events < 1:
+            raise ValueError("max_events must be a positive integer")
+        if max_events_per_source is not None and max_events_per_source < 1:
+            raise ValueError("max_events_per_source must be a positive integer")
         run_id = f"run-{uuid4().hex[:12]}"
         with self.trace.step("load_config", input_count=3) as state:
             profile, policy, watchlist = await self._load_config()
@@ -161,18 +173,34 @@ class SignalHarnessWorkflow:
                     since=since,
                     guard=guard,
                 )
-            raw_events = collection.events
+            limit_result = self._apply_event_limits(
+                collection.events,
+                max_events=max_events,
+                max_events_per_source=max_events_per_source,
+            )
+            raw_events = limit_result.events
             state["output_count"] = len(raw_events)
             state["failed_sources"] = collection.failed_sources
             state["source_tasks"] = collection.source_tasks
+            if limit_result.metadata:
+                state["metadata"] = {"event_limits": limit_result.metadata}
             state["cache_events"] = [
                 f"source:{task.source_type}:{'hit' if task.cache_hit else 'miss'}"
                 for task in collection.source_tasks
             ]
+            detail_parts: list[str] = []
             if collection.failed_sources:
-                state["detail"] = (
+                detail_parts.append(
                     f"Partial collection failure: {len(collection.failed_sources)} source(s)"
                 )
+            dropped = int(limit_result.metadata.get("dropped_count", 0))
+            if dropped:
+                before = int(limit_result.metadata.get("before_count", len(collection.events)))
+                detail_parts.append(
+                    "Deterministic event limit applied: "
+                    f"before={before}, after={len(raw_events)}, dropped={dropped}"
+                )
+            state["detail"] = "; ".join(detail_parts)
 
         with self.trace.step("normalize", input_count=len(raw_events)) as state:
             events = [self._normalize_collected(item) for item in raw_events]
@@ -536,6 +564,127 @@ class SignalHarnessWorkflow:
             failed_sources=failures,
             source_tasks=source_tasks,
         )
+
+    def _apply_event_limits(
+        self,
+        events: list[dict[str, Any]],
+        *,
+        max_events: int | None,
+        max_events_per_source: int | None,
+    ) -> EventLimitResult:
+        if max_events is None and max_events_per_source is None:
+            return EventLimitResult(events=events, metadata={})
+
+        indexed = list(enumerate(events))
+        before_by_source = self._source_counts(indexed)
+        selected = indexed
+        if max_events_per_source is not None:
+            grouped: dict[str, list[tuple[int, dict[str, Any]]]] = {}
+            for pair in selected:
+                grouped.setdefault(self._source_key(pair[1]), []).append(pair)
+            selected = [
+                pair
+                for source_key in sorted(grouped)
+                for pair in sorted(grouped[source_key], key=self._event_rank)[
+                    :max_events_per_source
+                ]
+            ]
+        if max_events is not None:
+            selected = sorted(selected, key=self._event_rank)[:max_events]
+        else:
+            selected = sorted(selected, key=self._event_rank)
+
+        after_by_source = self._source_counts(selected)
+        metadata: dict[str, Any] = {
+            "before_count": len(events),
+            "after_count": len(selected),
+            "dropped_count": max(0, len(events) - len(selected)),
+            "max_events": max_events,
+            "max_events_per_source": max_events_per_source,
+            "source_counts_before": before_by_source,
+            "source_counts_after": after_by_source,
+        }
+        return EventLimitResult(
+            events=[item for _, item in selected],
+            metadata=metadata,
+        )
+
+    @classmethod
+    def _source_counts(
+        cls,
+        indexed_events: list[tuple[int, dict[str, Any]]],
+    ) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for _, item in indexed_events:
+            key = cls._source_key(item)
+            counts[key] = counts.get(key, 0) + 1
+        return dict(sorted(counts.items()))
+
+    @staticmethod
+    def _source_key(item: dict[str, Any]) -> str:
+        if "_collector_raw" in item:
+            source_type = str(item.get("_collector_source_type") or "unknown")
+            source_name = str(item.get("_collector_source_name") or "unknown")
+            return f"{source_type}:{source_name}"
+        source_type = str(item.get("source_type") or "unknown")
+        source_name = str(item.get("source_name") or "unknown")
+        return f"{source_type}:{source_name}"
+
+    @classmethod
+    def _event_rank(cls, indexed_event: tuple[int, dict[str, Any]]) -> tuple[int, float, int]:
+        index, item = indexed_event
+        source_type = cls._source_key(item).split(":", 1)[0]
+        return (
+            cls._source_priority(source_type),
+            -cls._event_timestamp(item),
+            index,
+        )
+
+    @staticmethod
+    def _source_priority(source_type: str) -> int:
+        return {
+            "github_release": 0,
+            "github_issue": 1,
+            "rss": 2,
+            "web_change": 3,
+        }.get(source_type, 9)
+
+    @classmethod
+    def _event_timestamp(cls, item: dict[str, Any]) -> float:
+        raw = item.get("_collector_raw") if isinstance(item.get("_collector_raw"), dict) else item
+        if not isinstance(raw, dict):
+            return 0.0
+        for key in (
+            "published_at",
+            "updated_at",
+            "created_at",
+            "collected_at",
+            "pubDate",
+            "date",
+        ):
+            value = raw.get(key)
+            parsed = cls._parse_timestamp(value)
+            if parsed is not None:
+                return parsed
+        return 0.0
+
+    @staticmethod
+    def _parse_timestamp(value: object) -> float | None:
+        if isinstance(value, datetime):
+            normalized = value
+        elif isinstance(value, str) and value.strip():
+            raw = value.strip()
+            if raw.endswith(("Z", "z")):
+                raw = raw[:-1] + "+00:00"
+            try:
+                normalized = datetime.fromisoformat(raw)
+            except ValueError:
+                return None
+        else:
+            return None
+        if normalized.tzinfo is None:
+            normalized = normalized.replace(tzinfo=timezone.utc)
+        return normalized.timestamp()
 
     async def _run_source_job(
         self,

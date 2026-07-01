@@ -27,6 +27,7 @@ class TraceRecorder:
         state: dict[str, Any] = {
             "output_count": None,
             "detail": "",
+            "metadata": {},
             "failed_sources": [],
             "cache_events": [],
             "source_tasks": [],
@@ -53,6 +54,11 @@ class TraceRecorder:
                     ),
                     duration_ms=duration_ms,
                     detail=str(state["detail"] or ""),
+                    metadata=(
+                        dict(state["metadata"])
+                        if isinstance(state.get("metadata"), dict)
+                        else {}
+                    ),
                     failed_sources=[
                         str(value) for value in state.get("failed_sources", [])
                     ],

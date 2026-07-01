@@ -6,6 +6,8 @@ not as a repackaged Agent framework.
 
 ## Three-minute demo
 
+### Path A: offline deterministic / mock fixture demo
+
 1. Open with the problem.
 
    SignalHarness monitors project-environment signals from GitHub, RSS, and web
@@ -53,6 +55,55 @@ not as a repackaged Agent framework.
    `.signal-harness/` is the state source of truth and proposals are never
    applied automatically.
 
+This path uses `examples/signal_harness/sample_events.json`. It is stable,
+requires no API key, and is appropriate for CI or an interview environment with
+unreliable network access.
+
+### Path B: live OpenAI showcase
+
+Use this path when you want fresh watchlist data instead of the sample fixture.
+Do not pass `--fixture`; that is what makes SignalHarness read
+`configs/watchlist.yaml`.
+
+```bash
+set -a
+source .env
+set +a
+
+export LLM_PROVIDER="openai_compatible"
+export LLM_API_KEY="${OPENAI_API_KEY:-${OPENAI_KEY:-${OPENAI:-}}}"
+export LLM_BASE_URL="${OPENAI_BASE_URL:-https://api.openai.com}"
+export LLM_MODEL="${OPENAI_MODEL:-gpt-4o-mini}"
+export LLM_MODEL_PROFILE="openai_gpt4o_mini"
+
+SINCE="$(python - <<'PY'
+from datetime import datetime, timedelta, timezone
+print((datetime.now(timezone.utc) - timedelta(days=14)).replace(microsecond=0).isoformat().replace("+00:00", "Z"))
+PY
+)"
+
+uv run signal-harness scan \
+  --mode agent \
+  --since "$SINCE" \
+  --max-events 20 \
+  --max-events-per-source 8 \
+  --output-dir outputs/openai-live-showcase \
+  --state-dir .signal-harness/openai-live-showcase
+
+uv run signal-harness dashboard --output-dir outputs/openai-live-showcase
+uv run signal-harness trace --output-dir outputs/openai-live-showcase
+```
+
+The live default watchlist is `configs/watchlist.yaml`. The fixture-backed demo
+watchlist lives in `configs/watchlist_demo.yaml`, and the raw fixture remains at
+`examples/signal_harness/sample_events.json`.
+
+For live showcases, prefer a recent 7–14 day window plus
+`--max-events 20 --max-events-per-source 8`. Provider calls may still trigger
+fallback because of context limits, rate limits, schema retries, or timeouts;
+the dashboard explicitly reports fallback health and labels deterministic
+fallback audit output.
+
 ## Five-minute interview narrative
 
 Use this structure:
@@ -89,6 +140,9 @@ Use this structure:
   when deterministic audit fallback filled a skipped event.
 - The operational layer is intentionally lightweight: external schedulers,
   static HTML dashboard, local alerts, Markdown digests.
+- The live dashboard has an executive summary, source health, grouped
+  dependency updates, LLM fallback health, and review-only learning language so
+  the demo is explainable even when a real provider partially fails.
 
 ## What not to claim
 
