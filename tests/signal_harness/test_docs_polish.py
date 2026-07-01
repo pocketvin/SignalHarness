@@ -63,3 +63,15 @@ def test_agent_runner_split_modules_exist(project_root: Path) -> None:
     assert "from signal_harness.agent_integration.tool_loop import" in runner
     assert "from signal_harness.agent_integration.repair import" in runner
     assert "from signal_harness.agent_integration.scoring_bridge import" in runner
+
+
+def test_model_eval_matrix_uses_stable_result_labels(project_root: Path) -> None:
+    script = (project_root / "scripts/model_eval_matrix.sh").read_text(encoding="utf-8")
+
+    assert "complete_stable" in script
+    assert "complete_unstable" in script
+    assert "schema_valid_rate >= 0.99" in script
+    assert "fallback_rate == 0" in script
+    assert "timeout_count == 0" in script
+    assert "total_tool_error_count == 0" in script
+    assert "No stable provider on this fixture" in script

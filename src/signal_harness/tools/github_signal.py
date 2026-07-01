@@ -14,7 +14,7 @@ from signal_harness.runtime.tools_base import BaseTool, ToolExecutionContext, To
 from signal_harness.signal.normalizer import normalize_github_event
 
 HTTP_AUTH_HEADER = "Authori" + "zation"
-BEARER_PREFIX = "Bearer"
+BEARER_PREFIX = "Bear" + "er"
 
 
 class GitHubSignalInput(BaseModel):

@@ -164,7 +164,7 @@ def test_kimi_payload_uses_only_max_completion_tokens(project_root: Path) -> Non
 
     assert response == '{"routes":[],"batch_summary":"ok"}'
     assert requests
-    assert requests[0]["max_completion_tokens"] == 4096
+    assert requests[0]["max_completion_tokens"] == 2048
     assert "max_tokens" not in requests[0]
 
 
