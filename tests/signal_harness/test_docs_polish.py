@@ -72,6 +72,7 @@ def test_model_eval_matrix_uses_stable_result_labels(project_root: Path) -> None
     assert "complete_unstable" in script
     assert "schema_valid_rate >= 0.99" in script
     assert "fallback_rate == 0" in script
+    assert "retry_rate == 0" in script
     assert "timeout_count == 0" in script
     assert "total_tool_error_count == 0" in script
     assert "No stable provider on this fixture" in script

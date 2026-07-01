@@ -21,15 +21,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-providers = [
-    "openai>=1.0.0",
-]
-openai = [
-    "openai>=1.0.0",
-]
-anthropic = [
-    "anthropic>=0.40.0",
-]
 dev = [
     "pexpect>=4.9.0",
     "pytest>=8.0.0",

@@ -51,7 +51,7 @@ def test_kimi_profile_uses_max_completion_tokens(project_root: Path) -> None:
     assert profile.supports_native_tool_calling is False
     assert profile.schema_strategy == "prompt_json_retry"
     assert profile.tool_strategy == "controlled_tool_request"
-    assert profile.recommended_temperature == 1.0
+    assert profile.recommended_temperature == 0.0
 
 
 def test_model_profile_rejects_native_tool_calling_claim() -> None:
