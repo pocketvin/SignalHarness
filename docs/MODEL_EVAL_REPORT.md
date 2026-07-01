@@ -1,6 +1,6 @@
 # SignalHarness Model Eval Report
 
-Last updated: 2026-07-01 15:18 CST
+Last updated: 2026-07-01 20:08 CST
 
 This report records a current local fixture result. It is not a permanent model
 ranking and should be re-run when fixtures, prompts, provider models, or API
@@ -10,22 +10,27 @@ settings change.
 
 - Fixture: `examples/signal_harness/sample_events.json`
 - Mode: `agent`
-- Matrix command:
+- Matrix commands:
   - `bash scripts/model_eval_matrix.sh --providers openai,qwen,deepseek --runs 3`
-  - `bash scripts/model_eval_matrix.sh --providers kimi --runs 3 --sleep 10`
+  - `bash scripts/model_eval_matrix.sh --providers kimi --runs 1 --sleep 10`
+  - Kimi `runs=3` was not run because the `runs=1` result was not stable.
 - Provider path: SignalHarness OpenAI-compatible HTTP adapter
 - Tool loop: runner-controlled `EvidenceToolPlan` → Python validation/execution
   → `ToolObservation` → final evidence
 - CI impact: none. Public CI still uses offline mock-agent/scripted eval only.
 
+`complete_stable` now requires all of the following on the current fixture:
+`schema_valid_rate >= 0.99`, `fallback_rate == 0`, `retry_rate == 0`,
+`timeout_count == 0`, and `total_tool_error_count == 0`.
+
 ## Current local results
 
-| Provider | Model | Runs | Schema valid | Fallback | Retry | Timeout | Avg latency ms | Repair requested | Repair executed |
-|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| OpenAI | `gpt-4o-mini` | 3 | 1.0000 | 0.0000 | 0.0000 | 0 | 5807.00 | 0 | 0 |
-| Qwen | `qwen-plus` | 3 | 1.0000 | 0.0000 | 0.0833 | 0 | 13649.08 | 0 | 0 |
-| DeepSeek | `deepseek-v4-flash` | 3 | 0.9500 | 0.0500 | 0.1500 | 0 | 23256.05 | 2 | 2 |
-| Kimi | `kimi-k2.7-code` | 3 | 0.5833 | 0.4167 | 0.0000 | 5 | 37089.33 | 0 | 0 |
+| Provider | Model | Runs | Result | Schema valid | Fallback | Retry | Timeout | Tool total | Avg latency ms | Repair requested | Repair executed |
+|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| OpenAI | `gpt-4o-mini` | 3 | `complete_stable` | 1.0000 | 0.0000 | 0.0000 | 0 | 0 | 7388.33 | 0 | 0 |
+| Qwen | `qwen-plus` | 3 | `complete_unstable` | 0.8889 | 0.1111 | 0.1667 | 0 | 0 | 11290.39 | 2 | 4 |
+| DeepSeek | `deepseek-v4-flash` | 3 | `complete_unstable` | 1.0000 | 0.0000 | 0.0000 | 0 | 7 | 17456.82 | 4 | 6 |
+| Kimi | `kimi-latest` | 1 | `complete_unstable` | 0.0000 | 1.0000 | 1.0000 | 0 | 0 | 2458.00 | 0 | 0 |
 
 ## Tool error breakdown
 
@@ -33,47 +38,46 @@ settings change.
 |---|---:|---:|---:|---:|---:|
 | OpenAI | 0 | 0 | 0 | 0 | 0 |
 | Qwen | 0 | 0 | 0 | 0 | 0 |
-| DeepSeek | 0 | 0 | 0 | 2 | 2 |
+| DeepSeek | 0 | 0 | 3 | 4 | 7 |
 | Kimi | 0 | 0 | 0 | 0 | 0 |
 
-The tool prompt change dropped Qwen and DeepSeek tool validation errors to zero
-on this fixture. Missing `action`, `repo`, `url`, or `fixture` would be counted
-as a model tool argument adherence issue. Blocked-tool counts would represent
-normal harmless guardrail behavior when Python rejects non-allowlisted or
-non-read-only requests.
+Qwen had no tool errors on this run, but it is not strictly stable because
+schema validity, fallback rate, and retry rate did not meet the
+`complete_stable` threshold.
 
-DeepSeek still showed two aggregated runtime tool errors. These were executor
-or source failures, not schema/tool-argument failures. The latest per-provider
-trace only preserves the final run, while `model_eval_summary.json` aggregates
-all three runs.
+DeepSeek reached full schema validity with zero fallback and zero retry, but
+tool budget/runtime errors keep it out of the strict stable bucket on this
+fixture.
 
 ## Provider error classification
 
 | Provider | Provider error classes |
 |---|---|
 | OpenAI | none |
-| Qwen | `schema_error: 1` |
-| DeepSeek | `schema_error: 2`, `unknown_error: 2` |
-| Kimi | `timeout: 10` |
+| Qwen | `schema_error: 4`, `unknown_error: 1` |
+| DeepSeek | none |
+| Kimi | `unknown_error: 12` |
 
-Kimi no longer fails with HTTP 400 after using `max_completion_tokens` and the
-model-required temperature. The remaining failures are provider timeouts and an
-Agent-team run timeout on this fixture, so Kimi is now endpoint-compatible but
-not yet a stable default for SignalHarness model eval. The `kimi` profile keeps
-JSON mode disabled and does not enable native tool calling.
+Kimi did not show a timeout in this single run, but the local model selection
+used by `.env` was not accepted by the provider, so the result fell back for
+all schema-validated agent calls. Previous connectivity checks showed the
+Moonshot endpoint can work when the exact console-available model is used, but
+Kimi remains unsuitable as a baseline until the model name is re-verified and
+the fixture is re-run. The `kimi` profile keeps JSON mode disabled and does not
+enable native tool calling.
 
 ## Current recommendation
 
-- Recommended baseline for current SignalHarness eval: OpenAI `gpt-4o-mini`.
-- Domestic/default candidate: Qwen `qwen-plus`, because it reached full schema
-  validity and zero tool errors on this fixture, with higher latency and one
-  schema retry.
+- Recommended baseline for current SignalHarness eval: OpenAI `gpt-4o-mini`,
+  because it is the only `complete_stable` provider in this run.
+- Domestic candidate: Qwen `qwen-plus`, but not strictly stable on this
+  fixture because retry/fallback were non-zero and schema validity was below
+  the stable threshold.
 - Smoke/low-cost candidate: DeepSeek `deepseek-v4-flash`, but treat it as less
-  stable on this fixture because fallback, retries, runtime tool errors, and
-  higher latency remain visible.
-- Not recommended as the default yet: Kimi `kimi-k2.7-code`, because it is now
-  endpoint-compatible but still shows timeouts and a high fallback rate on this
-  fixture.
+  stable on this fixture because tool budget/runtime errors remain visible.
+- Not recommended as the default yet: Kimi, because this run was unstable and
+  should be repeated only after confirming the exact Moonshot model name
+  available in the local console.
 
 These are current local fixture results only. They should not be presented as a
 universal model leaderboard.
