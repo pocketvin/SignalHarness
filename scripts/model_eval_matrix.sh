@@ -479,6 +479,7 @@ for provider_dir in requested:
         is_stable = (
             schema_valid_rate >= 0.99
             and fallback_rate == 0
+            and retry_rate == 0
             and timeout_count == 0
             and total_tool_error_count == 0
         )
@@ -542,7 +543,7 @@ lines = [
     "",
     "Ranking uses local SignalHarness metrics only: higher schema_valid_rate is better; lower fallback, retry, timeout, tool-error, and latency are better. Rate-limited providers are marked inconclusive.",
     "",
-    "Result labels: `complete_stable` means schema_valid_rate >= 0.99, fallback_rate == 0, timeout_count == 0, and total_tool_error_count == 0; `complete_unstable` means the command completed but at least one fallback, timeout, or tool error occurred; `inconclusive` means rate-limited or provider hard failure; `failed` means the provider command failed; `skipped` means no key was configured.",
+    "Result labels: `complete_stable` means schema_valid_rate >= 0.99, fallback_rate == 0, retry_rate == 0, timeout_count == 0, and total_tool_error_count == 0; `complete_unstable` means the command completed but at least one fallback, retry, timeout, or tool error occurred; `inconclusive` means rate-limited or provider hard failure; `failed` means the provider command failed; `skipped` means no key was configured.",
     "",
     "| Rank | Provider | Model | Profile | Status | Result | Error class | Schema valid | Fallback | Retry | Timeouts | Tool validation | Tool blocked | Tool budget | Tool runtime | Tool total | Latency ms | Repair requested | Repair executed |",
     "|---:|---|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
