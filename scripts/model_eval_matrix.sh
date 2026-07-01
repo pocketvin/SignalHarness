@@ -318,7 +318,7 @@ for provider in "${providers[@]}"; do
       fi
       ;;
     kimi)
-      if run_eval "kimi" "kimi" "https://api.moonshot.cn/v1" "kimi-k2" \
+      if run_eval "kimi" "kimi" "https://api.moonshot.cn/v1" "kimi-k2.7-code" \
         KIMI_MODEL KIMI_BASE_URL \
         KIMI_API_KEY KIMI_KEY KIMI MOONSHOT_API_KEY MOONSHOT_KEY; then
         success_count=$((success_count + 1))
@@ -455,16 +455,38 @@ for provider_dir in requested:
             if trace_class == "none"
             else trace_class
         )
+    schema_valid_rate = float(payload.get("schema_valid_rate", 0))
+    retry_rate = float(payload.get("retry_rate", 1))
+    fallback_rate = float(payload.get("fallback_rate", 1))
+    timeout_count = int(payload.get("timeout_count", 0))
+    tool_validation_error_count = int(payload.get("tool_validation_error_count", 0))
+    tool_blocked_count = int(payload.get("tool_blocked_count", 0))
+    tool_budget_error_count = int(payload.get("tool_budget_error_count", 0))
+    tool_runtime_error_count = int(payload.get("tool_runtime_error_count", 0))
+    total_tool_error_count = int(payload.get("total_tool_error_count", 0))
+    legacy_tool_error_count = int(payload.get("tool_error_count", 0))
+    average_latency_ms = float(payload.get("average_latency_ms", 0))
+    repair_requested_count = int(payload.get("repair_requested_count", 0))
+    repair_executed_count = int(payload.get("repair_executed_count", 0))
+
     status = str(status_payload.get("status") or ("success" if payload else "missing"))
-    if classified == "rate_limited":
+    if status == "skipped":
+        result = "skipped"
+    elif classified == "rate_limited":
         result = "inconclusive"
         status = "rate_limited"
     elif status == "success":
-        result = "complete"
-    elif status == "skipped":
-        result = "skipped"
-    else:
+        is_stable = (
+            schema_valid_rate >= 0.99
+            and fallback_rate == 0
+            and timeout_count == 0
+            and total_tool_error_count == 0
+        )
+        result = "complete_stable" if is_stable else "complete_unstable"
+    elif status == "failed":
         result = "failed"
+    else:
+        result = "inconclusive"
     rows.append(
         {
             "provider_dir": provider_dir,
@@ -474,27 +496,33 @@ for provider_dir in requested:
             "status": status,
             "result": result,
             "error_class": classified,
-            "schema_valid_rate": float(payload.get("schema_valid_rate", 0)),
-            "retry_rate": float(payload.get("retry_rate", 1)),
-            "fallback_rate": float(payload.get("fallback_rate", 1)),
-            "timeout_count": int(payload.get("timeout_count", 0)),
-            "tool_validation_error_count": int(payload.get("tool_validation_error_count", 0)),
-            "tool_blocked_count": int(payload.get("tool_blocked_count", 0)),
-            "tool_budget_error_count": int(payload.get("tool_budget_error_count", 0)),
-            "tool_runtime_error_count": int(payload.get("tool_runtime_error_count", 0)),
-            "total_tool_error_count": int(payload.get("total_tool_error_count", 0)),
-            "legacy_tool_error_count": int(payload.get("tool_error_count", 0)),
-            "average_latency_ms": float(payload.get("average_latency_ms", 0)),
-            "repair_requested_count": int(payload.get("repair_requested_count", 0)),
-            "repair_executed_count": int(payload.get("repair_executed_count", 0)),
+            "schema_valid_rate": schema_valid_rate,
+            "retry_rate": retry_rate,
+            "fallback_rate": fallback_rate,
+            "timeout_count": timeout_count,
+            "tool_validation_error_count": tool_validation_error_count,
+            "tool_blocked_count": tool_blocked_count,
+            "tool_budget_error_count": tool_budget_error_count,
+            "tool_runtime_error_count": tool_runtime_error_count,
+            "total_tool_error_count": total_tool_error_count,
+            "legacy_tool_error_count": legacy_tool_error_count,
+            "average_latency_ms": average_latency_ms,
+            "repair_requested_count": repair_requested_count,
+            "repair_executed_count": repair_executed_count,
         }
     )
 
 
 def score(row: dict[str, object]) -> tuple[int, float, float, float, int, int, float]:
-    rate_limited_penalty = 1 if row["result"] == "inconclusive" else 0
+    result_penalty = {
+        "complete_stable": 0,
+        "complete_unstable": 1,
+        "inconclusive": 2,
+        "failed": 3,
+        "skipped": 4,
+    }.get(str(row["result"]), 5)
     return (
-        rate_limited_penalty,
+        result_penalty,
         -float(row["schema_valid_rate"]),
         float(row["fallback_rate"]),
         float(row["retry_rate"]),
@@ -513,6 +541,8 @@ lines = [
     f"Fixture: `{os.environ['MATRIX_FIXTURE']}`; runs per provider: {os.environ['MATRIX_RUNS']}.",
     "",
     "Ranking uses local SignalHarness metrics only: higher schema_valid_rate is better; lower fallback, retry, timeout, tool-error, and latency are better. Rate-limited providers are marked inconclusive.",
+    "",
+    "Result labels: `complete_stable` means schema_valid_rate >= 0.99, fallback_rate == 0, timeout_count == 0, and total_tool_error_count == 0; `complete_unstable` means the command completed but at least one fallback, timeout, or tool error occurred; `inconclusive` means rate-limited or provider hard failure; `failed` means the provider command failed; `skipped` means no key was configured.",
     "",
     "| Rank | Provider | Model | Profile | Status | Result | Error class | Schema valid | Fallback | Retry | Timeouts | Tool validation | Tool blocked | Tool budget | Tool runtime | Tool total | Latency ms | Repair requested | Repair executed |",
     "|---:|---|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
@@ -546,13 +576,11 @@ for index, row in enumerate(ranked_rows, start=1):
         + " |"
     )
 
-valid_rows = [row for row in ranked_rows if row["result"] == "complete"]
-stable = [
+stable_rows = [row for row in ranked_rows if row["result"] == "complete_stable"]
+completed_rows = [
     row
-    for row in valid_rows
-    if float(row["schema_valid_rate"]) >= 0.99
-    and float(row["fallback_rate"]) == 0
-    and int(row["timeout_count"]) == 0
+    for row in ranked_rows
+    if str(row["result"]) in {"complete_stable", "complete_unstable"}
 ]
 
 lines.extend(["", "## Tool error breakdown", ""])
@@ -574,23 +602,17 @@ lines.extend(
     ]
 )
 
-if stable:
-    recommended = stable[0]
+if stable_rows:
+    recommended = stable_rows[0]
     recommendation = (
         f"Use **{recommended['provider_dir']} / {recommended['model']}** as the "
         "current local-fixture default candidate. Re-test before treating this "
         "as a durable provider choice."
     )
-elif valid_rows:
-    recommended = valid_rows[0]
-    recommendation = (
-        f"Use **{recommended['provider_dir']} / {recommended['model']}** only as a "
-        "provisional candidate; no provider reached the stable threshold on this run."
-    )
 else:
     recommendation = (
-        "No provider completed this matrix. Keep mock-agent/demo as CI defaults and "
-        "treat real provider results as inconclusive."
+        "No stable provider on this fixture. Keep mock-agent/demo as CI defaults and "
+        "do not choose a real-provider default from this run."
     )
 
 lines.extend(
@@ -603,11 +625,13 @@ lines.extend(
 )
 summary.write_text("\n".join(lines), encoding="utf-8")
 print(f"Matrix summary: {summary}")
-if valid_rows:
-    best = valid_rows[0]
-    print(f"Best complete candidate: {best['provider_dir']} / {best['model']} ({best['profile']})")
+if stable_rows:
+    best = stable_rows[0]
+    print(f"Best stable candidate: {best['provider_dir']} / {best['model']} ({best['profile']})")
+elif completed_rows:
+    print("No stable provider on this fixture; completed providers are unstable.")
 else:
-    print("No complete provider result; matrix is inconclusive.")
+    print("No stable provider on this fixture; matrix is inconclusive.")
 PY
 
 echo "Completed: success=${success_count}, failed=${failure_count}, skipped=${skipped_count}"

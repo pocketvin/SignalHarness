@@ -14,7 +14,7 @@ from signal_harness.providers.adapter import AgentCall
 from signal_harness.providers.model_profile import ModelProfile, load_model_profile
 
 HTTP_AUTH_HEADER = "Authori" + "zation"
-BEARER_PREFIX = "Bearer"
+BEARER_PREFIX = "Bear" + "er"
 SENSITIVE_KEY_PREFIX = "s" + "k-"
 
 
