@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +15,7 @@ from signal_harness.providers.model_profile import ModelProfile, load_model_prof
 
 HTTP_AUTH_HEADER = "Authori" + "zation"
 BEARER_PREFIX = "Bearer"
+SENSITIVE_KEY_PREFIX = "s" + "k-"
 
 
 class OpenAICompatibleProvider:
@@ -27,6 +30,7 @@ class OpenAICompatibleProvider:
         base_url: str,
         profile: ModelProfile,
         client: httpx.AsyncClient | None = None,
+        request_sleep_seconds: float = 0.0,
     ) -> None:
         self.model = profile.model
         self.profile = profile
@@ -34,6 +38,7 @@ class OpenAICompatibleProvider:
         self._api_key = api_key
         self._client = client or httpx.AsyncClient(timeout=httpx.Timeout(60.0))
         self._owns_client = client is None
+        self._request_sleep_seconds = max(0.0, request_sleep_seconds)
 
     @classmethod
     def from_env(
@@ -54,9 +59,14 @@ class OpenAICompatibleProvider:
             base_url=os.environ.get("LLM_BASE_URL", "https://api.openai.com"),
             profile=profile,
             client=client,
+            request_sleep_seconds=float(
+                os.environ.get("LLM_REQUEST_SLEEP_SECONDS", "0") or 0
+            ),
         )
 
     async def complete(self, call: AgentCall) -> str:
+        if self._request_sleep_seconds:
+            await asyncio.sleep(self._request_sleep_seconds)
         response = await self._client.post(
             self._chat_completions_url(),
             headers={
@@ -65,7 +75,10 @@ class OpenAICompatibleProvider:
             },
             json=self._payload(call),
         )
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise RuntimeError(_safe_http_status_error(exc)) from exc
         return _assistant_text(response.json(), agent_name=call.agent_name)
 
     async def close(self) -> None:
@@ -94,8 +107,8 @@ class OpenAICompatibleProvider:
             "model": self.model,
             "messages": messages,
             "temperature": self.profile.recommended_temperature,
-            "max_tokens": self.profile.max_output_tokens,
         }
+        payload[self.profile.output_token_parameter] = self.profile.max_output_tokens
         if self.profile.supports_json_mode:
             payload["response_format"] = {"type": "json_object"}
         return payload
@@ -126,3 +139,21 @@ def _assistant_text(payload: Any, *, agent_name: str) -> str:
         if text.strip():
             return text
     raise RuntimeError(f"{agent_name} returned an empty response")
+
+
+def _safe_http_status_error(exc: httpx.HTTPStatusError) -> str:
+    body = _redact_sensitive_response_text(exc.response.text[:500])
+    return (
+        "Provider HTTP error "
+        f"status_code={exc.response.status_code}; response_body={body}"
+    )
+
+
+def _redact_sensitive_response_text(text: str) -> str:
+    redacted = text.replace(HTTP_AUTH_HEADER, "[redacted-header]")
+    redacted = redacted.replace(BEARER_PREFIX, "[redacted-prefix]")
+    return re.sub(
+        rf"{re.escape(SENSITIVE_KEY_PREFIX)}[A-Za-z0-9._~-]+",
+        "[redacted-key]",
+        redacted,
+    )

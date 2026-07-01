@@ -6,6 +6,7 @@ supports_native_tool_calling: false
 supports_system_prompt: true
 max_input_tokens: 32768
 max_output_tokens: 4096
-recommended_temperature: 0.0
+output_token_parameter: max_completion_tokens
+recommended_temperature: 1.0
 schema_strategy: prompt_json_retry
 tool_strategy: controlled_tool_request

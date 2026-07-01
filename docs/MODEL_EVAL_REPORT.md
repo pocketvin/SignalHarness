@@ -1,6 +1,6 @@
 # SignalHarness Model Eval Report
 
-Last updated: 2026-07-01 01:12 CST
+Last updated: 2026-07-01 15:18 CST
 
 This report records a current local fixture result. It is not a permanent model
 ranking and should be re-run when fixtures, prompts, provider models, or API
@@ -12,7 +12,7 @@ settings change.
 - Mode: `agent`
 - Matrix command:
   - `bash scripts/model_eval_matrix.sh --providers openai,qwen,deepseek --runs 3`
-  - `bash scripts/model_eval_matrix.sh --providers kimi --runs 1 --sleep 10`
+  - `bash scripts/model_eval_matrix.sh --providers kimi --runs 3 --sleep 10`
 - Provider path: SignalHarness OpenAI-compatible HTTP adapter
 - Tool loop: runner-controlled `EvidenceToolPlan` → Python validation/execution
   → `ToolObservation` → final evidence
@@ -25,7 +25,7 @@ settings change.
 | OpenAI | `gpt-4o-mini` | 3 | 1.0000 | 0.0000 | 0.0000 | 0 | 5807.00 | 0 | 0 |
 | Qwen | `qwen-plus` | 3 | 1.0000 | 0.0000 | 0.0833 | 0 | 13649.08 | 0 | 0 |
 | DeepSeek | `deepseek-v4-flash` | 3 | 0.9500 | 0.0500 | 0.1500 | 0 | 23256.05 | 2 | 2 |
-| Kimi | `kimi-k2.7-code` | 1 | 0.0000 | 1.0000 | 0.8333 | 1 | 16427.67 | 0 | 0 |
+| Kimi | `kimi-k2.7-code` | 3 | 0.5833 | 0.4167 | 0.0000 | 5 | 37089.33 | 0 | 0 |
 
 ## Tool error breakdown
 
@@ -54,15 +54,13 @@ all three runs.
 | OpenAI | none |
 | Qwen | `schema_error: 1` |
 | DeepSeek | `schema_error: 2`, `unknown_error: 2` |
-| Kimi | `http_error: 10`, `timeout: 2` |
+| Kimi | `timeout: 10` |
 
-Kimi did not fail because of 429 in this run. The direct visible failure is
-HTTP 400 from `https://api.moonshot.cn/v1/chat/completions`, plus one provider
-timeout. SignalHarness does not store raw provider responses in committed docs,
-so the safe conclusion is that the configured Kimi model/endpoint/payload
-combination is incompatible for this run. Re-test with the exact model name
-available in the Moonshot console, for example `kimi-latest` if that is the
-account-supported model. The `kimi` profile already keeps JSON mode disabled.
+Kimi no longer fails with HTTP 400 after using `max_completion_tokens` and the
+model-required temperature. The remaining failures are provider timeouts and an
+Agent-team run timeout on this fixture, so Kimi is now endpoint-compatible but
+not yet a stable default for SignalHarness model eval. The `kimi` profile keeps
+JSON mode disabled and does not enable native tool calling.
 
 ## Current recommendation
 
@@ -73,8 +71,9 @@ account-supported model. The `kimi` profile already keeps JSON mode disabled.
 - Smoke/low-cost candidate: DeepSeek `deepseek-v4-flash`, but treat it as less
   stable on this fixture because fallback, retries, runtime tool errors, and
   higher latency remain visible.
-- Not recommended until retested: Kimi `kimi-k2.7-code`, because the endpoint
-  returned HTTP 400 and all Agent calls fell back.
+- Not recommended as the default yet: Kimi `kimi-k2.7-code`, because it is now
+  endpoint-compatible but still shows timeouts and a high fallback rate on this
+  fixture.
 
 These are current local fixture results only. They should not be presented as a
 universal model leaderboard.
