@@ -209,7 +209,7 @@ def score_signal(
     category_weight = (
         0.10
         if category_name == SignalCategory.NOISE.value
-        else max(0.85, min(1.0, 0.85 + 0.15 * configured_weight))
+        else max(0.55, min(1.0, configured_weight))
     )
     final = weighted_score * category_weight
     return ScoreBreakdown(

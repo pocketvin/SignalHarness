@@ -152,7 +152,7 @@ class ControlledToolLoop:
             )
         if self.tool_executor is None:
             error = "SignalToolExecutor is unavailable"
-            trace["errors"].append(f"{name}: {error}")
+            _append_unique(trace["errors"], f"{name}: {error}")
             return ToolObservation(
                 tool_name=name,
                 status="error",
@@ -169,7 +169,7 @@ class ControlledToolLoop:
         raw_ref = f"sha256:{stable_hash(result.output)}"
         output_limit = self.limits.max_tool_output_chars
         if result.is_error:
-            trace["errors"].append(f"{name}: {result.output}")
+            _append_unique(trace["errors"], f"{name}: {result.output}")
             observation = ToolObservation(
                 tool_name=name,
                 status="error",
@@ -233,10 +233,7 @@ def cap_evidence_after_tool_failures(
     ]
     if not failures:
         return evidence
-    message = "; ".join(
-        f"{item.tool_name}: {item.error or item.output_summary}"
-        for item in failures
-    )
+    message = "Evidence confidence reduced due to tool errors."
     return ContextEvidenceOutput(
         results=[
             item.model_copy(
@@ -251,3 +248,8 @@ def cap_evidence_after_tool_failures(
             for item in evidence.results
         ]
     )
+
+
+def _append_unique(items: list[str], value: str) -> None:
+    if value not in items:
+        items.append(value)

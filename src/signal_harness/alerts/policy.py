@@ -24,6 +24,11 @@ IMPORTANT_MODULE_TERMS = {
 }
 IMPORTANT_CATEGORIES = {
     SignalCategory.DEPENDENCY_UPDATE,
+    SignalCategory.CHECKPOINT_PERSISTENCE_SIGNAL,
+    SignalCategory.STRUCTURED_OUTPUT_SIGNAL,
+    SignalCategory.TOOL_CALLING_SIGNAL,
+    SignalCategory.PROVIDER_COMPATIBILITY_SIGNAL,
+    SignalCategory.SECURITY_SUPPLY_CHAIN,
     SignalCategory.POLICY_SIGNAL,
 }
 
@@ -117,4 +122,3 @@ def _alert_reasons(
     if matched_modules:
         reasons.append("important_affected_module=" + ",".join(matched_modules[:3]))
     return reasons
-

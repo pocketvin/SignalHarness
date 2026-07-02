@@ -11,6 +11,7 @@ from signal_harness.agent_integration.schemas import (
     EvidenceToolPlan,
     SupervisorOutput,
     ToolObservation,
+    ToolRequest,
 )
 from signal_harness.agents.evidence import EvidenceAgent
 from signal_harness.providers.adapter import AgentCall
@@ -133,6 +134,7 @@ class ContextEvidenceAgent:
                 cluster.model_dump(mode="json") for cluster in clusters
             ],
             "source_diversity": sorted({event.source_type for event in events}),
+            "source_tool_hints": _source_tool_hints(events),
             "available_tools": list(self.available_tools),
             "tool_request_contract": self.tool_request_contract,
             "tool_planning_rules": self.tool_planning_rules,
@@ -193,13 +195,16 @@ class ContextEvidenceAgent:
         )
 
     def fallback_plan(self, events: list[SignalEvent]) -> EvidenceToolPlan:
+        requests = [
+            ToolRequest.model_validate(item) for item in _source_tool_hints(events)
+        ]
         return EvidenceToolPlan(
             source_types_observed=list(
                 dict.fromkeys(event.source_type for event in events)
             ),
-            tool_requests=[],
+            tool_requests=list({request_key(item): item for item in requests}.values()),
             planning_summary=(
-                "Deterministic fallback did not request additional tools."
+                "Deterministic source-aware fallback requested safe primary-source tools."
             ),
         )
 
@@ -222,6 +227,11 @@ class ContextEvidenceAgent:
             for item in active_observations
             if item.status != "success"
         ]
+        failure_note = (
+            "Evidence confidence reduced due to tool errors."
+            if errors
+            else "No additional external lookup was performed by the fallback."
+        )
         return ContextEvidenceOutput(
             results=[
                 ContextEvidenceItem(
@@ -231,18 +241,80 @@ class ContextEvidenceAgent:
                     confidence=min(result.confidence, 0.55) if errors else result.confidence,
                     source_quality=result.source_quality,
                     unsupported_claims=[],
-                    uncertainty=(
-                        "Tool failures or blocked requests limited verification: "
-                        + "; ".join(errors)
-                        if errors
-                        else "No additional external lookup was performed by the fallback."
-                    ),
+                    uncertainty=failure_note,
                     source_types_observed=[event.source_type],
                     tools_requested=requested,
                     tools_executed=executed,
-                    tool_errors=errors,
+                    tool_errors=(
+                        ["Evidence confidence reduced due to tool errors."]
+                        if errors
+                        else []
+                    ),
                 )
                 for event in events
                 for result in [evidence_agent.run(event)]
             ]
         )
+
+
+def _source_tool_hints(events: list[SignalEvent]) -> list[dict[str, Any]]:
+    requests = [
+        hint for event in events for hint in [_source_tool_hint(event)] if hint is not None
+    ]
+    return [
+        request.model_dump(mode="json")
+        for request in {request_key(item): item for item in requests}.values()
+    ]
+
+
+def request_key(request: ToolRequest) -> tuple[str, tuple[tuple[str, str], ...]]:
+    """Stable key for deduping tool requests without losing explicit arguments."""
+
+    return (
+        request.tool_name,
+        tuple(sorted((str(key), str(value)) for key, value in request.arguments.items())),
+    )
+
+
+def _source_tool_hint(event: SignalEvent) -> ToolRequest | None:
+    """Return the safest primary-source read tool for one normalized event."""
+
+    if event.source_type == "github_release" and "/" in event.source_name:
+        return ToolRequest(
+            tool_name="github_signal",
+            arguments={
+                "action": "fetch_repo_releases",
+                "repo": event.source_name,
+            },
+            reason="Verify the observed GitHub release from the same repository.",
+        )
+    if event.source_type == "github_issue" and "/" in event.source_name:
+        return ToolRequest(
+            tool_name="github_signal",
+            arguments={
+                "action": "fetch_repo_issues",
+                "repo": event.source_name,
+            },
+            reason="Verify the observed GitHub issue from the same repository.",
+        )
+    if event.source_type == "rss":
+        feed_url = str(
+            event.raw_payload.get("feed_url")
+            or event.raw_payload.get("source_feed_url")
+            or ""
+        ).strip()
+        if feed_url.startswith(("http://", "https://")):
+            return ToolRequest(
+                tool_name="rss_signal",
+                arguments={"action": "fetch_feed", "url": feed_url},
+                reason="Verify the observed RSS item by reading the configured feed URL.",
+            )
+    if event.source_type == "web_change":
+        fixture = str(event.raw_payload.get("fixture") or "").strip()
+        if fixture:
+            return ToolRequest(
+                tool_name="web_change",
+                arguments={"action": "load_fixture", "fixture": fixture},
+                reason="Verify the observed web-change source from its local fixture.",
+            )
+    return None

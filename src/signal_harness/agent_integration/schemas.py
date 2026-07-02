@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, TypeAlias
+from typing import Any, Literal, TypeAlias, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -183,12 +183,16 @@ class LearningPolicyOutput(BaseModel):
     learning_summary: str
     memory_sections_read: list[str] = Field(default_factory=list)
 
-    @field_validator("watchlist_update_proposal")
+    @field_validator("watchlist_update_proposal", mode="before")
     @classmethod
     def _watchlist_proposal_requires_approval(
         cls,
-        value: dict[str, Any],
+        value: Any,
     ) -> dict[str, Any]:
-        if value.get("requires_approval") is not True:
+        if not isinstance(value, dict):
+            raise ValueError("watchlist proposals must be objects")
+        proposal = cast(dict[str, Any], dict(value))
+        proposal.setdefault("requires_approval", True)
+        if proposal.get("requires_approval") is not True:
             raise ValueError("watchlist proposals must require approval")
-        return value
+        return proposal

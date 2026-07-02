@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from signal_harness.signal.feedback import create_feedback_record
 from signal_harness.signal.normalizer import normalize_event
 from signal_harness.signal.policy import load_signal_policy
+from signal_harness.signal.policy import decision_for_score
 from signal_harness.signal.scorer import score_signal
 from signal_harness.signal.schemas import SignalCategory
 
@@ -133,3 +134,35 @@ def test_category_weight_affects_final_priority(project_root) -> None:
 
     assert dependency.category_weight > market.category_weight
     assert dependency.final_score > market.final_score
+
+
+def test_plain_github_release_defaults_to_save_not_alert(project_root) -> None:
+    policy = load_signal_policy(project_root / "configs" / "signal_policy.yaml")
+    release = score_signal(
+        _event("langgraph==1.2.7"),
+        PROFILE,
+        policy,
+        now=NOW,
+        category=SignalCategory.DEPENDENCY_UPDATE,
+    )
+
+    assert decision_for_score(release.final_score, policy).value == "save"
+
+
+def test_security_breaking_dependency_can_require_action(project_root) -> None:
+    policy = load_signal_policy(project_root / "configs" / "signal_policy.yaml")
+    event = _event(
+        "langgraph security breaking API compatibility CVE checkpoint persistence migration"
+    )
+    score = score_signal(
+        event,
+        PROFILE,
+        policy,
+        now=NOW,
+        category=SignalCategory.SECURITY_SUPPLY_CHAIN,
+    )
+
+    assert decision_for_score(score.final_score, policy).value in {
+        "alert",
+        "action_required",
+    }

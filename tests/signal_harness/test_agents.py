@@ -39,6 +39,58 @@ def test_classifier_detects_dependency_update() -> None:
     assert result.category is SignalCategory.DEPENDENCY_UPDATE
 
 
+def test_classifier_does_not_treat_plain_github_issue_as_dependency_update() -> None:
+    result = ClassifierAgent().run(
+        _event(
+            source_type="github_issue",
+            title="FuturesDict callback does extra work",
+            content="A runtime bug report about callback overhead in one component.",
+        ),
+        {"dependencies": ["langgraph"], "ignore_keywords": []},
+    )
+
+    assert result.category is SignalCategory.AGENT_RUNTIME_SIGNAL
+
+
+def test_classifier_routes_tool_schema_provider_signals() -> None:
+    classifier = ClassifierAgent()
+    profile = {"dependencies": ["langgraph"], "ignore_keywords": []}
+
+    assert (
+        classifier.run(
+            _event(
+                source_type="github_issue",
+                title="Structured output JSON schema incompatibility",
+                content="with_structured_output fails when reasoning is enabled.",
+            ),
+            profile,
+        ).category
+        is SignalCategory.STRUCTURED_OUTPUT_SIGNAL
+    )
+    assert (
+        classifier.run(
+            _event(
+                source_type="github_issue",
+                title="Tool calling wrapper swallows interrupts",
+                content="Tool call wrapper behavior prevents propagation.",
+            ),
+            profile,
+        ).category
+        is SignalCategory.TOOL_CALLING_SIGNAL
+    )
+    assert (
+        classifier.run(
+            _event(
+                source_type="rss",
+                title="OpenAI provider API behavior changed",
+                content="JSON mode and model API compatibility guidance changed.",
+            ),
+            profile,
+        ).category
+        is SignalCategory.PROVIDER_COMPATIBILITY_SIGNAL
+    )
+
+
 def test_evidence_agent_preserves_primary_url() -> None:
     event = _event()
 

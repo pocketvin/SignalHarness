@@ -110,8 +110,12 @@ def test_dashboard_and_digest_outputs_include_expected_sections(tmp_path: Path) 
                     "fallback_used": True,
                     "retry_count": 1,
                     "schema_error": "provider_timeout after 45s",
+                    "provider": "mock-provider",
+                    "model": "mock-model",
+                    "model_profile": "mock-agent",
                     "tools_requested": ["github_signal"],
                     "tools_executed": ["github_signal"],
+                    "tool_errors": ["github_signal: request failed"],
                     "blocked_tools": [],
                     "source_tasks": [
                         {
@@ -185,26 +189,38 @@ def test_dashboard_and_digest_outputs_include_expected_sections(tmp_path: Path) 
 
     html = dashboard.read_text(encoding="utf-8")
     assert "SignalHarness Dashboard" in html
-    assert "信号总览 / Executive Summary" in html
+    assert "Executive Summary" in html
+    assert "Signal Summary" in html
+    assert "What changed?" in html
+    assert "Why it matters?" in html
+    assert "What should be done next?" in html
     assert "LLM fallback health notice" in html
     assert "High priority signals" in html
+    assert "Top actionable signals" in html
+    assert "Ecosystem and runtime signals" in html
+    assert "External insights" in html
+    assert "Observed dependency updates" in html
     assert "[Release] example/project: Security-sensitive provider release" in html
     assert "core-provider-permission" in html
     assert "Grouped dependency updates" in html
     assert "Alerts" in html
     assert "Source health" in html
+    assert "Tool health" in html
     assert "Model, profile, and limits" in html
     assert "llm_agent_call_count: 1" in html
     assert "schema_failures: 1" in html
     assert "fallback_count: 1" in html
     assert "retry_total: 1" in html
+    assert "tool_error_count: 1" in html
+    assert "provider: mock-provider" in html
+    assert "model_profile: mock-agent" in html
     assert "Agent trace and tools" in html
     assert "Agent repair pass" in html
     assert "No repair pass was triggered." in html
     assert "Score breakdown" in html
     assert "Learning proposal summary" in html
     assert "Learning proposals are review-only" in html
-    assert "本次未自动应用学习结果" in html
+    assert "No learning was applied automatically" in html
     assert "Learning staging" in html
     assert "proposal-1" in html
     for digest in (daily, weekly):

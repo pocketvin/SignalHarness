@@ -34,6 +34,8 @@ class OpenAICompatibleProvider:
     ) -> None:
         self.model = profile.model
         self.profile = profile
+        self.provider = profile.provider
+        self.model_profile = os.environ.get("LLM_MODEL_PROFILE", "").strip()
         self.base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._client = client or httpx.AsyncClient(timeout=httpx.Timeout(60.0))

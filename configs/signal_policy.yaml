@@ -27,6 +27,14 @@ keyword_weights:
   checkpoint: 1.2
   memory: 1.1
   skill: 1.1
+  tool calling: 1.2
+  structured output: 1.2
+  json schema: 1.2
+  provider: 1.1
+  cve: 1.5
+  vulnerability: 1.4
+  supply chain: 1.3
+  benchmark: 0.8
 
 suggested_focus_keywords: []
 
@@ -36,16 +44,26 @@ ignore_patterns:
 
 category_weights:
   dependency_update: 1.00
-  competitor_update: 0.85
-  market_signal: 0.70
+  ecosystem_issue: 0.74
+  agent_runtime_signal: 0.88
+  checkpoint_persistence_signal: 1.00
+  structured_output_signal: 0.92
+  tool_calling_signal: 0.92
+  provider_compatibility_signal: 0.90
+  source_collection_signal: 0.78
+  security_supply_chain: 1.00
+  evaluation_benchmark_signal: 0.72
+  docs_change_signal: 0.70
+  competitor_update: 0.78
+  market_signal: 0.68
   policy_signal: 0.90
-  expert_opinion: 0.65
-  team_update: 0.80
+  expert_opinion: 0.62
+  team_update: 0.70
   noise: 0.10
 
 thresholds:
-  action_required: 85
-  alert: 75
+  action_required: 88
+  alert: 80
   save: 45
 
 feedback_adjustments:

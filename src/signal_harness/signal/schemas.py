@@ -13,6 +13,16 @@ class SignalCategory(str, Enum):
     """Supported business categories for normalized project signals."""
 
     DEPENDENCY_UPDATE = "dependency_update"
+    ECOSYSTEM_ISSUE = "ecosystem_issue"
+    AGENT_RUNTIME_SIGNAL = "agent_runtime_signal"
+    CHECKPOINT_PERSISTENCE_SIGNAL = "checkpoint_persistence_signal"
+    STRUCTURED_OUTPUT_SIGNAL = "structured_output_signal"
+    TOOL_CALLING_SIGNAL = "tool_calling_signal"
+    PROVIDER_COMPATIBILITY_SIGNAL = "provider_compatibility_signal"
+    SOURCE_COLLECTION_SIGNAL = "source_collection_signal"
+    SECURITY_SUPPLY_CHAIN = "security_supply_chain"
+    EVALUATION_BENCHMARK_SIGNAL = "evaluation_benchmark_signal"
+    DOCS_CHANGE_SIGNAL = "docs_change_signal"
     COMPETITOR_UPDATE = "competitor_update"
     MARKET_SIGNAL = "market_signal"
     POLICY_SIGNAL = "policy_signal"
@@ -228,7 +238,9 @@ class TraceStep(BaseModel):
     failed_sources: list[str] = Field(default_factory=list)
     agent_name: str | None = None
     mode: str | None = None
+    provider: str | None = None
     model: str | None = None
+    model_profile: str | None = None
     prompt_version: str | None = None
     input_event_id: str | None = None
     output_schema: str | None = None

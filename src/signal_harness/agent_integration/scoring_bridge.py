@@ -80,7 +80,7 @@ def guarded_assessments(
         policy_multiplier = (
             0.10
             if route.category is SignalCategory.NOISE
-            else max(0.85, min(1.0, 0.85 + 0.15 * configured_category))
+            else max(0.55, min(1.0, configured_category))
         )
         if noise is not None:
             policy_multiplier *= noise.score_multiplier
@@ -132,6 +132,15 @@ def guarded_assessments(
             policy_multiplier=round(max(0.0, min(1.0, policy_multiplier)), 4),
             final_score=final_score,
         )
+        reason = _reason_text(
+            route.routing_reason,
+            route.noise_reason,
+            evidence_item.context_summary,
+            evidence_item.uncertainty,
+            impact_item.impact_reason,
+            action_item.critic_notes,
+            tool_errors=evidence_item.tool_errors,
+        )
         assessments.append(
             SignalAssessment(
                 event_id=event.event_id,
@@ -142,19 +151,7 @@ def guarded_assessments(
                 affected_modules=impact_item.affected_modules,
                 evidence_urls=evidence_item.evidence_urls,
                 source_quality=evidence_item.source_quality,
-                reason=" ".join(
-                    filter(
-                        None,
-                        [
-                            route.routing_reason,
-                            route.noise_reason,
-                            evidence_item.context_summary,
-                            evidence_item.uncertainty,
-                            impact_item.impact_reason,
-                            action_item.critic_notes,
-                        ],
-                    )
-                ),
+                reason=reason,
                 action_items=action_items,
                 decision=decision,
                 score_breakdown=base,
@@ -168,3 +165,29 @@ def guarded_assessments(
             )
         )
     return assessments, permission_checks
+
+
+def _reason_text(*parts: str | None, tool_errors: list[str]) -> str:
+    cleaned: list[str] = []
+    for part in parts:
+        if not part:
+            continue
+        text = " ".join(str(part).split())
+        if not text or _is_tool_debug_text(text):
+            continue
+        cleaned.append(text)
+    if tool_errors and not any("Evidence confidence reduced" in item for item in cleaned):
+        cleaned.append("Evidence confidence reduced due to tool errors.")
+    return " ".join(dict.fromkeys(cleaned))
+
+
+def _is_tool_debug_text(text: str) -> bool:
+    lowered = text.lower()
+    debug_markers = (
+        "rss parse failed",
+        "rss request failed",
+        "github request failed",
+        "tool failures or blocked requests",
+        "syntax error: line",
+    )
+    return any(marker in lowered for marker in debug_markers)

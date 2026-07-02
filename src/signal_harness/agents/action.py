@@ -25,6 +25,16 @@ class ActionAgent:
         if category is SignalCategory.DEPENDENCY_UPDATE:
             items.append("Compare release or issue details with the currently pinned dependency.")
             items.append("Create a manual compatibility test plan before changing code.")
+        elif category in {
+            SignalCategory.CHECKPOINT_PERSISTENCE_SIGNAL,
+            SignalCategory.STRUCTURED_OUTPUT_SIGNAL,
+            SignalCategory.TOOL_CALLING_SIGNAL,
+            SignalCategory.PROVIDER_COMPATIBILITY_SIGNAL,
+        }:
+            items.append("Reproduce the behavior against a small local smoke case before changing code.")
+            items.append("Check whether schema validation, fallback, or permission guards need adjustment.")
+        elif category is SignalCategory.SECURITY_SUPPLY_CHAIN:
+            items.append("Review the advisory and confirm exposure before any dependency or config change.")
         elif category is SignalCategory.POLICY_SIGNAL:
             items.append("Identify compliance or licensing obligations and assign an owner.")
         elif category is SignalCategory.COMPETITOR_UPDATE:

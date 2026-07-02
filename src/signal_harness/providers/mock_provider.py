@@ -42,7 +42,9 @@ class MockProvider:
     """Return LLM-like fixtures without using fallback unless requested."""
 
     name = "mock-provider"
+    provider = "mock-provider"
     model = "mock-signal-model-v2"
+    model_profile = "mock-agent"
 
     def __init__(
         self,

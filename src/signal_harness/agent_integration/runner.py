@@ -23,8 +23,10 @@ from signal_harness.agent_integration.schemas import (
     EvidenceToolPlan,
     ImpactOutput,
     LearningPolicyOutput,
+    RequiredAgent,
     SupervisorOutput,
     ToolObservation,
+    ToolRequest,
 )
 from signal_harness.agent_integration.scoring_bridge import guarded_assessments
 from signal_harness.agent_integration.tool_loop import (
@@ -40,6 +42,7 @@ from signal_harness.agent_team import (
     LearningPolicyAgent,
     SignalSupervisorAgent,
 )
+from signal_harness.agents.classifier import ClassifierAgent
 from signal_harness.providers.adapter import AgentCall, AgentProvider
 from signal_harness.runtime.tool_executor import SignalToolExecutor
 from signal_harness.runtime.tracing import TraceRecorder
@@ -47,6 +50,7 @@ from signal_harness.signal.schemas import (
     FeedbackRecord,
     NoiseAssessment,
     SignalAssessment,
+    SignalCategory,
     SignalCluster,
     SignalEvent,
     TraceStep,
@@ -60,16 +64,67 @@ class AgentLoopLimits:
     """Bound LLM calls, schema repair, and controlled evidence tool use."""
 
     max_schema_retries: int = 1
-    max_agent_call_seconds: int = 45
-    max_run_seconds: int = 180
+    max_agent_call_seconds: int = 75
+    max_run_seconds: int = 300
     max_total_tool_requests_per_run: int = 20
     max_tool_requests_per_event: int = 3
-    max_tool_output_chars: int = 1000
+    max_tool_output_chars: int = 700
     max_repair_rounds_per_run: int = 1
     max_repair_events_per_run: int = 5
 
 
 ToolLoopLimits = AgentLoopLimits
+
+
+def _request_key(request: ToolRequest) -> tuple[str, tuple[tuple[str, str], ...]]:
+    return (
+        request.tool_name,
+        tuple(sorted((str(key), str(value)) for key, value in request.arguments.items())),
+    )
+
+
+def _canonical_source_request(event: SignalEvent) -> ToolRequest | None:
+    if event.source_type == "github_release" and "/" in event.source_name:
+        return ToolRequest(
+            tool_name="github_signal",
+            arguments={"action": "fetch_repo_releases", "repo": event.source_name},
+            reason="Verify the observed GitHub release source.",
+        )
+    if event.source_type == "github_issue" and "/" in event.source_name:
+        return ToolRequest(
+            tool_name="github_signal",
+            arguments={"action": "fetch_repo_issues", "repo": event.source_name},
+            reason="Verify the observed GitHub issue source.",
+        )
+    if event.source_type == "rss":
+        feed_url = str(
+            event.raw_payload.get("feed_url")
+            or event.raw_payload.get("source_feed_url")
+            or ""
+        ).strip()
+        if feed_url.startswith(("http://", "https://")):
+            return ToolRequest(
+                tool_name="rss_signal",
+                arguments={"action": "fetch_feed", "url": feed_url},
+                reason="Verify the observed RSS item from the configured feed.",
+            )
+    if event.source_type == "web_change":
+        fixture = str(event.raw_payload.get("fixture") or "").strip()
+        if fixture:
+            return ToolRequest(
+                tool_name="web_change",
+                arguments={"action": "load_fixture", "fixture": fixture},
+                reason="Verify the observed web-change fixture.",
+            )
+    return None
+
+
+def _required_agents_for_category(category: SignalCategory) -> list[RequiredAgent]:
+    if category is SignalCategory.NOISE:
+        return []
+    if category is SignalCategory.EXPERT_OPINION:
+        return ["context_evidence", "impact", "learning_observation"]
+    return ["context_evidence", "impact", "action", "learning_observation"]
 
 
 class LLMAgentTeamRunner:
@@ -139,14 +194,31 @@ class LLMAgentTeamRunner:
     ) -> OutputT:
         raw = output.model_dump(mode="json")
         raw_results = raw.get("results", raw.get("routes"))
-        observed = {
+        observed_ids = [
             str(item.get("event_id"))
             for item in raw_results or []
-            if isinstance(item, dict)
+            if isinstance(item, dict) and item.get("event_id")
+        ]
+        observed = {
+            event_id for event_id in observed_ids if event_id in expected_ids
         }
-        if observed == expected_ids:
+        if observed == expected_ids and len(observed_ids) == len(expected_ids):
             return output
         replacement = fallback()
+        field_name = "routes" if hasattr(output, "routes") else "results"
+        current_items = list(getattr(output, field_name, []))
+        fallback_items = list(getattr(replacement, field_name, []))
+        merged_by_id: dict[str, Any] = {}
+        for item in current_items:
+            event_id = str(getattr(item, "event_id", ""))
+            if event_id in expected_ids and event_id not in merged_by_id:
+                merged_by_id[event_id] = item
+        for item in fallback_items:
+            event_id = str(getattr(item, "event_id", ""))
+            if event_id in expected_ids and event_id not in merged_by_id:
+                merged_by_id[event_id] = item
+        if set(merged_by_id) == expected_ids:
+            replacement = output.model_copy(update={field_name: list(merged_by_id.values())})
         trace = self.trace.steps[trace_index]
         self.trace.steps[trace_index] = trace.model_copy(
             update={
@@ -154,7 +226,10 @@ class LLMAgentTeamRunner:
                 "fallback_used": True,
                 "output_count": _output_count(replacement),
                 "error": "Agent output did not cover every input event exactly once.",
-                "detail": "Coverage validation failed; deterministic fallback used.",
+                "detail": (
+                    "Coverage validation failed; deterministic fallback filled "
+                    "missing audit records while preserving valid model outputs."
+                ),
             }
         )
         return replacement
@@ -213,6 +288,7 @@ class LLMAgentTeamRunner:
             ),
             trace_index=route_trace,
         )
+        routes = self._calibrate_route_categories(events, routes, project_profile)
         route_by_id = {route.event_id: route for route in routes.routes}
 
         evidence_events = self._events_for(events, route_by_id, "context_evidence")
@@ -233,6 +309,7 @@ class LLMAgentTeamRunner:
                 lambda: self.evidence.fallback_plan(evidence_events),
                 event_ids=[event.event_id for event in evidence_events],
             )
+            plan, source_blocked = self._source_aware_tool_plan(evidence_events, plan)
             observations, tool_trace = await self._execute_tool_requests(
                 plan,
                 policy,
@@ -243,9 +320,15 @@ class LLMAgentTeamRunner:
                 update={
                     "tools_executed": tool_trace["executed"],
                     "tool_errors": tool_trace["errors"],
-                    "blocked_tools": tool_trace["blocked"],
+                    "blocked_tools": [*tool_trace["blocked"], *source_blocked],
                     "budget_blocked_count": len(tool_trace["budget_blocked"]),
-                    "permission_checks": tool_trace["permission_checks"],
+                    "permission_checks": [
+                        *tool_trace["permission_checks"],
+                        *[
+                            f"{item}:blocked:source_mismatch"
+                            for item in source_blocked
+                        ],
+                    ],
                     "cache_events": tool_trace["cache_events"],
                 }
             )
@@ -290,8 +373,14 @@ class LLMAgentTeamRunner:
                 update={
                     "tools_executed": tool_trace["executed"],
                     "tool_errors": tool_trace["errors"],
-                    "blocked_tools": tool_trace["blocked"],
-                    "permission_checks": tool_trace["permission_checks"],
+                    "blocked_tools": [*tool_trace["blocked"], *source_blocked],
+                    "permission_checks": [
+                        *tool_trace["permission_checks"],
+                        *[
+                            f"{item}:blocked:source_mismatch"
+                            for item in source_blocked
+                        ],
+                    ],
                     "cache_events": tool_trace["cache_events"],
                     "event_input_count": len(evidence_events),
                     "tool_observation_count": len(observations),
@@ -506,7 +595,29 @@ class LLMAgentTeamRunner:
                 assessment.model_dump(mode="json") for assessment in assessments
             ],
         }
-        if needs_learning:
+        conservative_learning = self._should_use_conservative_learning(
+            assessments,
+            feedback_history=feedback_history,
+        )
+        if needs_learning and conservative_learning:
+            learning = self.learning.fallback(learning_memories)
+            self.trace.steps.append(
+                TraceStep(
+                    step="learning_review_noop",
+                    status="skipped",
+                    agent="LearningPolicyAgent",
+                    input_count=len(events),
+                    output_count=3,
+                    duration_ms=0,
+                    detail=(
+                        "LearningPolicyAgent LLM call skipped; this run used "
+                        "conservative review-only learning because fallback/tool "
+                        "health warnings were present or no high-priority signal "
+                        "required policy learning."
+                    ),
+                )
+            )
+        elif needs_learning:
             learning_call = self.learning.build_call(learning_memories)
             learning, _ = await self._invoke(
                 learning_call,
@@ -517,6 +628,30 @@ class LLMAgentTeamRunner:
         else:
             learning = self.learning.fallback(learning_memories)
         return assessments, learning
+
+    def _should_use_conservative_learning(
+        self,
+        assessments: list[SignalAssessment],
+        *,
+        feedback_history: Iterable[FeedbackRecord],
+    ) -> bool:
+        llm_health_warning = any(
+            step.step == "llm_agent_call"
+            and (
+                step.fallback_used
+                or step.schema_error
+                or step.error
+                or step.tool_errors
+            )
+            for step in self.trace.steps
+        )
+        if llm_health_warning:
+            return True
+        high_priority = any(
+            assessment.decision.value in {"action_required", "alert"}
+            for assessment in assessments
+        )
+        return not high_priority and not list(feedback_history)
 
     async def run_learning(
         self,
@@ -556,6 +691,102 @@ class LLMAgentTeamRunner:
             policy,
             event_count=event_count,
         )
+
+    def _source_aware_tool_plan(
+        self,
+        events: list[SignalEvent],
+        plan: EvidenceToolPlan,
+    ) -> tuple[EvidenceToolPlan, list[str]]:
+        """Constrain real-agent evidence tools to the observed source types."""
+
+        if self.mode is not RunMode.AGENT:
+            return plan, []
+        allowed = {
+            _request_key(request): request
+            for event in events
+            for request in [_canonical_source_request(event)]
+            if request is not None
+        }
+        selected: list[ToolRequest] = []
+        blocked: list[str] = []
+        for request in plan.tool_requests:
+            if request.tool_name in {"signal_memory", "signal_score"}:
+                selected.append(request)
+                continue
+            key = _request_key(request)
+            if key in allowed:
+                selected.append(allowed[key])
+            else:
+                blocked.append(request.tool_name)
+        existing_keys = {_request_key(request) for request in selected}
+        selected.extend(
+            request
+            for key, request in allowed.items()
+            if key not in existing_keys
+        )
+        deduped = list({_request_key(request): request for request in selected}.values())
+        real_agent_cap = min(8, self.tool_limits.max_total_tool_requests_per_run)
+        deduped = deduped[:real_agent_cap]
+        if len(deduped) == len(plan.tool_requests) and not blocked:
+            return plan, []
+        return (
+            plan.model_copy(
+                update={
+                    "tool_requests": deduped,
+                    "planning_summary": (
+                        plan.planning_summary
+                        + " Source-aware guardrail removed cross-source or invalid "
+                        "tool requests and kept canonical read-only source tools."
+                    ).strip(),
+                }
+            ),
+            list(dict.fromkeys(blocked)),
+        )
+
+    @staticmethod
+    def _calibrate_route_categories(
+        events: list[SignalEvent],
+        routes: SupervisorOutput,
+        project_profile: dict[str, Any],
+    ) -> SupervisorOutput:
+        classifier = ClassifierAgent()
+        event_by_id = {event.event_id: event for event in events}
+        calibrated = []
+        broad_categories = {
+            "dependency_update",
+            "team_update",
+            "expert_opinion",
+            "market_signal",
+            "ecosystem_issue",
+        }
+        for route in routes.routes:
+            event = event_by_id.get(route.event_id)
+            if event is None:
+                calibrated.append(route)
+                continue
+            deterministic = classifier.run(event, project_profile).category
+            should_replace = (
+                route.category.value in broad_categories
+                and deterministic is not route.category
+            )
+            updates: dict[str, Any] = {}
+            reason = route.routing_reason
+            if should_replace:
+                updates["category"] = deterministic
+                reason += " Category calibrated by deterministic source/content rules."
+            if route.analyze and not route.required_agents:
+                updates["required_agents"] = _required_agents_for_category(
+                    updates.get("category", route.category)
+                )
+                reason += " Required downstream agents filled by routing guardrail."
+            if updates:
+                updates["routing_reason"] = reason
+                calibrated.append(
+                    route.model_copy(update=updates)
+                )
+            else:
+                calibrated.append(route)
+        return routes.model_copy(update={"routes": calibrated})
 
     @staticmethod
     def _evidence_exit_condition(
@@ -637,6 +868,7 @@ class LLMAgentTeamRunner:
             lambda: self.evidence.fallback_plan(repair_events),
             event_ids=event_ids,
         )
+        plan, source_blocked = self._source_aware_tool_plan(repair_events, plan)
         observations, tool_trace = await self._execute_tool_requests(
             plan,
             policy,
@@ -647,9 +879,15 @@ class LLMAgentTeamRunner:
             update={
                 "tools_executed": tool_trace["executed"],
                 "tool_errors": tool_trace["errors"],
-                "blocked_tools": tool_trace["blocked"],
+                "blocked_tools": [*tool_trace["blocked"], *source_blocked],
                 "budget_blocked_count": len(tool_trace["budget_blocked"]),
-                "permission_checks": tool_trace["permission_checks"],
+                "permission_checks": [
+                    *tool_trace["permission_checks"],
+                    *[
+                        f"{item}:blocked:source_mismatch"
+                        for item in source_blocked
+                    ],
+                ],
                 "cache_events": tool_trace["cache_events"],
                 "detail": (
                     "repair_internal_llm_call=true; "
@@ -709,8 +947,14 @@ class LLMAgentTeamRunner:
             update={
                 "tools_executed": tool_trace["executed"],
                 "tool_errors": tool_trace["errors"],
-                "blocked_tools": tool_trace["blocked"],
-                "permission_checks": tool_trace["permission_checks"],
+                "blocked_tools": [*tool_trace["blocked"], *source_blocked],
+                "permission_checks": [
+                    *tool_trace["permission_checks"],
+                    *[
+                        f"{item}:blocked:source_mismatch"
+                        for item in source_blocked
+                    ],
+                ],
                 "cache_events": tool_trace["cache_events"],
                 "event_input_count": len(repair_events),
                 "tool_observation_count": len(observations),

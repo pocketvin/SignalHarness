@@ -269,7 +269,9 @@ class SignalHarnessWorkflow:
                     status="success",
                     agent="LLMAgentTeamRunner",
                     duration_ms=0,
+                    provider=str(getattr(provider, "provider", provider.name)),
                     model=provider.model,
+                    model_profile=str(getattr(provider, "model_profile", "") or ""),
                     detail=(
                         f"max_schema_retries={runner.loop_limits.max_schema_retries}; "
                         f"max_agent_call_seconds="
@@ -546,11 +548,18 @@ class SignalHarnessWorkflow:
                 if job.source_type == "web_change":
                     collected.append(item)
                 else:
+                    raw_item = dict(item)
+                    if job.source_type == "rss":
+                        raw_item.setdefault("feed_url", str(job.arguments.get("url", "")))
+                        raw_item.setdefault(
+                            "source_feed_url",
+                            str(job.arguments.get("url", "")),
+                        )
                     collected.append(
                         {
                             "_collector_source_name": job.source_name,
                             "_collector_source_type": job.source_type,
-                            "_collector_raw": item,
+                            "_collector_raw": raw_item,
                         }
                     )
         if not collected:
@@ -590,7 +599,7 @@ class SignalHarnessWorkflow:
                 ]
             ]
         if max_events is not None:
-            selected = sorted(selected, key=self._event_rank)[:max_events]
+            selected = self._balanced_event_limit(selected, max_events)
         else:
             selected = sorted(selected, key=self._event_rank)
 
@@ -620,6 +629,35 @@ class SignalHarnessWorkflow:
             counts[key] = counts.get(key, 0) + 1
         return dict(sorted(counts.items()))
 
+    @classmethod
+    def _balanced_event_limit(
+        cls,
+        indexed_events: list[tuple[int, dict[str, Any]]],
+        max_events: int,
+    ) -> list[tuple[int, dict[str, Any]]]:
+        grouped: dict[str, list[tuple[int, dict[str, Any]]]] = {}
+        for pair in indexed_events:
+            grouped.setdefault(cls._source_key(pair[1]), []).append(pair)
+        for source_key, values in grouped.items():
+            grouped[source_key] = sorted(values, key=cls._event_rank)
+        source_order = sorted(
+            grouped,
+            key=lambda source_key: (
+                cls._source_priority(source_key.split(":", 1)[0]),
+                source_key,
+            ),
+        )
+        selected: list[tuple[int, dict[str, Any]]] = []
+        while len(selected) < max_events and any(grouped.values()):
+            for source_key in source_order:
+                values = grouped[source_key]
+                if not values:
+                    continue
+                selected.append(values.pop(0))
+                if len(selected) >= max_events:
+                    break
+        return selected
+
     @staticmethod
     def _source_key(item: dict[str, Any]) -> str:
         if "_collector_raw" in item:
@@ -643,9 +681,9 @@ class SignalHarnessWorkflow:
     @staticmethod
     def _source_priority(source_type: str) -> int:
         return {
-            "github_release": 0,
-            "github_issue": 1,
-            "rss": 2,
+            "github_issue": 0,
+            "rss": 1,
+            "github_release": 2,
             "web_change": 3,
         }.get(source_type, 9)
 

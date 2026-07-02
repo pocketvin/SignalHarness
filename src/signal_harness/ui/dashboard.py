@@ -77,10 +77,10 @@ def _render_dashboard(
         key=lambda value: _to_float(value.get("impact_score")),
         reverse=True,
     )
-    high_priority_sorted = sorted(
+    high_priority_sorted = _balanced_signal_list(
         high_priority,
-        key=lambda value: _to_float(value.get("impact_score")),
-        reverse=True,
+        event_by_id,
+        limit=12,
     )
     top_modules = Counter(
         module
@@ -116,6 +116,7 @@ def _render_dashboard(
     llm_step = next((step for step in trace if step.get("step") == "llm_agent_call"), {})
     limit_step = next((step for step in trace if step.get("step") == "agent_loop_limits"), {})
     health = _llm_health(trace)
+    tool_health = _tool_health(trace)
     cards = [
         _metric("Signals", len(signals)),
         _metric("Assessments", len(assessments)),
@@ -133,10 +134,56 @@ def _render_dashboard(
         health=health,
         event_by_id=event_by_id,
     )
+    signal_summary = _signal_summary(
+        signals=signals,
+        assessments=assessments,
+        source_tasks=source_tasks,
+        failed_sources=failed_sources,
+        health=health,
+        tool_health=tool_health,
+    )
     rows = "\n".join(
         _signal_row(item, event_by_id.get(str(item.get("event_id")), {}))
         for item in high_priority_sorted[:12]
     ) or "<tr><td colspan=\"4\">No action-required or alert signals.</td></tr>"
+    actionable_rows = "\n".join(
+        _signal_row(item, event_by_id.get(str(item.get("event_id")), {}))
+        for item in high_priority_sorted[:8]
+    ) or "<tr><td colspan=\"4\">No actionable signals in this run.</td></tr>"
+    runtime_rows = _section_rows(
+        assessments,
+        event_by_id,
+        categories={
+            "ecosystem_issue",
+            "agent_runtime_signal",
+            "checkpoint_persistence_signal",
+            "structured_output_signal",
+            "tool_calling_signal",
+            "provider_compatibility_signal",
+            "source_collection_signal",
+            "security_supply_chain",
+            "evaluation_benchmark_signal",
+            "docs_change_signal",
+        },
+        limit=8,
+        empty="No ecosystem/runtime signals in this run.",
+    )
+    insight_rows = _section_rows(
+        assessments,
+        event_by_id,
+        categories={"expert_opinion", "market_signal"},
+        source_types={"rss"},
+        limit=8,
+        empty="No external insight signals in this run.",
+    )
+    dependency_rows = _section_rows(
+        assessments,
+        event_by_id,
+        categories={"dependency_update"},
+        source_types={"github_release"},
+        limit=6,
+        empty="No direct dependency or release signals in this run.",
+    )
     alert_items = "".join(
         f"<li><strong>{_e(alert.get('title'))}</strong> — {_e(', '.join(_strings(alert.get('reasons'))))}</li>"
         for alert in alerts
@@ -174,18 +221,22 @@ def _render_dashboard(
     )
     model_items = "".join(
         [
-            f"<li>provider: {_e(model_eval.get('provider') or llm_step.get('mode') or 'n/a')}</li>",
+            f"<li>mode: {_e(model_eval.get('mode') or llm_step.get('mode') or 'n/a')}</li>",
+            f"<li>provider: {_e(model_eval.get('provider') or llm_step.get('provider') or 'n/a')}</li>",
             f"<li>model: {_e(model_eval.get('model') or llm_step.get('model') or 'n/a')}</li>",
-            f"<li>model_profile: {_e(model_eval.get('model_profile') or 'n/a')}</li>",
+            f"<li>model_profile: {_e(model_eval.get('model_profile') or llm_step.get('model_profile') or 'n/a')}</li>",
             f"<li>run_state_mode: {_e(model_eval.get('run_state_mode') or 'n/a')}</li>",
             f"<li>llm_agent_call_count: {health['llm_agent_call_count']}</li>",
             f"<li>schema_failures: {health['schema_failures']}</li>",
             f"<li>fallback_count: {health['fallback_count']}</li>",
+            f"<li>audit_fallback_count: {health['audit_fallback_count']}</li>",
             f"<li>retry_total: {health['retry_total']}</li>",
             f"<li>timeout_count: {health['timeout_count']}</li>",
+            f"<li>tool_error_count: {tool_health['total_tool_error_count']}</li>",
             f"<li>limits: {_e(limit_step.get('detail') or 'n/a')}</li>",
         ]
     )
+    tool_health_section = _tool_health_section(tool_health)
     source_items = "".join(
         f"<li>{_e(task.get('source_type'))}:{_e(task.get('source_name'))} — "
         f"{_e(task.get('status'))} ({_e(task.get('output_count'))} outputs)</li>"
@@ -226,14 +277,20 @@ def _render_dashboard(
   <div class="grid">{''.join(cards)}</div>
   {banner}
   {executive}
+  {signal_summary}
   <section>
     <h2>High priority signals</h2>
-    <p>{len(high_priority)} action-required or alert signals. Showing top {min(12, len(high_priority))} by score.</p>
+    <p>{len(high_priority)} action-required or alert signals. Showing a balanced top {min(12, len(high_priority))} by source and category.</p>
     <table><thead><tr><th>Signal</th><th>Tags</th><th>Score</th><th>Reason</th></tr></thead><tbody>{rows}</tbody></table>
   </section>
+  <section><h2>Top actionable signals</h2><table><thead><tr><th>Signal</th><th>Tags</th><th>Score</th><th>Reason</th></tr></thead><tbody>{actionable_rows}</tbody></table></section>
+  <section><h2>Ecosystem and runtime signals</h2><table><thead><tr><th>Signal</th><th>Tags</th><th>Score</th><th>Reason</th></tr></thead><tbody>{runtime_rows}</tbody></table></section>
+  <section><h2>External insights</h2><table><thead><tr><th>Signal</th><th>Tags</th><th>Score</th><th>Reason</th></tr></thead><tbody>{insight_rows}</tbody></table></section>
+  <section><h2>Observed dependency updates</h2><table><thead><tr><th>Signal</th><th>Tags</th><th>Score</th><th>Reason</th></tr></thead><tbody>{dependency_rows}</tbody></table></section>
   <section><h2>Grouped dependency updates</h2>{dependency_groups}</section>
   <section><h2>Alerts</h2><ul>{alert_items}</ul></section>
   <section><h2>Source health</h2><ul>{source_items}</ul><h3>Failed sources</h3><ul>{failed_items}</ul></section>
+  {tool_health_section}
   <section><h2>Top affected modules</h2><ul>{module_items}</ul></section>
   <section><h2>Model, profile, and limits</h2><ul>{model_items}</ul></section>
   <section><h2>Agent trace and tools</h2><ul>{trace_items}</ul></section>
@@ -289,7 +346,7 @@ def _executive_summary(
     )
     return f"""
   <section>
-    <h2>信号总览 / Executive Summary</h2>
+    <h2>Executive Summary</h2>
     <div class="columns">
       <div>
         <ul>
@@ -312,6 +369,72 @@ def _executive_summary(
 """
 
 
+def _signal_summary(
+    *,
+    signals: list[dict[str, Any]],
+    assessments: list[dict[str, Any]],
+    source_tasks: list[dict[str, Any]],
+    failed_sources: list[str],
+    health: dict[str, int | bool],
+    tool_health: dict[str, Any],
+) -> str:
+    del source_tasks
+    categories = Counter(str(item.get("category") or "unknown") for item in assessments)
+    source_types = Counter(str(item.get("source_type") or "unknown") for item in signals)
+    top_categories = ", ".join(
+        f"{category} ({count})" for category, count in categories.most_common(4)
+    ) or "no categorized signals"
+    top_sources = ", ".join(
+        f"{source_type} ({count})" for source_type, count in source_types.most_common(4)
+    ) or "no collected source types"
+    if categories.get("checkpoint_persistence_signal") or categories.get("tool_calling_signal") or categories.get("structured_output_signal"):
+        what_changed = (
+            "Runtime, tool-calling, checkpoint, or structured-output signals were present "
+            "alongside broader external updates."
+        )
+    elif categories.get("provider_compatibility_signal"):
+        what_changed = "Provider or model API compatibility signals were present."
+    elif categories.get("expert_opinion"):
+        what_changed = "The run mostly collected broader AI engineering insight signals."
+    else:
+        what_changed = "The run collected a mixed set of external project signals."
+    risk_notes: list[str] = []
+    if health["fallback_count"] or health["schema_failures"]:
+        risk_notes.append(
+            "LLM fallback or schema failures occurred; treat affected conclusions as audit-backed."
+        )
+    if tool_health["total_tool_error_count"]:
+        risk_notes.append(
+            "Tool errors reduced evidence confidence for at least one source lookup."
+        )
+    if failed_sources:
+        risk_notes.append("Some configured sources failed and should be inspected.")
+    why_matters = (
+        "These signals matter because SignalHarness depends on controlled tool execution, "
+        "schema validation, provider compatibility, traceable fallback, and reliable source collection."
+    )
+    if risk_notes:
+        why_matters += " " + " ".join(risk_notes)
+    next_actions = [
+        "Review checkpoint, tool-calling, structured-output, provider, security, and source-collection signals first.",
+        "Save broad engineering articles as context unless they directly affect provider integration, tool safety, schema reliability, or evaluation.",
+        "Treat ordinary release series as observed signals unless breaking, security, or API compatibility impact is confirmed.",
+    ]
+    if failed_sources or tool_health["total_tool_error_count"]:
+        next_actions.append("Investigate source or tool errors before relying on affected confidence scores.")
+    return f"""
+  <section>
+    <h2>Signal Summary</h2>
+    <h3>What changed?</h3>
+    <p>{_e(what_changed)} Sources: {_e(top_sources)}. Categories: {_e(top_categories)}.</p>
+    <h3>Why it matters?</h3>
+    <p>{_e(why_matters)}</p>
+    <h3>What should be done next?</h3>
+    <ul>{''.join(f'<li>{_e(item)}</li>' for item in next_actions)}</ul>
+  </section>
+"""
+
+
 def _fallback_banner(health: dict[str, int | bool]) -> str:
     if not (
         health["schema_failures"]
@@ -324,13 +447,14 @@ def _fallback_banner(health: dict[str, int | bool]) -> str:
     return f"""
   <section class="warning">
     <h2>LLM fallback health notice</h2>
-    <p>本次运行触发 LLM fallback，当前 dashboard 包含 deterministic fallback audit output。结果可用于审计和展示系统兜底能力，但不代表完整稳定的 LLM reasoning run。</p>
+    <p>This run triggered LLM fallback, retry, timeout, or schema health warnings. The dashboard includes deterministic fallback audit output where applicable. This is useful for auditability, but it should not be described as a fully stable LLM reasoning run.</p>
     <ul>
       <li>llm_agent_call_count: {health['llm_agent_call_count']}</li>
       <li>schema_failures: {health['schema_failures']}</li>
       <li>fallback_count: {health['fallback_count']}</li>
       <li>retry_total: {health['retry_total']}</li>
       <li>timeout_count: {health['timeout_count']}</li>
+      <li>tool_error_count: {health['tool_error_count']}</li>
     </ul>
   </section>
 """
@@ -351,15 +475,74 @@ def _llm_health(trace: list[dict[str, Any]]) -> dict[str, int | bool]:
         "schema_failures": sum(
             1
             for step in llm_steps
-            if step.get("schema_valid") is False or bool(step.get("schema_error"))
+            if step.get("schema_valid") is False
         ),
-        "fallback_count": sum(1 for step in trace if bool(step.get("fallback_used"))),
+        "fallback_count": sum(1 for step in llm_steps if bool(step.get("fallback_used")))
+        + sum(1 for step in trace if step.get("step") == "agent_team_run_timeout"),
+        "audit_fallback_count": sum(
+            1 for step in trace if step.get("step") == "skipped_event_audit_fallback"
+        ),
         "retry_total": sum(int(step.get("retry_count") or 0) for step in llm_steps),
         "timeout_count": timeout_count,
+        "tool_error_count": sum(len(step.get("tool_errors") or []) for step in trace),
         "agent_team_run_timeout": any(
             step.get("step") == "agent_team_run_timeout" for step in trace
         ),
     }
+
+
+def _tool_health(trace: list[dict[str, Any]]) -> dict[str, Any]:
+    errors: list[str] = []
+    tools: list[str] = []
+    for step in trace:
+        tools.extend(str(item) for item in step.get("tools_executed") or [])
+        tools.extend(str(item) for item in step.get("blocked_tools") or [])
+        errors.extend(str(item) for item in step.get("tool_errors") or [])
+    unique_errors = list(dict.fromkeys(errors))
+    breakdown = Counter(_tool_error_type(error) for error in unique_errors)
+    affected_tools = Counter(error.split(":", 1)[0] for error in unique_errors if ":" in error)
+    return {
+        "total_tool_error_count": len(unique_errors),
+        "error_breakdown": breakdown,
+        "affected_tools": affected_tools,
+        "sample_errors": unique_errors[:3],
+        "tools_touched": Counter(tools),
+    }
+
+
+def _tool_health_section(tool_health: dict[str, Any]) -> str:
+    breakdown = tool_health["error_breakdown"]
+    affected = tool_health["affected_tools"]
+    samples = tool_health["sample_errors"]
+    breakdown_items = _list_items(breakdown.most_common(6))
+    affected_items = _list_items(affected.most_common(6))
+    sample_items = "".join(f"<li>{_e(item[:240])}</li>" for item in samples) or "<li>None.</li>"
+    return f"""
+  <section>
+    <h2>Tool health</h2>
+    <ul>
+      <li>total_tool_error_count: {tool_health['total_tool_error_count']}</li>
+    </ul>
+    <div class="columns">
+      <div><h3>Error type breakdown</h3><ul>{breakdown_items}</ul></div>
+      <div><h3>Affected tools</h3><ul>{affected_items}</ul></div>
+      <div><h3>Sample error</h3><ul>{sample_items}</ul></div>
+    </div>
+  </section>
+"""
+
+
+def _tool_error_type(error: str) -> str:
+    lowered = error.lower()
+    if "rss parse failed" in lowered:
+        return "rss_parse_failed"
+    if "request failed" in lowered:
+        return "request_failed"
+    if "budget" in lowered:
+        return "budget_blocked"
+    if "blocked" in lowered:
+        return "permission_or_source_blocked"
+    return "tool_error"
 
 
 def _recommended_actions(
@@ -385,6 +568,77 @@ def _recommended_actions(
     return recommendations
 
 
+def _balanced_signal_list(
+    assessments: list[dict[str, Any]],
+    event_by_id: dict[str, dict[str, Any]],
+    *,
+    limit: int,
+) -> list[dict[str, Any]]:
+    sorted_items = sorted(
+        assessments,
+        key=lambda value: _to_float(value.get("impact_score")),
+        reverse=True,
+    )
+    selected: list[dict[str, Any]] = []
+    group_counts: Counter[tuple[str, str]] = Counter()
+    release_dependency_count = 0
+    for item in sorted_items:
+        event = event_by_id.get(str(item.get("event_id")), {})
+        category = str(item.get("category") or "unknown")
+        source_name = str(event.get("source_name") or "unknown")
+        source_type = str(event.get("source_type") or "unknown")
+        key = (source_name, category)
+        if category == "dependency_update" or source_type == "github_release":
+            if release_dependency_count >= 3:
+                continue
+            release_dependency_count += 1
+        if group_counts[key] >= 2:
+            continue
+        selected.append(item)
+        group_counts[key] += 1
+        if len(selected) >= limit:
+            break
+    if len(selected) < limit:
+        for item in sorted_items:
+            if item in selected:
+                continue
+            selected.append(item)
+            if len(selected) >= limit:
+                break
+    return selected
+
+
+def _section_rows(
+    assessments: list[dict[str, Any]],
+    event_by_id: dict[str, dict[str, Any]],
+    *,
+    categories: set[str],
+    source_types: set[str] | None = None,
+    limit: int,
+    empty: str,
+) -> str:
+    rows = [
+        item
+        for item in sorted(
+            assessments,
+            key=lambda value: _to_float(value.get("impact_score")),
+            reverse=True,
+        )
+        if str(item.get("category") or "") in categories
+        or (
+            source_types is not None
+            and str(event_by_id.get(str(item.get("event_id")), {}).get("source_type") or "")
+            in source_types
+        )
+    ][:limit]
+    if not rows:
+        return f"<tr><td colspan=\"4\">{_e(empty)}</td></tr>"
+    return "\n".join(
+        _signal_row(item, event_by_id.get(str(item.get("event_id")), {}))
+        for item in rows
+    )
+
+
 def _signal_row(assessment: dict[str, Any], event: dict[str, Any]) -> str:
     title = _display_title(event, assessment)
     url = str(event.get("url") or "")
@@ -397,7 +651,7 @@ def _signal_row(assessment: dict[str, Any], event: dict[str, Any]) -> str:
         f"<div class=\"signal-subtitle\">{subtitle}</div></td>"
         f"<td><div class=\"tags\">{tags}</div></td>"
         f"<td>{_to_float(assessment.get('impact_score')):.1f}</td>"
-        f"<td>{_e(assessment.get('reason'))}</td>"
+        f"<td>{_e(_display_reason(assessment.get('reason')))}</td>"
         "</tr>"
     )
 
@@ -458,6 +712,21 @@ def _is_demo_url(url: str) -> bool:
         or "sample-" in lowered
         or "sample_events" in lowered
     )
+
+
+def _display_reason(value: object) -> str:
+    text = " ".join(str(value or "").split())
+    if not text:
+        return ""
+    tool_debug_markers = (
+        "RSS parse failed",
+        "RSS request failed",
+        "GitHub request failed",
+        "syntax error: line",
+    )
+    if any(marker.lower() in text.lower() for marker in tool_debug_markers):
+        return "Evidence confidence reduced due to tool errors."
+    return text
 
 
 def _dependency_groups(
@@ -550,11 +819,11 @@ def _learning_section(
 ) -> str:
     learning_summary = str(learning.get("learning_summary") or "No learning observation.")
     no_apply_message = (
-        "No learning was applied in this run. Learning proposals require explicit "
-        "review/apply. 本次未自动应用学习结果。学习建议是 review-only，需要人工审核后才能应用。"
+        "No learning was applied automatically. Learning proposals are review-only "
+        "and require explicit review before apply."
     )
     fallback_note = (
-        "<p class=\"muted\">Fallback was used, so learning remains review-only and was not auto-applied.</p>"
+        "<p class=\"muted\">This run included fallback, so any learning proposal should be treated as review-only and not applied without manual inspection.</p>"
         if fallback_used
         else ""
     )

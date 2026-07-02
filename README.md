@@ -1,20 +1,16 @@
 # SignalHarness
 
-SignalHarness is a standalone LLM-enhanced routed multi-agent signal
-intelligence harness.
+SignalHarness is a project-centric signal intelligence harness for small
+developer teams. It watches external change sources, filters noisy updates,
+asks a routed LLM Agent team to add context, and turns the result into a local
+dashboard, trace, digest, alert file, and review-only learning proposals.
 
-It monitors project-environment signals from GitHub, RSS, and web changes,
-verifies evidence, analyzes project impact, proposes safe actions, and produces
-review-only learning proposals. Python owns tool permission, budget, schema
-validation, fallback, trace, outputs, and final scoring.
-
-SignalHarness is not provider-native function calling, not a fully autonomous
-self-evolving system, not a fully conversational multi-agent debate runtime,
-and not a LangGraph/CrewAI/AutoGen wrapper. The LLM never directly executes
-tools or applies configuration changes.
-
-SignalHarness is an independent project inspired by general agent harness
-design patterns. It does not vendor or depend on OpenHarness code.
+The default inputs are GitHub repositories, RSS/Atom feeds, and fixture-backed
+web-change sources. The runtime is deliberately inspectable: Python owns source
+collection, read-only tool execution, permission checks, schema validation,
+fallback, trace recording, deterministic scoring, and all file writes. LLM
+Agents contribute classification, evidence synthesis, impact reasoning, action
+planning, and learning proposals inside those guardrails.
 
 ## Core architecture
 
@@ -40,6 +36,9 @@ Memory is infrastructure, not an Agent. The four stores are `ProjectMemory`,
 - Repair is bounded by Python-owned run limits. Agents may suggest only
   Impact→Evidence or Action→Impact repair; there is no recursive handoff loop.
 - `mock-agent` runs offline with mock-safe tool outputs and no API key.
+- Provider-native function calling is intentionally disabled today:
+  `ModelProfile.supports_native_tool_calling` remains false and tool execution
+  stays in the controlled Python loop.
 
 ## Run modes
 
@@ -54,16 +53,16 @@ uv run signal-harness scan \
   --fixture examples/signal_harness/sample_events.json \
   --mode mock-agent
 
-# Real provider path, defaults to SignalHarness OpenAI-compatible HTTP adapter
+# Real provider path through the SignalHarness OpenAI-compatible HTTP adapter
 LLM_API_KEY=... uv run signal-harness scan \
   --fixture examples/signal_harness/sample_events.json \
   --mode agent
 ```
 
-`demo` is not presented as true multi-Agent execution. `mock-agent` and
-`agent` use the same routed five-Agent architecture. A single Agent may have
-multiple turns: ContextEvidenceAgent first proposes tool requests and then
-reads controlled observations before producing final evidence.
+`demo` is the deterministic offline baseline. `mock-agent` and `agent` use the
+same routed five-Agent architecture. A single Agent may have multiple turns:
+ContextEvidenceAgent first proposes tool requests and then reads controlled
+observations before producing final evidence.
 
 ## Demo paths
 
@@ -79,9 +78,8 @@ uv run signal-harness scan \
 and may contain demo links. `configs/watchlist_demo.yaml` preserves a
 fixture-backed watchlist variant for local demo experiments.
 
-For a live OpenAI showcase, do not pass `--fixture`. The default
-`configs/watchlist.yaml` is the live watchlist and no longer includes the
-fixture-backed `sample-product-changelog` source:
+For a live OpenAI showcase, run without `--fixture` so SignalHarness reads the
+live `configs/watchlist.yaml` watchlist:
 
 ```bash
 SINCE="$(python - <<'PY'
@@ -100,8 +98,8 @@ uv run signal-harness scan \
 ```
 
 Live provider runs can hit context limits, rate limits, schema retries, or
-timeouts. The dashboard now makes fallback/retry/timeout health explicit and
-labels deterministic fallback audit output when it is used.
+timeouts. The dashboard makes fallback, retry, timeout, source-health, and
+tool-health status explicit so the run remains explainable.
 
 Optional real-provider environment variables:
 
@@ -113,9 +111,9 @@ Optional real-provider environment variables:
   YAML path under `configs/model_profiles/`)
 
 `ModelProfile` documents conservative model capabilities such as JSON mode,
-system prompt support, token limits, and strategy names. It does not enable
-provider-native tool calling: the default `tool_strategy` remains
-`controlled_tool_request`, and `supports_native_tool_calling` is false.
+system prompt support, token limits, and strategy names. The default
+`tool_strategy` is `controlled_tool_request`; provider-native tool execution is
+outside the current runtime boundary.
 
 ## Public-safe CI and secrets policy
 
@@ -374,6 +372,13 @@ signals, alerts, source health, top modules, Agent trace/tool controls, Agent
 repair pass status, guarded score breakdowns, model/profile/limit metadata, and
 learning staging status. If no repair pass was triggered, the dashboard says so
 explicitly.
+
+The dashboard includes a deterministic Signal Summary that answers what
+changed, why it matters, and what to do next. High-priority tables are balanced
+by source/category so dependency releases do not crowd out provider/API
+changes, runtime/tooling issues, structured-output signals, security or
+supply-chain risk, evaluation trends, and broader engineering insights. Tool
+errors are shown in Tool health rather than repeated inside every signal reason.
 
 ## Project structure
 

@@ -4,9 +4,23 @@ github:
       events:
         - releases
         - issues
+    - repo: openai/openai-python
+      events:
+        - releases
+        - issues
+    - repo: pydantic/pydantic
+      events:
+        - releases
+        - issues
 rss:
   feeds:
+    - name: OpenAI News
+      url: https://openai.com/news/rss.xml
+    - name: GitHub Changelog
+      url: https://github.blog/changelog/feed/
     - name: GitHub Engineering
       url: https://github.blog/engineering/feed/
+    - name: GitHub Security
+      url: https://github.blog/security/feed/
     - name: Simon Willison
       url: https://simonwillison.net/atom/everything/
