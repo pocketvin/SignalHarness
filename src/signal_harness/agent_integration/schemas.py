@@ -35,6 +35,66 @@ class SupervisorRoute(BaseModel):
     noise_reason: str | None = None
     related_cluster_id: str | None = None
 
+    @field_validator("category", mode="before")
+    @classmethod
+    def _normalize_category_alias(cls, value: Any) -> Any:
+        """Accept conservative LLM category aliases without weakening schema safety."""
+
+        if isinstance(value, SignalCategory):
+            return value
+        if not isinstance(value, str):
+            return value
+        normalized = value.strip().lower().replace("-", "_").replace(" ", "_")
+        aliases = {
+            "dependency": SignalCategory.DEPENDENCY_UPDATE,
+            "dependencies": SignalCategory.DEPENDENCY_UPDATE,
+            "release": SignalCategory.DEPENDENCY_UPDATE,
+            "ecosystem": SignalCategory.ECOSYSTEM_ISSUE,
+            "ecosystem_signal": SignalCategory.ECOSYSTEM_ISSUE,
+            "runtime": SignalCategory.AGENT_RUNTIME_SIGNAL,
+            "agent_runtime": SignalCategory.AGENT_RUNTIME_SIGNAL,
+            "agent_runtime_issue": SignalCategory.AGENT_RUNTIME_SIGNAL,
+            "checkpoint": SignalCategory.CHECKPOINT_PERSISTENCE_SIGNAL,
+            "checkpoint_persistence": SignalCategory.CHECKPOINT_PERSISTENCE_SIGNAL,
+            "persistence": SignalCategory.CHECKPOINT_PERSISTENCE_SIGNAL,
+            "schema": SignalCategory.STRUCTURED_OUTPUT_SIGNAL,
+            "json_schema": SignalCategory.STRUCTURED_OUTPUT_SIGNAL,
+            "structured_output": SignalCategory.STRUCTURED_OUTPUT_SIGNAL,
+            "structured_outputs": SignalCategory.STRUCTURED_OUTPUT_SIGNAL,
+            "tool": SignalCategory.TOOL_CALLING_SIGNAL,
+            "tools": SignalCategory.TOOL_CALLING_SIGNAL,
+            "tool_calling": SignalCategory.TOOL_CALLING_SIGNAL,
+            "tool_call": SignalCategory.TOOL_CALLING_SIGNAL,
+            "provider": SignalCategory.PROVIDER_COMPATIBILITY_SIGNAL,
+            "provider_api": SignalCategory.PROVIDER_COMPATIBILITY_SIGNAL,
+            "provider_compatibility": SignalCategory.PROVIDER_COMPATIBILITY_SIGNAL,
+            "model_api": SignalCategory.PROVIDER_COMPATIBILITY_SIGNAL,
+            "source": SignalCategory.SOURCE_COLLECTION_SIGNAL,
+            "source_collection": SignalCategory.SOURCE_COLLECTION_SIGNAL,
+            "collection": SignalCategory.SOURCE_COLLECTION_SIGNAL,
+            "rss": SignalCategory.SOURCE_COLLECTION_SIGNAL,
+            "security": SignalCategory.SECURITY_SUPPLY_CHAIN,
+            "supply_chain": SignalCategory.SECURITY_SUPPLY_CHAIN,
+            "supply_chain_security": SignalCategory.SECURITY_SUPPLY_CHAIN,
+            "security_supply_chain_signal": SignalCategory.SECURITY_SUPPLY_CHAIN,
+            "evaluation": SignalCategory.EVALUATION_BENCHMARK_SIGNAL,
+            "eval": SignalCategory.EVALUATION_BENCHMARK_SIGNAL,
+            "benchmark": SignalCategory.EVALUATION_BENCHMARK_SIGNAL,
+            "benchmarks": SignalCategory.EVALUATION_BENCHMARK_SIGNAL,
+            "docs": SignalCategory.DOCS_CHANGE_SIGNAL,
+            "documentation": SignalCategory.DOCS_CHANGE_SIGNAL,
+            "docs_change": SignalCategory.DOCS_CHANGE_SIGNAL,
+            "changelog": SignalCategory.DOCS_CHANGE_SIGNAL,
+            "competitor": SignalCategory.COMPETITOR_UPDATE,
+            "market": SignalCategory.MARKET_SIGNAL,
+            "policy": SignalCategory.POLICY_SIGNAL,
+            "expert": SignalCategory.EXPERT_OPINION,
+            "expert_insight": SignalCategory.EXPERT_OPINION,
+            "expert_opinion_signal": SignalCategory.EXPERT_OPINION,
+            "team": SignalCategory.TEAM_UPDATE,
+        }
+        return aliases.get(normalized, value)
+
     @model_validator(mode="after")
     def _validate_route_contract(self) -> "SupervisorRoute":
         if not self.analyze and self.required_agents:

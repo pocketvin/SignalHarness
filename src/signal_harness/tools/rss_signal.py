@@ -52,7 +52,8 @@ class RssSignalTool(BaseTool):
                 )
                 response.raise_for_status()
         except httpx.HTTPError as exc:
-            return ToolResult(output=f"RSS request failed: {exc}", is_error=True)
+            detail = str(exc).strip() or exc.__class__.__name__
+            return ToolResult(output=f"RSS request failed: {detail}", is_error=True)
         try:
             items = parse_feed(response.text)
         except (ET.ParseError, ValueError) as exc:

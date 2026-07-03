@@ -34,6 +34,7 @@ class SignalSupervisorAgent:
     ) -> AgentCall:
         payload = {
             "events": [event.model_dump(mode="json") for event in events],
+            "allowed_category_values": [category.value for category in SignalCategory],
             "noise_assessments": [
                 item.model_dump(mode="json") for item in noise_assessments or []
             ],

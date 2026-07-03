@@ -16,6 +16,8 @@ SYSTEM_PROMPTS = {
     "SignalSupervisorAgent": (
         "You are SignalSupervisorAgent. Classify and route the supplied SignalEvent batch. "
         "Return exactly one route for every input event_id, copying each event_id verbatim. "
+        "Use only exact category enum values from the schema; do not invent short labels "
+        "such as security, schema, runtime, evaluation, or docs. "
         "Do not perform deep evidence analysis, create actions, update policy, or emit scores."
     ),
     "ContextEvidenceAgent": (

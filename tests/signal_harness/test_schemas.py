@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import pytest
 from pydantic import ValidationError
 
+from signal_harness.agent_integration.schemas import SupervisorRoute
 from signal_harness.signal.schemas import (
     FeedbackLabel,
     FeedbackRecord,
@@ -86,3 +87,31 @@ def test_trace_step_metadata_is_optional_and_structured() -> None:
 
     assert legacy.metadata == {}
     assert structured.metadata["repair"]["event_ids"] == ["demo-001"]
+
+
+def test_supervisor_route_normalizes_safe_category_aliases() -> None:
+    aliases = {
+        "evaluation": SignalCategory.EVALUATION_BENCHMARK_SIGNAL,
+        "security": SignalCategory.SECURITY_SUPPLY_CHAIN,
+        "schema": SignalCategory.STRUCTURED_OUTPUT_SIGNAL,
+        "docs": SignalCategory.DOCS_CHANGE_SIGNAL,
+        "provider": SignalCategory.PROVIDER_COMPATIBILITY_SIGNAL,
+        "tool calling": SignalCategory.TOOL_CALLING_SIGNAL,
+    }
+
+    for raw, expected in aliases.items():
+        route = SupervisorRoute(
+            event_id=f"event-{raw.replace(' ', '-')}",
+            category=raw,
+            routing_reason="Alias normalization test.",
+        )
+        assert route.category is expected
+
+
+def test_supervisor_route_rejects_unknown_category_alias() -> None:
+    with pytest.raises(ValidationError):
+        SupervisorRoute(
+            event_id="event-unknown",
+            category="interesting_but_unsupported",
+            routing_reason="Unknown aliases must still fail.",
+        )

@@ -230,6 +230,58 @@ def test_dashboard_and_digest_outputs_include_expected_sections(tmp_path: Path) 
         assert "Learning proposal summary" in text
 
 
+def test_dashboard_separates_retry_and_audit_from_llm_fallback(tmp_path: Path) -> None:
+    output_dir = tmp_path / "outputs"
+    output_dir.mkdir()
+    (output_dir / "signals.json").write_text(
+        json.dumps([_event().model_dump(mode="json")]),
+        encoding="utf-8",
+    )
+    (output_dir / "impact_scores.json").write_text(
+        json.dumps([_assessment().model_dump(mode="json")]),
+        encoding="utf-8",
+    )
+    (output_dir / "alerts.json").write_text("[]", encoding="utf-8")
+    (output_dir / "task_trace.json").write_text(
+        json.dumps(
+            [
+                {
+                    "step": "llm_agent_call",
+                    "status": "success",
+                    "duration_ms": 10,
+                    "agent_name": "ContextEvidenceAgent",
+                    "schema_valid": True,
+                    "fallback_used": False,
+                    "retry_count": 1,
+                    "schema_error": "ReadTimeout",
+                },
+                {
+                    "step": "skipped_event_audit_fallback",
+                    "status": "success",
+                    "duration_ms": 0,
+                    "fallback_used": True,
+                    "input_count": 1,
+                    "output_count": 1,
+                    "detail": (
+                        "Supervisor routing skipped one or more downstream LLM stages. "
+                        "This is not downstream LLM Agent execution."
+                    ),
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    dashboard = write_dashboard(output_dir)
+
+    html = dashboard.read_text(encoding="utf-8")
+    assert "LLM fallback health notice" not in html
+    assert "LLM retry health notice" in html
+    assert "Audit completion notice" in html
+    assert "fallback_count: 0" in html
+    assert "audit_fallback_count: 1" in html
+
+
 def test_dashboard_and_trace_summary_show_repair_pass(tmp_path: Path) -> None:
     output_dir = tmp_path / "outputs"
     output_dir.mkdir()

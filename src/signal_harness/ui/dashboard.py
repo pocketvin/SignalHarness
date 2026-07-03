@@ -123,7 +123,7 @@ def _render_dashboard(
         _metric("Alerts", len(alerts)),
         _metric("Action required", counts["action_required"]),
     ]
-    banner = _fallback_banner(health)
+    banner = _health_notices(health, failed_sources=failed_sources)
     executive = _executive_summary(
         signals=signals,
         assessments=assessments,
@@ -356,7 +356,8 @@ def _executive_summary(
           <li>Action required: {action_required}</li>
           <li>Source health: {_e(source_summary)}</li>
           <li>Failed sources: {len(failed_sources)}</li>
-          <li>Fallback/retry/timeout triggered: {_e(fallback_text)}</li>
+          <li>LLM fallback/retry/timeout triggered: {_e(fallback_text)}</li>
+          <li>Audit fallback completions: {health['audit_fallback_count']}</li>
         </ul>
       </div>
       <div><h3>Signal types</h3><ul>{source_type_items}</ul></div>
@@ -435,29 +436,76 @@ def _signal_summary(
 """
 
 
-def _fallback_banner(health: dict[str, int | bool]) -> str:
-    if not (
+def _health_notices(
+    health: dict[str, int | bool],
+    *,
+    failed_sources: list[str],
+) -> str:
+    sections: list[str] = []
+    if (
         health["schema_failures"]
         or health["fallback_count"]
-        or health["retry_total"]
-        or health["timeout_count"]
         or health["agent_team_run_timeout"]
     ):
-        return ""
-    return f"""
+        sections.append(
+            f"""
   <section class="warning">
     <h2>LLM fallback health notice</h2>
-    <p>This run triggered LLM fallback, retry, timeout, or schema health warnings. The dashboard includes deterministic fallback audit output where applicable. This is useful for auditability, but it should not be described as a fully stable LLM reasoning run.</p>
+    <p>This run used deterministic LLM fallback for at least one Agent call or hit the Agent-team timeout guardrail. This is useful for auditability, but affected reasoning should not be described as a fully stable LLM-only run.</p>
     <ul>
       <li>llm_agent_call_count: {health['llm_agent_call_count']}</li>
       <li>schema_failures: {health['schema_failures']}</li>
       <li>fallback_count: {health['fallback_count']}</li>
+      <li>agent_team_run_timeout: {_e(health['agent_team_run_timeout'])}</li>
       <li>retry_total: {health['retry_total']}</li>
       <li>timeout_count: {health['timeout_count']}</li>
       <li>tool_error_count: {health['tool_error_count']}</li>
     </ul>
   </section>
 """
+        )
+    elif health["retry_total"] or health["timeout_count"]:
+        sections.append(
+            f"""
+  <section class="warning">
+    <h2>LLM retry health notice</h2>
+    <p>A provider retry or timeout warning occurred, but the Agent output recovered without deterministic LLM fallback.</p>
+    <ul>
+      <li>llm_agent_call_count: {health['llm_agent_call_count']}</li>
+      <li>retry_total: {health['retry_total']}</li>
+      <li>timeout_count: {health['timeout_count']}</li>
+      <li>fallback_count: {health['fallback_count']}</li>
+    </ul>
+  </section>
+"""
+        )
+    if health["audit_fallback_count"]:
+        sections.append(
+            f"""
+  <section>
+    <h2>Audit completion notice</h2>
+    <p>Supervisor routing skipped one or more downstream LLM stages, so deterministic audit fallback filled complete local assessment records. This is audit completion, not a failed downstream Agent execution.</p>
+    <ul>
+      <li>audit_fallback_count: {health['audit_fallback_count']}</li>
+    </ul>
+  </section>
+"""
+        )
+    if failed_sources:
+        sample_items = "".join(f"<li>{_e(item[:240])}</li>" for item in failed_sources[:3])
+        sections.append(
+            f"""
+  <section class="warning">
+    <h2>Source health warning</h2>
+    <p>One or more configured live sources failed during collection. The run can still be useful, but source coverage is incomplete.</p>
+    <ul>
+      <li>failed_source_count: {len(failed_sources)}</li>
+      {sample_items}
+    </ul>
+  </section>
+"""
+        )
+    return "".join(sections)
 
 
 def _llm_health(trace: list[dict[str, Any]]) -> dict[str, int | bool]:
