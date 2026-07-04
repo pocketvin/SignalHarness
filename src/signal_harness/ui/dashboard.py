@@ -123,7 +123,11 @@ def _render_dashboard(
         _metric("Alerts", len(alerts)),
         _metric("Action required", counts["action_required"]),
     ]
-    banner = _health_notices(health, failed_sources=failed_sources)
+    banner = _health_notices(
+        health,
+        failed_sources=failed_sources,
+        source_tasks=source_tasks,
+    )
     executive = _executive_summary(
         signals=signals,
         assessments=assessments,
@@ -229,7 +233,7 @@ def _render_dashboard(
             f"<li>llm_agent_call_count: {health['llm_agent_call_count']}</li>",
             f"<li>schema_failures: {health['schema_failures']}</li>",
             f"<li>fallback_count: {health['fallback_count']}</li>",
-            f"<li>audit_fallback_count: {health['audit_fallback_count']}</li>",
+            f"<li>audit_completion_count: {health['audit_completion_count']}</li>",
             f"<li>retry_total: {health['retry_total']}</li>",
             f"<li>timeout_count: {health['timeout_count']}</li>",
             f"<li>tool_error_count: {tool_health['total_tool_error_count']}</li>",
@@ -317,7 +321,7 @@ def _executive_summary(
     source_tasks: list[dict[str, Any]],
     failed_sources: list[str],
     top_modules: Counter[str],
-    health: dict[str, int | bool],
+    health: dict[str, Any],
     event_by_id: dict[str, dict[str, Any]],
 ) -> str:
     source_statuses = Counter(str(task.get("status") or "unknown") for task in source_tasks)
@@ -336,7 +340,7 @@ def _executive_summary(
     recommendation_items = "".join(
         f"<li>{_e(item)}</li>" for item in recommendations
     ) or "<li>No immediate action recommendation.</li>"
-    fallback_text = (
+    llm_health_warning = (
         "yes"
         if health["fallback_count"]
         or health["retry_total"]
@@ -356,8 +360,8 @@ def _executive_summary(
           <li>Action required: {action_required}</li>
           <li>Source health: {_e(source_summary)}</li>
           <li>Failed sources: {len(failed_sources)}</li>
-          <li>LLM fallback/retry/timeout triggered: {_e(fallback_text)}</li>
-          <li>Audit fallback completions: {health['audit_fallback_count']}</li>
+          <li>LLM health warning: {_e(llm_health_warning)}</li>
+          <li>Audit completions: {health['audit_completion_count']}</li>
         </ul>
       </div>
       <div><h3>Signal types</h3><ul>{source_type_items}</ul></div>
@@ -376,7 +380,7 @@ def _signal_summary(
     assessments: list[dict[str, Any]],
     source_tasks: list[dict[str, Any]],
     failed_sources: list[str],
-    health: dict[str, int | bool],
+    health: dict[str, Any],
     tool_health: dict[str, Any],
 ) -> str:
     del source_tasks
@@ -403,6 +407,10 @@ def _signal_summary(
     if health["fallback_count"] or health["schema_failures"]:
         risk_notes.append(
             "LLM fallback or schema failures occurred; treat affected conclusions as audit-backed."
+        )
+    elif health["retry_total"] or health["timeout_count"]:
+        risk_notes.append(
+            "Provider retry warnings occurred, but structured Agent outputs recovered."
         )
     if tool_health["total_tool_error_count"]:
         risk_notes.append(
@@ -437,9 +445,10 @@ def _signal_summary(
 
 
 def _health_notices(
-    health: dict[str, int | bool],
+    health: dict[str, Any],
     *,
     failed_sources: list[str],
+    source_tasks: list[dict[str, Any]],
 ) -> str:
     sections: list[str] = []
     if (
@@ -461,6 +470,7 @@ def _health_notices(
       <li>timeout_count: {health['timeout_count']}</li>
       <li>tool_error_count: {health['tool_error_count']}</li>
     </ul>
+    {_provider_retry_breakdown_html(health)}
   </section>
 """
         )
@@ -476,23 +486,25 @@ def _health_notices(
       <li>timeout_count: {health['timeout_count']}</li>
       <li>fallback_count: {health['fallback_count']}</li>
     </ul>
+    {_provider_retry_breakdown_html(health)}
   </section>
 """
         )
-    if health["audit_fallback_count"]:
+    if health["audit_completion_count"]:
         sections.append(
             f"""
   <section>
     <h2>Audit completion notice</h2>
-    <p>Supervisor routing skipped one or more downstream LLM stages, so deterministic audit fallback filled complete local assessment records. This is audit completion, not a failed downstream Agent execution.</p>
+    <p>Supervisor routing skipped one or more downstream LLM stages, so deterministic audit completion filled complete local assessment records. This is audit completion, not a failed downstream Agent execution.</p>
     <ul>
-      <li>audit_fallback_count: {health['audit_fallback_count']}</li>
+      <li>audit_completion_count: {health['audit_completion_count']}</li>
     </ul>
   </section>
 """
         )
     if failed_sources:
         sample_items = "".join(f"<li>{_e(item[:240])}</li>" for item in failed_sources[:3])
+        breakdown_html = _source_failure_breakdown_html(source_tasks)
         sections.append(
             f"""
   <section class="warning">
@@ -502,13 +514,14 @@ def _health_notices(
       <li>failed_source_count: {len(failed_sources)}</li>
       {sample_items}
     </ul>
+    {breakdown_html}
   </section>
 """
         )
     return "".join(sections)
 
 
-def _llm_health(trace: list[dict[str, Any]]) -> dict[str, int | bool]:
+def _llm_health(trace: list[dict[str, Any]]) -> dict[str, Any]:
     llm_steps = [step for step in trace if step.get("step") == "llm_agent_call"]
     timeout_count = 0
     for step in trace:
@@ -527,16 +540,79 @@ def _llm_health(trace: list[dict[str, Any]]) -> dict[str, int | bool]:
         ),
         "fallback_count": sum(1 for step in llm_steps if bool(step.get("fallback_used")))
         + sum(1 for step in trace if step.get("step") == "agent_team_run_timeout"),
-        "audit_fallback_count": sum(
-            1 for step in trace if step.get("step") == "skipped_event_audit_fallback"
+        "audit_completion_count": sum(
+            1 for step in trace if _is_audit_completion_step(str(step.get("step") or ""))
         ),
         "retry_total": sum(int(step.get("retry_count") or 0) for step in llm_steps),
         "timeout_count": timeout_count,
         "tool_error_count": sum(len(step.get("tool_errors") or []) for step in trace),
+        "provider_error_breakdown": Counter(
+            _provider_error_type(step)
+            for step in llm_steps
+            if step.get("retry_count") or step.get("error") or step.get("schema_error")
+        ),
         "agent_team_run_timeout": any(
             step.get("step") == "agent_team_run_timeout" for step in trace
         ),
     }
+
+
+def _is_audit_completion_step(step_name: str) -> bool:
+    return step_name in {
+        "skipped_stage_audit_completion",
+        "skipped_event_audit_fallback",
+    }
+
+
+def _provider_retry_breakdown_html(health: dict[str, Any]) -> str:
+    breakdown = health.get("provider_error_breakdown")
+    if not isinstance(breakdown, Counter) or not breakdown:
+        return ""
+    return (
+        "<h3>Provider retry/error breakdown</h3><ul>"
+        + _list_items(breakdown.most_common(6))
+        + "</ul>"
+    )
+
+
+def _provider_error_type(step: dict[str, Any]) -> str:
+    text = " ".join(
+        str(step.get(key) or "")
+        for key in ("error", "schema_error", "detail", "exit_condition")
+    ).lower()
+    if "connecterror" in text or "connection" in text:
+        return "connect_error"
+    if "readtimeout" in text or "read timeout" in text:
+        return "read_timeout"
+    if "timeout" in text:
+        return "timeout"
+    if "rate" in text and "limit" in text:
+        return "rate_limit"
+    if step.get("schema_valid") is False:
+        return "schema_validation"
+    return "provider_retry"
+
+
+def _source_failure_breakdown_html(source_tasks: list[dict[str, Any]]) -> str:
+    failed_tasks = [
+        task
+        for task in source_tasks
+        if str(task.get("status") or "").lower() not in {"success", "ok"}
+    ]
+    if not failed_tasks:
+        return ""
+    by_type = Counter(str(task.get("source_type") or "unknown") for task in failed_tasks)
+    by_status = Counter(str(task.get("status") or "unknown") for task in failed_tasks)
+    return (
+        "<div class=\"columns\">"
+        "<div><h3>Failed source types</h3><ul>"
+        + _list_items(by_type.most_common(8))
+        + "</ul></div>"
+        "<div><h3>Failure status</h3><ul>"
+        + _list_items(by_status.most_common(8))
+        + "</ul></div>"
+        "</div>"
+    )
 
 
 def _tool_health(trace: list[dict[str, Any]]) -> dict[str, Any]:

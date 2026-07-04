@@ -256,16 +256,23 @@ def test_dashboard_separates_retry_and_audit_from_llm_fallback(tmp_path: Path) -
                     "schema_error": "ReadTimeout",
                 },
                 {
-                    "step": "skipped_event_audit_fallback",
+                    "step": "skipped_stage_audit_completion",
                     "status": "success",
                     "duration_ms": 0,
-                    "fallback_used": True,
+                    "fallback_used": False,
                     "input_count": 1,
                     "output_count": 1,
                     "detail": (
                         "Supervisor routing skipped one or more downstream LLM stages. "
-                        "This is not downstream LLM Agent execution."
+                        "Deterministic audit completion generated complete assessment "
+                        "records only; this is not downstream LLM Agent execution."
                     ),
+                    "metadata": {
+                        "audit_completion": {
+                            "event_ids": ["demo-001"],
+                            "not_downstream_llm_execution": True,
+                        }
+                    },
                 },
             ]
         ),
@@ -279,7 +286,7 @@ def test_dashboard_separates_retry_and_audit_from_llm_fallback(tmp_path: Path) -
     assert "LLM retry health notice" in html
     assert "Audit completion notice" in html
     assert "fallback_count: 0" in html
-    assert "audit_fallback_count: 1" in html
+    assert "audit_completion_count: 1" in html
 
 
 def test_dashboard_and_trace_summary_show_repair_pass(tmp_path: Path) -> None:

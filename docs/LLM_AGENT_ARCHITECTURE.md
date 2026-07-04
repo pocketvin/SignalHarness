@@ -23,11 +23,12 @@ ContextEvidenceAgent normally uses two turns, and routed stages may be skipped
 when `required_agents` does not include them. Noise receives no deep-analysis
 calls; low-priority expert opinion can stop after evidence and impact.
 
-If routing skips an event or a downstream stage, deterministic fallback may
-fill the remaining assessment fields solely to preserve a complete audit
+If routing skips an event or a downstream stage, deterministic audit completion
+may fill the remaining assessment fields solely to preserve a complete audit
 record. This does not mean ContextEvidenceAgent, ImpactAnalystAgent, or
-ActionPlannerAgent executed for that skipped event. The trace emits
-`skipped_event_audit_fallback` with this distinction.
+ActionPlannerAgent executed for that skipped event. New traces emit
+`skipped_stage_audit_completion` with this distinction. Older
+`skipped_event_audit_fallback` records remain supported when reading past runs.
 
 ## Prompt context layers
 

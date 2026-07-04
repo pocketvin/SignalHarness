@@ -78,8 +78,9 @@ errors are visible in trace and model-eval summaries.
 - tool validation/blocked/budget/runtime/total errors.
 
 Tracing is local and file-based. It records Agent names, schemas, prompt
-versions, retries, fallback, tool requests/execution/errors, permission checks,
-repair summary steps, and skipped-event audit fallback semantics.
+versions, retries, true LLM fallback, tool requests/execution/errors,
+permission checks, repair summary steps, and skipped-stage deterministic audit
+completion semantics.
 
 ## Retry and bounded repair
 

@@ -7,6 +7,9 @@ do not require network access or real API keys.
 
 - `sample_events.json`: small four-event fixture for `demo` and `mock-agent`
   scans.
+- `curated_showcase_events.json`: interview-friendly offline showcase fixture
+  with stable public source pages and a broader mix of provider, schema,
+  tool-calling, source-health, security, evaluation, and dependency signals.
 - `eval_multisource_events.json`: multi-source fixture for evidence,
   clustering, controlled tool-use, and eval demonstrations.
 - `project_profile.yaml`: demo project context used by scoring and prompts.
@@ -24,6 +27,12 @@ uv run signal-harness scan \
 uv run signal-harness scan \
   --fixture examples/signal_harness/sample_events.json \
   --mode mock-agent
+
+uv run signal-harness scan \
+  --fixture examples/signal_harness/curated_showcase_events.json \
+  --mode mock-agent \
+  --output-dir outputs/curated-showcase \
+  --state-dir .signal-harness/curated-showcase
 
 uv run signal-harness trace
 uv run signal-harness dashboard

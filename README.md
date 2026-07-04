@@ -359,11 +359,12 @@ The deterministic layer retains normalization, deduplication, base scoring,
 schema validation, permission enforcement, reporting, persistence, replay
 evaluation, and fallback behavior.
 
-When Supervisor routing skips an event or downstream stage, deterministic
-fallback may still populate evidence, impact, or action-shaped fields so the
-stored assessment remains complete for audit. Those values are audit defaults,
-not downstream LLM Agent execution; the trace marks them as
-`skipped_event_audit_fallback`.
+When Supervisor routing skips an event or downstream stage, deterministic audit
+completion may still populate evidence, impact, or action-shaped fields so the
+stored assessment remains complete. Those values are audit defaults, not
+downstream LLM Agent execution; new traces mark this as
+`skipped_stage_audit_completion`. Older traces with
+`skipped_event_audit_fallback` are still readable for compatibility.
 
 ## Dashboard explainability
 

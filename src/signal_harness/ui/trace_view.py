@@ -32,7 +32,7 @@ FLOW_ORDER = (
     "repair_impact",
     "repair_action",
     "repair_blocked",
-    "skipped_event_audit_fallback",
+    "skipped_stage_audit_completion",
     "deterministic_fallback",
     "classify",
     "evidence",
@@ -433,7 +433,7 @@ def write_trace_summary(
     skipped_audit_steps = [
         step
         for step in step_list
-        if step.step == "skipped_event_audit_fallback"
+        if _is_audit_completion_step(step.step)
     ]
     if skipped_audit_steps:
         lines.extend(
@@ -442,7 +442,8 @@ def write_trace_summary(
                 "## Skipped Event Audit Completion",
                 "",
                 (
-                    "Supervisor-routed skips are completed with deterministic fallback "
+                    "Supervisor-routed skips are completed with deterministic audit "
+                    "completion "
                     "only so every event retains a full audit assessment. This is not "
                     "downstream LLM Agent execution."
                 ),
@@ -453,6 +454,13 @@ def write_trace_summary(
     path = root / "trace_summary.md"
     atomic_write_text(path, "\n".join(lines).rstrip() + "\n")
     return path
+
+
+def _is_audit_completion_step(step_name: str) -> bool:
+    return step_name in {
+        "skipped_stage_audit_completion",
+        "skipped_event_audit_fallback",
+    }
 
 
 def _repair_metadata(step: TraceStep) -> dict[str, object]:

@@ -90,8 +90,9 @@ variant is kept separately as `configs/watchlist_demo.yaml`, and the stable
 offline fixture remains `examples/signal_harness/sample_events.json`.
 
 Real provider calls can still hit context limits, rate limits, schema retries,
-or timeouts. The dashboard shows LLM fallback/retry/timeout health and explains
-when deterministic fallback audit output was used.
+or timeouts. The dashboard separates LLM fallback health from retry warnings
+and from deterministic audit-completion records produced for Supervisor-skipped
+stages.
 
 Real network calls may fail because of credentials, endpoint compatibility,
 rate limits, model behavior, or provider availability. Such failures do not

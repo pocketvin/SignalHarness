@@ -1,0 +1,141 @@
+[
+  {
+    "event_id": "showcase-001",
+    "source_type": "github_release",
+    "source_name": "openai/openai-python",
+    "title": "OpenAI Python SDK release notes mention structured output compatibility",
+    "content": "A tracked provider SDK release includes structured output, JSON schema, retry, and API compatibility notes that may affect SignalHarness provider integration tests.",
+    "url": "https://github.com/openai/openai-python/releases",
+    "published_at": "2026-07-01T09:00:00Z",
+    "raw_payload": {
+      "official": true,
+      "showcase_note": "Stable release-list URL used for interview demos."
+    },
+    "collected_at": "2026-07-01T09:05:00Z"
+  },
+  {
+    "event_id": "showcase-002",
+    "source_type": "github_issue",
+    "source_name": "langchain-ai/langgraph",
+    "title": "Tool calling runtime issue discusses wrapper interrupts and allowlists",
+    "content": "Maintainers and users discuss tool calling, wrapper behavior, runtime interrupts, and safe allowlists for agent tool execution.",
+    "url": "https://github.com/langchain-ai/langgraph/issues",
+    "published_at": "2026-07-01T11:00:00Z",
+    "raw_payload": {
+      "official": true,
+      "showcase_note": "Stable issue-list URL used for interview demos."
+    },
+    "collected_at": "2026-07-01T11:05:00Z"
+  },
+  {
+    "event_id": "showcase-003",
+    "source_type": "rss",
+    "source_name": "OpenAI News",
+    "title": "Provider API update highlights JSON mode and schema validation behavior",
+    "content": "The provider update is relevant to model API compatibility, JSON mode behavior, schema validation, and fallback strategy in OpenAI-compatible adapters.",
+    "url": "https://openai.com/news/",
+    "published_at": "2026-07-02T08:00:00Z",
+    "raw_payload": {
+      "feed_url": "https://openai.com/news/rss.xml"
+    },
+    "collected_at": "2026-07-02T08:05:00Z"
+  },
+  {
+    "event_id": "showcase-004",
+    "source_type": "rss",
+    "source_name": "GitHub Changelog",
+    "title": "GitHub feed reliability note affects source collection monitoring",
+    "content": "A changelog item touches RSS feed, source collection, crawler reliability, rate-limit behavior, and observability for project watchlists.",
+    "url": "https://github.blog/changelog/",
+    "published_at": "2026-07-02T10:00:00Z",
+    "raw_payload": {
+      "feed_url": "https://github.blog/changelog/feed/"
+    },
+    "collected_at": "2026-07-02T10:05:00Z"
+  },
+  {
+    "event_id": "showcase-005",
+    "source_type": "rss",
+    "source_name": "GitHub Security",
+    "title": "Supply chain advisory stresses dependency provenance checks",
+    "content": "A security article discusses vulnerability handling, supply chain risk, dependency provenance, and review workflows for CI-facing automation.",
+    "url": "https://github.blog/security/",
+    "published_at": "2026-07-02T12:00:00Z",
+    "raw_payload": {
+      "feed_url": "https://github.blog/security/feed/"
+    },
+    "collected_at": "2026-07-02T12:05:00Z"
+  },
+  {
+    "event_id": "showcase-006",
+    "source_type": "github_release",
+    "source_name": "pydantic/pydantic",
+    "title": "Pydantic release notes include JSON schema migration guidance",
+    "content": "The release is a tracked direct dependency update with JSON schema compatibility, validation behavior, migration, and potential regression implications.",
+    "url": "https://github.com/pydantic/pydantic/releases",
+    "published_at": "2026-07-02T14:00:00Z",
+    "raw_payload": {
+      "official": true,
+      "showcase_note": "Stable release-list URL used for interview demos."
+    },
+    "collected_at": "2026-07-02T14:05:00Z"
+  },
+  {
+    "event_id": "showcase-007",
+    "source_type": "github_issue",
+    "source_name": "langchain-ai/langgraph",
+    "title": "Checkpoint persistence migration discussion for durable agent recovery",
+    "content": "The issue discusses checkpoint persistence, durability, migration risk, and recovery behavior for routed agent workflows.",
+    "url": "https://github.com/langchain-ai/langgraph/issues",
+    "published_at": "2026-07-03T09:00:00Z",
+    "raw_payload": {
+      "official": true,
+      "showcase_note": "Stable issue-list URL used for interview demos."
+    },
+    "collected_at": "2026-07-03T09:05:00Z"
+  },
+  {
+    "event_id": "showcase-008",
+    "source_type": "rss",
+    "source_name": "Simon Willison",
+    "title": "Engineering note on evaluation harnesses and reproducible model evals",
+    "content": "An expert engineering post emphasizes evaluation harnesses, retry tracking, schema valid rate, benchmark fixtures, and reproducible provider comparisons.",
+    "url": "https://simonwillison.net/",
+    "published_at": "2026-07-03T11:00:00Z",
+    "raw_payload": {
+      "feed_url": "https://simonwillison.net/atom/everything/"
+    },
+    "collected_at": "2026-07-03T11:05:00Z"
+  },
+  {
+    "event_id": "showcase-009",
+    "source_type": "web_change",
+    "source_name": "SignalHarness showcase page",
+    "title": "Product documentation adds local trace and dashboard explanation",
+    "content": "A documentation change highlights local trace, static dashboard, no external telemetry, and review-only learning proposals for interview demos.",
+    "url": "https://github.com/pocketvin/SignalHarness",
+    "published_at": "2026-07-03T13:00:00Z",
+    "raw_payload": {
+      "fixture": "showcase_doc_change",
+      "changed_fields": [
+        "trace",
+        "dashboard",
+        "learning"
+      ]
+    },
+    "collected_at": "2026-07-03T13:05:00Z"
+  },
+  {
+    "event_id": "showcase-010",
+    "source_type": "rss",
+    "source_name": "GitHub Engineering",
+    "title": "Engineering article discusses benchmark and reliability tradeoffs",
+    "content": "The article covers evaluation, benchmark design, retry budgets, latency, source freshness, and reliability tradeoffs for developer tooling.",
+    "url": "https://github.blog/engineering/",
+    "published_at": "2026-07-03T15:00:00Z",
+    "raw_payload": {
+      "feed_url": "https://github.blog/engineering/feed/"
+    },
+    "collected_at": "2026-07-03T15:05:00Z"
+  }
+]

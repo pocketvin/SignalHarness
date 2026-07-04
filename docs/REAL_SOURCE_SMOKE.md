@@ -45,8 +45,8 @@ uv run signal-harness trace
 
 - `outputs/task_trace.json` for `SourceTask` records, source failures, cache
   events, and Agent trace.
-- `outputs/trace_summary.md` for failed sources, skipped audit fallback, tool
-  controls, and repair pass status.
+- `outputs/trace_summary.md` for failed sources, skipped-stage audit
+  completion, tool controls, and repair pass status.
 - `outputs/dashboard.html` for source health, score breakdowns, repair pass,
   model/profile/limits, and learning staging.
 

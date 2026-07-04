@@ -95,14 +95,15 @@ uv run signal-harness trace --output-dir outputs/openai-live-showcase
 ```
 
 The live default watchlist is `configs/watchlist.yaml`. The fixture-backed demo
-watchlist lives in `configs/watchlist_demo.yaml`, and the raw fixture remains at
-`examples/signal_harness/sample_events.json`.
+watchlist lives in `configs/watchlist_demo.yaml`, the CI fixture remains at
+`examples/signal_harness/sample_events.json`, and the interview-friendly
+curated showcase fixture is
+`examples/signal_harness/curated_showcase_events.json`.
 
 For live showcases, prefer a recent 7–14 day window plus
 `--max-events 20 --max-events-per-source 8`. Provider calls may still trigger
-fallback because of context limits, rate limits, schema retries, or timeouts;
-the dashboard explicitly reports fallback health and labels deterministic
-fallback audit output.
+retry warnings, true LLM fallback, or timeouts; the dashboard reports those
+separately from deterministic audit completion for Supervisor-skipped stages.
 
 ## Five-minute interview narrative
 

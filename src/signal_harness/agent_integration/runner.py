@@ -537,7 +537,7 @@ class LLMAgentTeamRunner:
                 }
             )
 
-        audit_fallback_event_ids = [
+        audit_completion_event_ids = [
             event.event_id
             for event in events
             if not route_by_id[event.event_id].analyze
@@ -546,21 +546,29 @@ class LLMAgentTeamRunner:
                 for stage in ("context_evidence", "impact", "action")
             )
         ]
-        if audit_fallback_event_ids:
+        if audit_completion_event_ids:
             self.trace.steps.append(
                 TraceStep(
-                    step="skipped_event_audit_fallback",
+                    step="skipped_stage_audit_completion",
                     status="success",
-                    agent="DeterministicAuditFallback",
-                    input_count=len(audit_fallback_event_ids),
-                    output_count=len(audit_fallback_event_ids),
+                    agent="DeterministicAuditCompletion",
+                    input_count=len(audit_completion_event_ids),
+                    output_count=len(audit_completion_event_ids),
                     duration_ms=0,
-                    fallback_used=True,
+                    fallback_used=False,
+                    metadata={
+                        "audit_completion": {
+                            "event_ids": audit_completion_event_ids,
+                            "reason": "supervisor_skipped_downstream_stage",
+                            "not_downstream_llm_execution": True,
+                        }
+                    },
                     detail=(
                         "Supervisor routing skipped one or more downstream LLM stages. "
-                        "Deterministic fallback generated complete audit assessments only; "
+                        "Deterministic audit completion generated complete assessment "
+                        "records only; "
                         "this is not downstream LLM Agent execution. Events: "
-                        + ", ".join(audit_fallback_event_ids)
+                        + ", ".join(audit_completion_event_ids)
                     ),
                 )
             )

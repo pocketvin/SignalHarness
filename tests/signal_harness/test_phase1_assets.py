@@ -53,6 +53,24 @@ def test_sample_events_match_signal_event_schema() -> None:
     assert any(event.event_id == "demo-001" for event in events)
 
 
+def test_curated_showcase_events_match_signal_event_schema() -> None:
+    payload = json.loads(
+        (
+            ROOT / "examples" / "signal_harness" / "curated_showcase_events.json"
+        ).read_text(encoding="utf-8")
+    )
+    events = [SignalEvent.model_validate(item) for item in payload]
+
+    assert len(events) >= 8
+    assert {event.source_type for event in events} >= {
+        "github_release",
+        "github_issue",
+        "rss",
+        "web_change",
+    }
+    assert not any("example.com" in event.url for event in events)
+
+
 def test_notice_describes_independent_harness_identity() -> None:
     notice = (ROOT / "NOTICE.md").read_text(encoding="utf-8")
     assert "independent project inspired by general agent harness design patterns" in notice
