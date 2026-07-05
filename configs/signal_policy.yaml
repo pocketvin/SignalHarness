@@ -14,10 +14,10 @@ agent_score_weights:
   evidence_confidence: 0.10
 
 source_weights:
-  official_release: 95
-  official_issue: 80
-  official_blog: 85
-  expert_blog: 70
+  official_release: 88
+  official_issue: 70
+  official_blog: 78
+  expert_blog: 62
   community_discussion: 50
   unverified: 20
   web_change: 60
@@ -43,8 +43,8 @@ ignore_patterns:
   - typo only
 
 category_weights:
-  dependency_update: 1.00
-  ecosystem_issue: 0.74
+  dependency_update: 0.94
+  ecosystem_issue: 0.70
   agent_runtime_signal: 0.88
   checkpoint_persistence_signal: 1.00
   structured_output_signal: 0.92

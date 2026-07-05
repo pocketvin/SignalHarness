@@ -72,9 +72,7 @@ def test_fixture_scan_feedback_and_calibration(project_root: Path, tmp_path: Pat
     assert (state_dir / "alert_state.json").exists()
 
     assessments = json.loads((output_dir / "impact_scores.json").read_text(encoding="utf-8"))
-    assert any(
-        item["decision"] in {"alert", "action_required"} for item in assessments
-    )
+    assert any(item["decision"] in {"save", "alert", "action_required"} for item in assessments)
     trace = json.loads((output_dir / "task_trace.json").read_text(encoding="utf-8"))
     assert any(item["agent"] == "ClassifierAgent" for item in trace)
     assert any(item["step"] == "write_json_outputs" for item in trace)

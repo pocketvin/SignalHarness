@@ -640,23 +640,38 @@ class SignalHarnessWorkflow:
             grouped.setdefault(cls._source_key(pair[1]), []).append(pair)
         for source_key, values in grouped.items():
             grouped[source_key] = sorted(values, key=cls._event_rank)
-        source_order = sorted(
-            grouped,
-            key=lambda source_key: (
-                cls._source_priority(source_key.split(":", 1)[0]),
-                source_key,
+        source_keys_by_type: dict[str, list[str]] = {}
+        for source_key in grouped:
+            source_type = source_key.split(":", 1)[0]
+            source_keys_by_type.setdefault(source_type, []).append(source_key)
+        for source_type, source_keys in source_keys_by_type.items():
+            source_keys_by_type[source_type] = sorted(source_keys)
+        source_type_order = sorted(
+            source_keys_by_type,
+            key=lambda source_type: (
+                cls._source_type_round_robin_rank(source_type),
+                source_type,
             ),
         )
+        source_offsets = {source_type: 0 for source_type in source_type_order}
         selected: list[tuple[int, dict[str, Any]]] = []
         while len(selected) < max_events and any(grouped.values()):
-            for source_key in source_order:
-                values = grouped[source_key]
-                if not values:
+            for source_type in source_type_order:
+                source_keys = source_keys_by_type[source_type]
+                if not any(grouped[source_key] for source_key in source_keys):
                     continue
-                selected.append(values.pop(0))
+                start = source_offsets[source_type]
+                for offset in range(len(source_keys)):
+                    source_index = (start + offset) % len(source_keys)
+                    source_key = source_keys[source_index]
+                    values = grouped[source_key]
+                    if values:
+                        selected.append(values.pop(0))
+                        source_offsets[source_type] = (source_index + 1) % len(source_keys)
+                        break
                 if len(selected) >= max_events:
                     break
-        return selected
+        return sorted(selected, key=cls._event_rank)
 
     @staticmethod
     def _source_key(item: dict[str, Any]) -> str:
@@ -669,21 +684,16 @@ class SignalHarnessWorkflow:
         return f"{source_type}:{source_name}"
 
     @classmethod
-    def _event_rank(cls, indexed_event: tuple[int, dict[str, Any]]) -> tuple[int, float, int]:
+    def _event_rank(cls, indexed_event: tuple[int, dict[str, Any]]) -> tuple[float, int]:
         index, item = indexed_event
-        source_type = cls._source_key(item).split(":", 1)[0]
-        return (
-            cls._source_priority(source_type),
-            -cls._event_timestamp(item),
-            index,
-        )
+        return (-cls._event_timestamp(item), index)
 
     @staticmethod
-    def _source_priority(source_type: str) -> int:
+    def _source_type_round_robin_rank(source_type: str) -> int:
         return {
-            "github_issue": 0,
+            "github_release": 0,
             "rss": 1,
-            "github_release": 2,
+            "github_issue": 2,
             "web_change": 3,
         }.get(source_type, 9)
 

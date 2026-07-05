@@ -32,11 +32,42 @@ def _event(**updates) -> SignalEvent:
 
 def test_classifier_detects_dependency_update() -> None:
     result = ClassifierAgent().run(
-        _event(),
-        {"dependencies": ["langgraph"], "ignore_keywords": []},
+        _event(
+            source_name="pydantic/pydantic",
+            title="Pydantic JSON schema compatibility migration",
+            content="A migration release changes validation and JSON schema compatibility.",
+        ),
+        {"dependencies": ["pydantic"], "ignore_keywords": []},
     )
 
     assert result.category is SignalCategory.DEPENDENCY_UPDATE
+
+
+def test_classifier_does_not_treat_plain_release_as_dependency_update() -> None:
+    result = ClassifierAgent().run(
+        _event(
+            source_name="pydantic/pydantic",
+            title="Pydantic 2.12.1 release",
+            content="Routine bug fixes and documentation updates.",
+        ),
+        {"dependencies": ["pydantic"], "ignore_keywords": []},
+    )
+
+    assert result.category is SignalCategory.ECOSYSTEM_ISSUE
+
+
+def test_classifier_does_not_match_short_dependency_inside_words() -> None:
+    result = ClassifierAgent().run(
+        _event(
+            source_type="github_issue",
+            source_name="langchain-ai/langgraph",
+            title="Type annotation inconsistency and descriptive bug report",
+            content="A descriptive issue mentions validation without naming the package.",
+        ),
+        {"dependencies": ["rich"], "ignore_keywords": []},
+    )
+
+    assert result.category is not SignalCategory.DEPENDENCY_UPDATE
 
 
 def test_classifier_does_not_treat_plain_github_issue_as_dependency_update() -> None:
@@ -46,7 +77,7 @@ def test_classifier_does_not_treat_plain_github_issue_as_dependency_update() -> 
             title="FuturesDict callback does extra work",
             content="A runtime bug report about callback overhead in one component.",
         ),
-        {"dependencies": ["langgraph"], "ignore_keywords": []},
+        {"dependencies": ["pydantic"], "ignore_keywords": []},
     )
 
     assert result.category is SignalCategory.AGENT_RUNTIME_SIGNAL
@@ -54,7 +85,11 @@ def test_classifier_does_not_treat_plain_github_issue_as_dependency_update() -> 
 
 def test_classifier_routes_tool_schema_provider_signals() -> None:
     classifier = ClassifierAgent()
-    profile = {"dependencies": ["langgraph"], "ignore_keywords": []}
+    profile = {
+        "dependencies": ["pydantic"],
+        "monitored_ecosystem": ["langgraph"],
+        "ignore_keywords": [],
+    }
 
     assert (
         classifier.run(

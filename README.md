@@ -82,7 +82,7 @@ For a live OpenAI showcase, run without `--fixture` so SignalHarness reads the
 live `configs/watchlist.yaml` watchlist:
 
 ```bash
-SINCE="$(python - <<'PY'
+SINCE="$(uv run python - <<'PY'
 from datetime import datetime, timedelta, timezone
 print((datetime.now(timezone.utc) - timedelta(days=14)).replace(microsecond=0).isoformat().replace("+00:00", "Z"))
 PY
@@ -125,9 +125,10 @@ SignalHarness test suite and local acceptance commands, while real provider
 checks remain manual smoke tests documented in `docs/SMOKE_TEST_AGENT_MODE.md`.
 
 Hardcoded API keys and secret-looking fallback credentials are forbidden. Use
-environment variables such as `LLM_API_KEY` or `ANTHROPIC_API_KEY` for manual
-smoke tests, and keep `.env`, runtime outputs, caches, and build artifacts out
-of git.
+environment variables such as `LLM_API_KEY`, or provider-specific local
+variables such as `OPENAI_KEY`, `QWEN_KEY`, `KIMI_KEY`, and `DEEPSEEK_KEY`, for
+manual smoke tests. Keep `.env`, runtime outputs, caches, and build artifacts
+out of git.
 
 For local real-provider evaluation, copy `.env.example` to `.env` and fill only
 local keys. The `.env` file is ignored by git and must not be committed.

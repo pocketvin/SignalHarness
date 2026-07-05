@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
@@ -10,6 +11,24 @@ from signal_harness.signal.schemas import (
     ScoreBreakdown,
     SignalCategory,
     SignalEvent,
+)
+
+DEPENDENCY_IMPACT_TERMS = (
+    "breaking",
+    "security",
+    "cve",
+    "vulnerability",
+    "deprecated",
+    "deprecation",
+    "supply chain",
+    "compatibility",
+    "regression",
+    "migration",
+    "api change",
+    "api compatibility",
+    "schema",
+    "validation",
+    "json schema compatibility",
 )
 
 
@@ -23,7 +42,17 @@ def _keywords(profile: dict[str, Any], key: str) -> list[str]:
 
 
 def _matched(text: str, keywords: Iterable[str]) -> list[str]:
-    return [keyword for keyword in keywords if keyword in text]
+    matched: list[str] = []
+    for keyword in keywords:
+        pattern = rf"(?<![a-z0-9]){re.escape(keyword)}(?![a-z0-9])"
+        if re.search(pattern, text):
+            matched.append(keyword)
+    return matched
+
+
+def _has_dependency_impact_terms(event: SignalEvent) -> bool:
+    text = f"{event.source_name} {event.title} {event.content}".lower()
+    return any(term in text for term in DEPENDENCY_IMPACT_TERMS)
 
 
 def source_score(event: SignalEvent, policy: dict[str, Any]) -> float:
@@ -110,9 +139,10 @@ def relevance_score(
     text = f"{event.source_name} {event.title} {event.content}".lower()
     groups = (
         ("critical_modules", 30),
-        ("dependencies", 30),
+        ("dependencies", 28),
+        ("monitored_ecosystem", 12),
         ("tech_stack", 15),
-        ("competitors", 20),
+        ("competitors", 10),
         ("focus_keywords", 15),
     )
     score = 10.0
@@ -211,6 +241,11 @@ def score_signal(
         if category_name == SignalCategory.NOISE.value
         else max(0.55, min(1.0, configured_weight))
     )
+    if (
+        category_name == SignalCategory.DEPENDENCY_UPDATE.value
+        and not _has_dependency_impact_terms(event)
+    ):
+        category_weight = min(category_weight, 0.82)
     final = weighted_score * category_weight
     return ScoreBreakdown(
         **components,

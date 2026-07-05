@@ -65,9 +65,9 @@ def test_scripted_eval_routes_noise_and_multisource(
     result = _scan(project_root, tmp_path)
     by_id = {item.event_id: item for item in result.assessments}
 
-    assert by_id["multi-001"].category is SignalCategory.DEPENDENCY_UPDATE
-    assert by_id["multi-001"].decision.value == "action_required"
-    assert by_id["multi-002"].decision.value == "alert"
+    assert by_id["multi-001"].category is SignalCategory.CHECKPOINT_PERSISTENCE_SIGNAL
+    assert by_id["multi-001"].decision.value == "alert"
+    assert by_id["multi-002"].decision.value == "save"
     assert by_id["multi-003"].decision.value == "save"
     assert by_id["multi-001"].required_agents == [
         "context_evidence",
@@ -633,7 +633,7 @@ def test_eval_summary_reports_workflow_metrics(
         result.assessments,
         result.trace.steps,
         expected_categories={
-            "multi-001": SignalCategory.DEPENDENCY_UPDATE,
+            "multi-001": SignalCategory.CHECKPOINT_PERSISTENCE_SIGNAL,
             "multi-004": SignalCategory.NOISE,
         },
         expected_noise_ids={"multi-004"},

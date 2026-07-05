@@ -138,6 +138,64 @@ def test_scan_max_events_limits_collected_events(
     assert limits["dropped_count"] == limits["before_count"] - 2
 
 
+def test_event_limit_preserves_source_type_diversity(project_root: Path, tmp_path: Path) -> None:
+    workflow = SignalHarnessWorkflow(
+        cwd=project_root,
+        output_dir=tmp_path / "outputs",
+        state_dir=tmp_path / "state",
+    )
+    events = [
+        {
+            "event_id": f"issue-{index}",
+            "source_type": "github_issue",
+            "source_name": f"repo-{index % 3}",
+            "title": f"Issue {index}",
+            "published_at": f"2026-07-01T0{index}:00:00Z",
+        }
+        for index in range(6)
+    ]
+    events.extend(
+        [
+            {
+                "event_id": "release-1",
+                "source_type": "github_release",
+                "source_name": "repo-release",
+                "title": "Release",
+                "published_at": "2026-07-01T10:00:00Z",
+            },
+            {
+                "event_id": "rss-1",
+                "source_type": "rss",
+                "source_name": "feed",
+                "title": "RSS",
+                "published_at": "2026-07-01T09:30:00Z",
+            },
+            {
+                "event_id": "web-1",
+                "source_type": "web_change",
+                "source_name": "web",
+                "title": "Web",
+                "published_at": "2026-07-01T09:00:00Z",
+            },
+        ]
+    )
+
+    result = workflow._apply_event_limits(  # noqa: SLF001
+        events,
+        max_events=4,
+        max_events_per_source=None,
+    )
+
+    assert {event["source_type"] for event in result.events} == {
+        "github_issue",
+        "github_release",
+        "rss",
+        "web_change",
+    }
+    assert result.metadata["source_counts_before"]
+    assert result.metadata["source_counts_after"]
+
+
 def test_json_outputs_are_written_once(project_root: Path, tmp_path: Path) -> None:
     workflow = SignalHarnessWorkflow(
         cwd=project_root,

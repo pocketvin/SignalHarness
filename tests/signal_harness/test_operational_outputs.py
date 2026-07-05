@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from signal_harness.agent_integration.mode import RunMode
-from signal_harness.alerts import AlertPolicy, write_alert_outputs
+from signal_harness.alerts import AlertPolicy, select_alerts, write_alert_outputs
 from signal_harness.providers.mock_provider import MockProvider
 from signal_harness.runtime.workflow import SignalHarnessWorkflow
 from signal_harness.signal.schemas import (
@@ -54,6 +54,12 @@ def _assessment(event_id: str = "alert-001") -> SignalAssessment:
     )
 
 
+def _assessment_with(**updates) -> SignalAssessment:
+    payload = _assessment().model_dump()
+    payload.update(updates)
+    return SignalAssessment.model_validate(payload)
+
+
 def test_alert_outputs_and_state_deduplicate(tmp_path: Path) -> None:
     output_dir = tmp_path / "outputs"
     state_dir = tmp_path / "state"
@@ -85,6 +91,61 @@ def test_alert_outputs_and_state_deduplicate(tmp_path: Path) -> None:
     assert json.loads((output_dir / "alerts.json").read_text(encoding="utf-8")) == []
     state = json.loads((state_dir / "alert_state.json").read_text(encoding="utf-8"))
     assert state["alerted_event_ids"].count("alert-001") == 1
+
+
+def test_alert_policy_rejects_broad_official_expert_opinion() -> None:
+    event = _event()
+    assessment = _assessment_with(
+        category=SignalCategory.EXPERT_OPINION,
+        decision=SignalDecision.ALERT,
+        impact_score=90,
+        source_quality=SourceQuality.OFFICIAL,
+        confidence=0.95,
+        cross_source_confidence=0.95,
+    )
+
+    alerts = select_alerts([event], [assessment], policy=AlertPolicy(alert_threshold=75))
+
+    assert alerts == []
+
+
+def test_alert_policy_rejects_ordinary_release_series() -> None:
+    event = _event().model_copy(
+        update={
+            "title": "Routine dependency release",
+            "content": "Routine maintenance release with small bug fixes.",
+        }
+    )
+    assessment = _assessment_with(
+        category=SignalCategory.DEPENDENCY_UPDATE,
+        decision=SignalDecision.ALERT,
+        impact_score=90,
+        source_quality=SourceQuality.OFFICIAL,
+        confidence=0.95,
+    )
+
+    alerts = select_alerts([event], [assessment], policy=AlertPolicy(alert_threshold=75))
+
+    assert alerts == []
+
+
+def test_alert_policy_caps_alerts_per_category() -> None:
+    events = [
+        _event(event_id=f"alert-{index}")
+        for index in range(4)
+    ]
+    assessments = [
+        _assessment_with(event_id=event.event_id)
+        for event in events
+    ]
+
+    alerts = select_alerts(
+        events,
+        assessments,
+        policy=AlertPolicy(alert_threshold=75, max_alerts_per_category=3),
+    )
+
+    assert len(alerts) == 3
 
 
 def test_dashboard_and_digest_outputs_include_expected_sections(tmp_path: Path) -> None:

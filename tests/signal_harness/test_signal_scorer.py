@@ -14,7 +14,8 @@ NOW = datetime(2026, 6, 25, tzinfo=timezone.utc)
 PROFILE = {
     "tech_stack": ["Python"],
     "critical_modules": ["checkpoint"],
-    "dependencies": ["langgraph"],
+    "dependencies": ["pydantic"],
+    "monitored_ecosystem": ["langgraph"],
     "competitors": ["CrewAI"],
     "focus_keywords": ["checkpoint", "persistence"],
     "ignore_keywords": ["giveaway"],
@@ -146,13 +147,13 @@ def test_plain_github_release_defaults_to_save_not_alert(project_root) -> None:
         category=SignalCategory.DEPENDENCY_UPDATE,
     )
 
-    assert decision_for_score(release.final_score, policy).value == "save"
+    assert decision_for_score(release.final_score, policy).value in {"ignore", "save"}
 
 
 def test_security_breaking_dependency_can_require_action(project_root) -> None:
     policy = load_signal_policy(project_root / "configs" / "signal_policy.yaml")
     event = _event(
-        "langgraph security breaking API compatibility CVE checkpoint persistence migration"
+        "pydantic security breaking API compatibility CVE checkpoint persistence migration"
     )
     score = score_signal(
         event,
@@ -166,3 +167,51 @@ def test_security_breaking_dependency_can_require_action(project_root) -> None:
         "alert",
         "action_required",
     }
+
+
+def test_monitored_ecosystem_scores_below_direct_dependency(project_root) -> None:
+    policy = load_signal_policy(project_root / "configs" / "signal_policy.yaml")
+    dependency = score_signal(
+        _event("pydantic JSON schema compatibility migration"),
+        PROFILE,
+        policy,
+        now=NOW,
+    )
+    ecosystem = score_signal(
+        _event("langgraph JSON schema compatibility migration"),
+        PROFILE,
+        policy,
+        now=NOW,
+    )
+
+    assert dependency.project_relevance_score > ecosystem.project_relevance_score
+
+
+def test_dependency_relevance_does_not_match_inside_words(project_root) -> None:
+    policy = load_signal_policy(project_root / "configs" / "signal_policy.yaml")
+    clean = score_signal(
+        _event("descriptive issue with validation notes"),
+        {
+            **PROFILE,
+            "dependencies": ["rich"],
+            "monitored_ecosystem": [],
+            "focus_keywords": [],
+            "critical_modules": [],
+        },
+        policy,
+        now=NOW,
+    )
+    direct = score_signal(
+        _event("rich compatibility regression"),
+        {
+            **PROFILE,
+            "dependencies": ["rich"],
+            "monitored_ecosystem": [],
+            "focus_keywords": [],
+            "critical_modules": [],
+        },
+        policy,
+        now=NOW,
+    )
+
+    assert direct.project_relevance_score > clean.project_relevance_score

@@ -29,7 +29,26 @@ IMPORTANT_CATEGORIES = {
     SignalCategory.TOOL_CALLING_SIGNAL,
     SignalCategory.PROVIDER_COMPATIBILITY_SIGNAL,
     SignalCategory.SECURITY_SUPPLY_CHAIN,
+    SignalCategory.EVALUATION_BENCHMARK_SIGNAL,
+    SignalCategory.SOURCE_COLLECTION_SIGNAL,
     SignalCategory.POLICY_SIGNAL,
+}
+ORDINARY_RELEASE_IMPACT_TERMS = {
+    "breaking",
+    "security",
+    "cve",
+    "vulnerability",
+    "deprecated",
+    "deprecation",
+    "supply chain",
+    "compatibility",
+    "regression",
+    "migration",
+    "api change",
+    "api compatibility",
+    "schema",
+    "validation",
+    "json schema compatibility",
 }
 
 
@@ -40,6 +59,7 @@ class AlertPolicy:
     alert_threshold: float = 75.0
     official_confidence_threshold: float = 0.75
     cross_source_threshold: float = 0.70
+    max_alerts_per_category: int = 3
 
     @classmethod
     def from_signal_policy(cls, policy: dict[str, Any]) -> "AlertPolicy":
@@ -64,13 +84,18 @@ def select_alerts(
     event_by_id = {event.event_id: event for event in events}
     seen = already_alerted or set()
     alerts: list[dict[str, Any]] = []
+    category_counts: dict[SignalCategory, int] = {}
     for assessment in assessments:
         if assessment.event_id in seen:
             continue
-        reasons = _alert_reasons(assessment, policy)
+        event = event_by_id.get(assessment.event_id)
+        reasons = _alert_reasons(assessment, policy, event=event)
         if not reasons:
             continue
-        event = event_by_id.get(assessment.event_id)
+        current_count = category_counts.get(assessment.category, 0)
+        if current_count >= policy.max_alerts_per_category:
+            continue
+        category_counts[assessment.category] = current_count + 1
         alerts.append(
             {
                 "event_id": assessment.event_id,
@@ -95,16 +120,27 @@ def select_alerts(
 def _alert_reasons(
     assessment: SignalAssessment,
     policy: AlertPolicy,
+    *,
+    event: SignalEvent | None,
 ) -> list[str]:
     reasons: list[str] = []
     if assessment.decision is SignalDecision.ACTION_REQUIRED:
         reasons.append("decision=action_required")
-    if assessment.decision is SignalDecision.ALERT:
-        reasons.append("decision=alert")
-    if assessment.impact_score >= policy.alert_threshold:
-        reasons.append(f"impact_score>={policy.alert_threshold:g}")
-    if assessment.category in IMPORTANT_CATEGORIES:
-        reasons.append(f"important_category={assessment.category.value}")
+    elif (
+        assessment.decision is SignalDecision.ALERT
+        and assessment.impact_score >= policy.alert_threshold
+        and assessment.category in IMPORTANT_CATEGORIES
+        and not _is_ordinary_release_series(assessment, event)
+    ):
+        reasons.extend(
+            [
+                "decision=alert",
+                f"impact_score>={policy.alert_threshold:g}",
+                f"high_risk_category={assessment.category.value}",
+            ]
+        )
+    else:
+        return []
     if (
         assessment.source_quality is SourceQuality.OFFICIAL
         and assessment.confidence >= policy.official_confidence_threshold
@@ -122,3 +158,17 @@ def _alert_reasons(
     if matched_modules:
         reasons.append("important_affected_module=" + ",".join(matched_modules[:3]))
     return reasons
+
+
+def _is_ordinary_release_series(
+    assessment: SignalAssessment,
+    event: SignalEvent | None,
+) -> bool:
+    if event is None:
+        return False
+    if event.source_type != "github_release":
+        return False
+    if assessment.category is not SignalCategory.DEPENDENCY_UPDATE:
+        return False
+    text = f"{event.source_name} {event.title} {event.content}".lower()
+    return not any(term in text for term in ORDINARY_RELEASE_IMPACT_TERMS)

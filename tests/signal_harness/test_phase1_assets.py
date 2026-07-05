@@ -34,6 +34,17 @@ def test_live_watchlist_does_not_use_sample_fixture() -> None:
     assert "sample_events.json" in json.dumps(demo)
 
 
+def test_project_profile_separates_dependencies_from_monitored_ecosystem() -> None:
+    profile = yaml.safe_load(
+        (ROOT / "configs/project_profile.yaml").read_text(encoding="utf-8")
+    )
+
+    assert "langgraph" not in [item.lower() for item in profile["dependencies"]]
+    assert "langchain-ai/langgraph" not in profile["dependencies"]
+    assert "pydantic" in profile["dependencies"]
+    assert "langchain-ai/langgraph" in profile["monitored_ecosystem"]
+
+
 def test_score_weights_sum_to_one() -> None:
     policy = yaml.safe_load(
         (ROOT / "configs" / "signal_policy.yaml").read_text(encoding="utf-8")
