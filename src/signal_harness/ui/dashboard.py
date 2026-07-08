@@ -82,6 +82,25 @@ def _render_dashboard(
         event_by_id,
         limit=12,
     )
+    observed_sorted = _balanced_signal_list(
+        sorted_assessments,
+        event_by_id,
+        limit=12,
+    )
+    priority_display = high_priority_sorted if high_priority else observed_sorted
+    priority_section_title = (
+        "High priority signals" if high_priority else "No high-priority signals"
+    )
+    priority_section_description = (
+        f"{len(high_priority)} action-required or alert signals. Showing a balanced "
+        f"top {min(12, len(high_priority))} by source and category."
+        if high_priority
+        else (
+            "No action-required or alert signals were produced in this run. "
+            "Showing top observed signals for review."
+        )
+    )
+    priority_table_heading = "" if high_priority else "<h3>Top observed signals</h3>"
     top_modules = Counter(
         module
         for item in assessments
@@ -148,12 +167,17 @@ def _render_dashboard(
     )
     rows = "\n".join(
         _signal_row(item, event_by_id.get(str(item.get("event_id")), {}))
-        for item in high_priority_sorted[:12]
-    ) or "<tr><td colspan=\"4\">No action-required or alert signals.</td></tr>"
-    actionable_rows = "\n".join(
-        _signal_row(item, event_by_id.get(str(item.get("event_id")), {}))
-        for item in high_priority_sorted[:8]
-    ) or "<tr><td colspan=\"4\">No actionable signals in this run.</td></tr>"
+        for item in priority_display[:12]
+    ) or "<tr><td colspan=\"4\">No observed signals in this run.</td></tr>"
+    actionable_section = ""
+    if high_priority:
+        actionable_rows = "\n".join(
+            _signal_row(item, event_by_id.get(str(item.get("event_id")), {}))
+            for item in high_priority_sorted[:8]
+        ) or "<tr><td colspan=\"4\">No actionable signals in this run.</td></tr>"
+        actionable_section = f"""
+  <section><h2>Top actionable signals</h2><table><thead><tr><th>Signal</th><th>Tags</th><th>Score</th><th>Reason</th></tr></thead><tbody>{actionable_rows}</tbody></table></section>
+"""
     runtime_rows = _section_rows(
         assessments,
         event_by_id,
@@ -191,7 +215,7 @@ def _render_dashboard(
     alert_items = "".join(
         f"<li><strong>{_e(alert.get('title'))}</strong> — {_e(', '.join(_strings(alert.get('reasons'))))}</li>"
         for alert in alerts
-    ) or "<li>No new alerts.</li>"
+    ) or "<li>No alerts. This run produced only save/ignore decisions.</li>"
     trace_items = "".join(
         "<li>"
         f"{_e(step.get('agent_name') or step.get('agent') or step.get('step'))}: "
@@ -283,11 +307,12 @@ def _render_dashboard(
   {executive}
   {signal_summary}
   <section>
-    <h2>High priority signals</h2>
-    <p>{len(high_priority)} action-required or alert signals. Showing a balanced top {min(12, len(high_priority))} by source and category.</p>
+    <h2>{priority_section_title}</h2>
+    <p>{priority_section_description}</p>
+    {priority_table_heading}
     <table><thead><tr><th>Signal</th><th>Tags</th><th>Score</th><th>Reason</th></tr></thead><tbody>{rows}</tbody></table>
   </section>
-  <section><h2>Top actionable signals</h2><table><thead><tr><th>Signal</th><th>Tags</th><th>Score</th><th>Reason</th></tr></thead><tbody>{actionable_rows}</tbody></table></section>
+  {actionable_section}
   <section><h2>Ecosystem and runtime signals</h2><table><thead><tr><th>Signal</th><th>Tags</th><th>Score</th><th>Reason</th></tr></thead><tbody>{runtime_rows}</tbody></table></section>
   <section><h2>External insights</h2><table><thead><tr><th>Signal</th><th>Tags</th><th>Score</th><th>Reason</th></tr></thead><tbody>{insight_rows}</tbody></table></section>
   <section><h2>Observed dependency updates</h2><table><thead><tr><th>Signal</th><th>Tags</th><th>Score</th><th>Reason</th></tr></thead><tbody>{dependency_rows}</tbody></table></section>

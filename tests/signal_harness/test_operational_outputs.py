@@ -291,6 +291,54 @@ def test_dashboard_and_digest_outputs_include_expected_sections(tmp_path: Path) 
         assert "Learning proposal summary" in text
 
 
+def test_dashboard_uses_empty_high_priority_wording(tmp_path: Path) -> None:
+    output_dir = tmp_path / "outputs"
+    output_dir.mkdir()
+    second_event = _event("observed-002").model_copy(
+        update={"title": "Observed low-priority signal"}
+    )
+    (output_dir / "signals.json").write_text(
+        json.dumps(
+            [
+                _event("observed-001").model_dump(mode="json"),
+                second_event.model_dump(mode="json"),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (output_dir / "impact_scores.json").write_text(
+        json.dumps(
+            [
+                _assessment_with(
+                    event_id="observed-001",
+                    decision=SignalDecision.SAVE,
+                    impact_score=52,
+                ).model_dump(mode="json"),
+                _assessment_with(
+                    event_id="observed-002",
+                    decision=SignalDecision.IGNORE,
+                    impact_score=18,
+                ).model_dump(mode="json"),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (output_dir / "alerts.json").write_text("[]", encoding="utf-8")
+    (output_dir / "task_trace.json").write_text("[]", encoding="utf-8")
+
+    dashboard = write_dashboard(output_dir)
+
+    html = dashboard.read_text(encoding="utf-8")
+    assert "No high-priority signals" in html
+    assert (
+        "No action-required or alert signals were produced in this run. "
+        "Showing top observed signals for review."
+    ) in html
+    assert "Top observed signals" in html
+    assert "Top actionable signals" not in html
+    assert "No alerts. This run produced only save/ignore decisions." in html
+
+
 def test_dashboard_separates_retry_and_audit_from_llm_fallback(tmp_path: Path) -> None:
     output_dir = tmp_path / "outputs"
     output_dir.mkdir()
