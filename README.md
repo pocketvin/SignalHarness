@@ -12,6 +12,13 @@ fallback, trace recording, deterministic scoring, and all file writes. LLM
 Agents contribute classification, evidence synthesis, impact reasoning, action
 planning, and learning proposals inside those guardrails.
 
+## Interview / Demo materials
+
+- [Demo guide](docs/DEMO_GUIDE.md)
+- [Architecture overview](docs/ARCHITECTURE.md)
+- [Interview demo script](docs/INTERVIEW_DEMO_SCRIPT.md)
+- [Project STAR stories](docs/PROJECT_STAR.md)
+
 ## Core architecture
 
 The real Agent path is implemented in `src/signal_harness/agent_team/`:

@@ -1,0 +1,113 @@
+# SignalHarness Architecture
+
+SignalHarness 是一个 project-centric signal intelligence Agent Harness。它把外部变化源转成可审计的本地 assessment、digest、dashboard、trace 和 review-only learning proposal。
+
+## Workflow flowchart
+
+```mermaid
+flowchart TD
+    A["External Sources<br/>GitHub / RSS / Web change / fixture"] --> B["Source Collection"]
+    B --> C["Normalization"]
+    C --> D["Deduplication"]
+    D --> E["Noise Filter"]
+    E --> F["SignalSupervisorAgent"]
+    F --> G["ContextEvidenceAgent"]
+    G --> H["ImpactAnalystAgent"]
+    H --> I["ActionPlannerAgent"]
+    I --> J["LearningPolicyAgent"]
+    J --> K["Guarded Assessment"]
+    K --> L["Alerts"]
+    K --> M["Digest"]
+    K --> N["Dashboard"]
+    K --> O["Trace"]
+    K --> P["Review-only Learning"]
+
+    Q["Python Runtime<br/>schema validation / permissions / scoring / fallback / file writes"] -. guards .-> F
+    Q -. guards .-> G
+    Q -. guards .-> H
+    Q -. guards .-> I
+    Q -. guards .-> J
+```
+
+## Real agent run sequence
+
+```mermaid
+sequenceDiagram
+    participant User as User CLI
+    participant Workflow
+    participant Provider
+    participant Agents as Five Agents
+    participant Tools as Tool Executor
+    participant Trace as Trace Recorder
+    participant Dashboard as Dashboard Writer
+
+    User->>Workflow: signal-harness scan --mode agent
+    Workflow->>Trace: record load_config / collect_signals
+    Workflow->>Provider: structured call: SignalSupervisorAgent
+    Provider-->>Workflow: SupervisorOutput
+    Workflow->>Trace: record schema / route metadata
+    Workflow->>Provider: structured call: ContextEvidenceAgent tool plan
+    Provider-->>Workflow: EvidenceToolPlan
+    Workflow->>Tools: execute allowed read-only tools
+    Tools-->>Workflow: ToolObservation objects
+    Workflow->>Trace: tools_requested / tools_executed / permission_checks
+    Workflow->>Provider: structured call: ContextEvidenceAgent final evidence
+    Provider-->>Workflow: ContextEvidenceOutput
+    Workflow->>Provider: structured call: ImpactAnalystAgent
+    Provider-->>Workflow: ImpactOutput
+    Workflow->>Provider: structured call: ActionPlannerAgent
+    Provider-->>Workflow: ActionOutput
+    Workflow->>Provider: structured call or review noop: LearningPolicyAgent
+    Provider-->>Workflow: LearningPolicyOutput
+    Workflow->>Workflow: guarded scoring and decision mapping
+    Workflow->>Trace: record fallback / retry / audit completion if any
+    Workflow->>Dashboard: write local dashboard.html and reports
+    Dashboard-->>User: local files under outputs/
+```
+
+## 四层安全边界
+
+1. LLM 不能直接执行工具  
+   Agent 只能输出 structured tool requests。Python runtime 检查 allowlist、permission policy、budget 和 read-only constraints，再决定是否执行。
+
+2. LLM 不能直接写文件  
+   LLM 只能返回 schema-validated JSON。`outputs/`、trace、digest、dashboard、proposal snapshots 都由 Python runtime 或 report writer 写入本地文件。
+
+3. LLM 不能决定最终分数  
+   `ImpactAnalystAgent` 提供 semantic relevance 和 impact reasoning，但没有 authoritative `final_score` 字段。最终分数由 deterministic scoring、semantic relevance、evidence confidence 和 policy multiplier 组合。
+
+4. Learning proposal 不能自动 apply  
+   `LearningPolicyAgent` 只能产出 review-only proposal。高风险 proposal 或 replay gate failed proposal 不会自动应用；需要显式 review 和 approval。
+
+## 核心文件路径
+
+- `configs/project_profile.yaml`  
+  项目上下文：技术栈、真实 dependencies、monitored ecosystem、critical modules、focus keywords。
+
+- `configs/watchlist.yaml`  
+  live source watchlist：GitHub repos、RSS feeds、Web change sources。
+
+- `configs/signal_policy.yaml`  
+  deterministic scoring weights、category weights、thresholds、tool allowlist、permission policy。
+
+- `src/signal_harness/runtime/workflow.py`  
+  主 workflow：source collection、normalization、deduplication、noise filter、event limit、Agent run、report writing。
+
+- `src/signal_harness/agent_integration/runner.py`  
+  五 Agent runner：controlled tool-use loop、schema retry、repair boundary、audit completion、LearningPolicy handling。
+
+- `src/signal_harness/agent_integration/scoring_bridge.py`  
+  将 Agent outputs 转成 guarded `SignalAssessment`，并由 Python runtime 计算 final decision。
+
+- `src/signal_harness/ui/dashboard.py`  
+  静态本地 dashboard writer。展示 summary、signals、source health、tool health、model/profile/limits、trace、score breakdown、learning。
+
+- `outputs/dashboard.html`  
+  本地 dashboard 产物。用于 demo，不提交。
+
+- `outputs/task_trace.json`  
+  本地 trace 产物。记录 Agent calls、schema/fallback/retry、tool requests/executions、permission checks、source task health。
+
+## 面试展示重点
+
+SignalHarness 的价值不是“又做了一个 dashboard”，而是展示 Agent Harness 的工程边界：LLM 做推理，Python 做约束；模型输出可审计，工具使用可追踪，fallback 不隐藏，learning 不自动改配置。
