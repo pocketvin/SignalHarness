@@ -16,14 +16,13 @@ from signal_harness.signal.schemas import FeedbackRecord
 class ProjectMemory:
     """Project profile and watchlist configuration."""
 
-    config_dir: Path
+    project_profile_path: Path
+    watchlist_path: Path
 
     def load(self) -> dict[str, Any]:
         return {
-            "project_profile": load_yaml_mapping(
-                self.config_dir / "project_profile.yaml"
-            ),
-            "watchlist": load_yaml_mapping(self.config_dir / "watchlist.yaml"),
+            "project_profile": load_yaml_mapping(self.project_profile_path),
+            "watchlist": load_yaml_mapping(self.watchlist_path),
         }
 
 
@@ -96,11 +95,15 @@ class MemoryBundle:
         *,
         config_dir: str | Path,
         state_dir: str | Path,
+        project_profile_path: str | Path | None = None,
+        watchlist_path: str | Path | None = None,
     ) -> "MemoryBundle":
         config = Path(config_dir).expanduser().resolve()
         state = Path(state_dir).expanduser().resolve()
+        profile = Path(project_profile_path or config / "project_profile.yaml").expanduser().resolve()
+        watchlist = Path(watchlist_path or config / "watchlist.yaml").expanduser().resolve()
         return cls(
-            project=ProjectMemory(config),
+            project=ProjectMemory(profile, watchlist),
             signal=SignalMemory(state / "signal_memory.json"),
             feedback=FeedbackMemory(state / "feedback_memory.json"),
             policy=PolicyMemory(config, state),

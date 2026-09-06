@@ -14,6 +14,10 @@ critical_modules:
   - evidence verification
   - impact scoring
   - feedback memory
+  - asyncio
+  - event loop
+  - provider adapter
+  - SSE
   - mcp
   - agent eval
   - evaluation
@@ -53,6 +57,10 @@ focus_keywords:
   - structured output
   - permission guard
   - feedback memory
+  - asyncio
+  - event loop
+  - provider adapter
+  - SSE
 ignore_keywords:
   - cryptocurrency price
   - gaming promotion

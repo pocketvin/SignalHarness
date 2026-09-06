@@ -45,6 +45,17 @@ def _matched(text: str, keywords: Iterable[str]) -> list[str]:
     return [keyword for keyword in keywords if contains_affirmed_term(text, keyword)]
 
 
+
+
+def _semantic_text(event: SignalEvent, *, include_source: bool = False) -> str:
+    """Return deterministic matching text while avoiding noisy GitHub issue bodies."""
+
+    prefix = f"{event.source_name} " if include_source else ""
+    text = f"{prefix}{event.title}"
+    if event.source_type != "github_issue":
+        text = f"{text} {event.content}"
+    return text.lower()
+
 def _has_dependency_impact_terms(event: SignalEvent) -> bool:
     text = f"{event.source_name} {event.title} {event.content}".lower()
     return any_affirmed_term(text, DEPENDENCY_IMPACT_TERMS)
@@ -97,7 +108,7 @@ def keyword_score(
     """Reward focus-keyword matches and penalize explicit ignore terms."""
 
     active_policy = policy or {}
-    text = f"{event.title} {event.content}".lower()
+    text = _semantic_text(event)
     suggested, keyword_weights = _policy_keywords(active_policy)
     focus_terms = list(
         dict.fromkeys(
@@ -131,7 +142,7 @@ def relevance_score(
     """Measure overlap with stack, dependencies, competitors, and critical modules."""
 
     active_policy = policy or {}
-    text = f"{event.source_name} {event.title} {event.content}".lower()
+    text = _semantic_text(event, include_source=True)
     groups = (
         ("critical_modules", 30),
         ("dependencies", 28),
@@ -183,7 +194,7 @@ def urgency_score(event: SignalEvent, *, now: datetime | None = None) -> float:
             published = published.replace(tzinfo=timezone.utc)
         age_days = max(0, (current - published).days)
         base = max(10.0, 100.0 - age_days * 5)
-    text = f"{event.title} {event.content}".lower()
+    text = _semantic_text(event)
     if any_affirmed_term(
         text, ("security", "breaking", "deprecated", "urgent", "migration")
     ):

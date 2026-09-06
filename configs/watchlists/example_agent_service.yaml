@@ -1,0 +1,16 @@
+github:
+  repositories:
+    - repo: openai/openai-python
+      events: [releases, issues]
+    - repo: fastapi/fastapi
+      events: [releases, issues]
+    - repo: pydantic/pydantic
+      events: [releases, issues]
+    - repo: encode/httpx
+      events: [releases, issues]
+rss:
+  feeds:
+    - name: OpenAI News
+      url: https://openai.com/news/rss.xml
+    - name: GitHub Changelog
+      url: https://github.blog/changelog/feed/

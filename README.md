@@ -80,10 +80,12 @@ uv run signal-harness serve \
 http://127.0.0.1:8001/demo
 ```
 
-页面默认是**中文**，右上角可切换 `EN`。默认运行模式是：
+页面默认是**中文**，右上角可切换 `EN`。运行前先选择**关联项目**，再选择数据来源、分析方式和真实模型。项目不是写死在 UI 中：`configs/projects/*.yaml` 是 Project Catalog，每个项目分别绑定自己的 Project Profile 与 Watchlist。公开仓库默认提供 `SignalHarness` 与 `Example · Agent API Service` 两个 profile，用来证明同一套 Workflow 可以按项目切换判断上下文。
+
+默认组合是：
 
 ```text
-离线五 Agent 演示 / mock-agent
+SignalHarness + 实时 Watchlist + 离线五 Agent / mock-agent
 ```
 
 它不需要 API Key，但仍然走真实五 Agent orchestration、Schema、Tool Guard、Trace、SSE 和 Python scoring，因此适合稳定展示真实 Harness 行为。
@@ -173,7 +175,7 @@ LLM_API_KEY=... uv run signal-harness scan \
   --mode agent
 ```
 
-`signal-harness serve` 启动时会自动读取项目根目录的 `.env`，但不会覆盖已经显式 export 的环境变量。Golden Demo 会先检查**非敏感配置状态**；如果缺少 `LLM_API_KEY` 或 Model Profile，页面会直接提示“真实模型未配置”。
+`signal-harness serve` 启动时会自动读取项目根目录的 `.env`，但不会覆盖已经显式 export 的环境变量。Golden Demo 当前可识别并按 run 切换 OpenAI、Qwen、Kimi、DeepSeek 四套 OpenAI-compatible 配置；未配置的 provider 会保持不可选。
 
 页面不会暴露 API Key、Base URL 或本地配置路径；“已配置”也只表示本地配置完整，真实网络连接仍在 Run 时验证。`.env` 已被 Git 和 Docker build context 排除。
 
@@ -454,7 +456,10 @@ src/signal_harness/service.py           FastAPI REST/SSE + MCP HTTP
 src/signal_harness/service_streaming.py stream-run / SSE replay manager
 src/signal_harness/ui/demo.py           中英双语 Golden Demo
 src/signal_harness/evals.py             Regression + Provider Contract Eval
-configs/                                Project / Policy / Watchlist / Model profiles
+configs/projects/                       Project Catalog entries
+configs/project_profiles/               Additional project profiles
+configs/watchlists/                      Additional project-scoped Watchlists
+configs/                                Default project / Policy / Model profiles
 examples/signal_harness/                Demo / Regression fixtures
 tests/signal_harness/                   Unit / Integration / Regression tests
 ```

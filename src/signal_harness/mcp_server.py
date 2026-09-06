@@ -12,6 +12,7 @@ from mcp.server import MCPServer
 from mcp.types import ToolAnnotations
 
 from signal_harness.memory import FeedbackMemory, ProjectMemory, SignalMemory
+from signal_harness.projects.catalog import default_project_id, project_option
 from signal_harness.runtime.permissions import SignalPermissionGuard
 from signal_harness.signal.policy import load_signal_policy
 
@@ -87,7 +88,7 @@ def build_mcp_server(
         "SignalHarness",
         description=(
             "Read-only project context, signal history, assessments, trace, and "
-            "feedback for SignalHarness."
+            "feedback for project-scoped SignalHarness runs."
         ),
     )
 
@@ -97,11 +98,18 @@ def build_mcp_server(
         annotations=_READ_ONLY,
         structured_output=True,
     )
-    def get_project_context() -> dict[str, Any]:
+    def get_project_context(project_id: str | None = None) -> dict[str, Any]:
         paths.guard("read_project_context")
-        project = ProjectMemory(paths.config_dir).load()
+        selected_id = project_id or default_project_id(paths.config_dir)
+        option = project_option(selected_id, paths.config_dir)
+        project = ProjectMemory(
+            option.project_profile_path,
+            option.watchlist_path,
+        ).load()
         policy = load_signal_policy(paths.config_dir / "signal_policy.yaml")
         return {
+            "project_id": option.id,
+            "project_name": option.name,
             **project,
             "policy_version": policy.get("version"),
             "enabled_tools": list(policy.get("enabled_tools", [])),

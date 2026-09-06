@@ -8,6 +8,11 @@ import httpx
 
 from signal_harness.agent_integration.mode import RunMode
 from signal_harness.providers.adapter import AgentCall
+from signal_harness.providers.catalog import (
+    default_provider_id,
+    provider_catalog,
+    provider_from_selection,
+)
 from signal_harness.providers.factory import provider_from_env
 from signal_harness.providers.mock_provider import MockProvider
 from signal_harness.providers.model_profile import ModelProfile, load_model_profile
@@ -280,3 +285,46 @@ def test_openai_provider_records_reported_usage_and_profile_cost(
     assert usage.total_tokens == 1500
     assert usage.estimated_cost_usd == 0.00045
     assert usage.source == "provider_reported_with_profile_pricing"
+
+
+def test_provider_catalog_exposes_multiple_non_secret_options(
+    project_root: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "secret-openai")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.openai.example/v1")
+    monkeypatch.setenv("OPENAI_MODEL", "gpt-4o-mini")
+    monkeypatch.setenv("QWEN_API_KEY", "secret-qwen")
+    monkeypatch.setenv("QWEN_BASE_URL", "https://qwen.example/v1")
+    monkeypatch.setenv("QWEN_MODEL", "qwen-plus")
+    monkeypatch.setenv("LLM_MODEL_PROFILE", "qwen")
+
+    options = provider_catalog(project_root / "configs")
+    public = [item.public_payload() for item in options]
+    by_id = {item["id"]: item for item in public}
+
+    assert by_id["openai"]["ready"] is True
+    assert by_id["qwen"]["ready"] is True
+    assert by_id["qwen"]["model"] == "qwen-plus"
+    assert default_provider_id(project_root / "configs") == "qwen"
+    serialized = json.dumps(public)
+    assert "secret-openai" not in serialized
+    assert "secret-qwen" not in serialized
+    assert "base_url" not in serialized
+
+
+def test_provider_from_selection_uses_selected_namespace(
+    project_root: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("KIMI_API_KEY", "test-key")
+    monkeypatch.setenv("KIMI_BASE_URL", "https://kimi.example/v1")
+    monkeypatch.setenv("KIMI_MODEL", "kimi-latest")
+    monkeypatch.setenv("KIMI_MODEL_PROFILE", "kimi")
+
+    provider = provider_from_selection("kimi", config_dir=project_root / "configs")
+    try:
+        assert provider.provider == "kimi"
+        assert provider.model == "kimi-latest"
+        assert provider.model_profile == "kimi"
+        assert provider.base_url == "https://kimi.example/v1"
+    finally:
+        asyncio.run(provider.close())

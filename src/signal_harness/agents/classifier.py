@@ -48,7 +48,9 @@ class ClassifierAgent:
         event: SignalEvent,
         project_profile: dict[str, Any],
     ) -> ClassificationResult:
-        text = f"{event.source_name} {event.title} {event.content}".lower()
+        full_text = f"{event.source_name} {event.title} {event.content}".lower()
+        title_text = f"{event.source_name} {event.title}".lower()
+        text = title_text if event.source_type == "github_issue" else full_text
         content_text = f"{event.title} {event.content}".lower()
         ignore_terms = [
             str(value).lower() for value in project_profile.get("ignore_keywords", [])
@@ -61,9 +63,18 @@ class ClassifierAgent:
 
         if (
             event.source_type == "github_issue"
-            and any(
-                value in content_text
-                for value in ("policy", "permission", "regulation", "license", "compliance")
+            and (
+                any(
+                    value in event.title.lower()
+                    for value in ("policy", "permission", "regulation", "license", "compliance")
+                )
+                or (
+                    "proposal" in event.title.lower()
+                    and any(
+                        value in content_text
+                        for value in ("policy", "permission", "regulation", "license", "compliance")
+                    )
+                )
             )
         ):
             return ClassificationResult(
@@ -76,7 +87,10 @@ class ClassifierAgent:
             str(value).lower() for value in project_profile.get("competitors", [])
         ]
         direct_dependency = any(_term_in_text(text, value) for value in dependencies)
-        dependency_impact = any_affirmed_term(text, DEPENDENCY_IMPACT_TERMS)
+        dependency_impact = any_affirmed_term(
+            content_text if direct_dependency else text,
+            DEPENDENCY_IMPACT_TERMS,
+        )
         if direct_dependency and dependency_impact:
             category = SignalCategory.DEPENDENCY_UPDATE
             reason = (
@@ -108,7 +122,7 @@ class ClassifierAgent:
             category = SignalCategory.SOURCE_COLLECTION_SIGNAL
             reason = "The signal affects source collection or feed reliability."
         elif (
-            any(value in content_text for value in ("documentation", "docs", "readme"))
+            any(value in event.title.lower() for value in ("documentation", "docs", "readme"))
             and any(value in content_text for value in ("typo", "wording", "copy", "example"))
         ):
             category = SignalCategory.DOCS_CHANGE_SIGNAL

@@ -31,11 +31,13 @@ class OpenAICompatibleProvider:
         profile: ModelProfile,
         client: httpx.AsyncClient | None = None,
         request_sleep_seconds: float = 0.0,
+        model_profile: str | None = None,
+        provider_label: str | None = None,
     ) -> None:
         self.model = profile.model
         self.profile = profile
-        self.provider = profile.provider
-        self.model_profile = os.environ.get("LLM_MODEL_PROFILE", "").strip()
+        self.provider = provider_label or profile.provider
+        self.model_profile = model_profile or os.environ.get("LLM_MODEL_PROFILE", "").strip()
         self.base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._client = client or httpx.AsyncClient(timeout=httpx.Timeout(60.0))
@@ -62,6 +64,7 @@ class OpenAICompatibleProvider:
             base_url=os.environ.get("LLM_BASE_URL", "https://api.openai.com"),
             profile=profile,
             client=client,
+            model_profile=os.environ.get("LLM_MODEL_PROFILE", "").strip(),
             request_sleep_seconds=float(
                 os.environ.get("LLM_REQUEST_SLEEP_SECONDS", "0") or 0
             ),

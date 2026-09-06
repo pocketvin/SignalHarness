@@ -58,13 +58,20 @@ class SignalMemoryTool(BaseTool):
         state_dir = Path(
             context.metadata.get("state_dir") or context.cwd / ".signal-harness"
         ).resolve()
+        project_profile_path = Path(
+            context.metadata.get("project_profile_path")
+            or config_dir / "project_profile.yaml"
+        ).resolve()
+        watchlist_path = Path(
+            context.metadata.get("watchlist_path") or config_dir / "watchlist.yaml"
+        ).resolve()
         payload: object
         if arguments.action == "load_project_profile":
-            payload = load_yaml_mapping(config_dir / "project_profile.yaml")
+            payload = load_yaml_mapping(project_profile_path)
         elif arguments.action == "load_signal_policy":
             payload = load_signal_policy(config_dir / "signal_policy.yaml")
         elif arguments.action == "load_watchlist":
-            payload = load_yaml_mapping(config_dir / "watchlist.yaml")
+            payload = load_yaml_mapping(watchlist_path)
         elif arguments.action == "load_feedback_history":
             payload = [
                 item.model_dump(mode="json")

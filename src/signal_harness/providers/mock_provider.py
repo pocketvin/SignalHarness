@@ -343,7 +343,11 @@ class MockProvider:
         }
         results: list[ImpactItem] = []
         for event in self._events(payload):
-            text = f"{event.title} {event.content}".lower()
+            text = (
+                event.title.lower()
+                if event.source_type == "github_issue"
+                else f"{event.title} {event.content}".lower()
+            )
             if any_affirmed_term(text, ("cve", "vulnerability", "supply chain")):
                 semantic = 92.0
             elif "checkpoint" in text:

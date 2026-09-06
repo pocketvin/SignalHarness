@@ -1,0 +1,41 @@
+project_name: Example Agent API Service
+goal: >-
+  Example project used to demonstrate project-scoped environment monitoring for
+  a Python Agent API service without changing SignalHarness runtime code.
+tech_stack:
+  - Python
+  - FastAPI
+  - Pydantic
+  - httpx
+  - Uvicorn
+  - asyncio
+critical_modules:
+  - API service
+  - provider adapter
+  - structured output
+  - async runtime
+  - request validation
+  - streaming
+  - observability
+dependencies:
+  - fastapi
+  - pydantic
+  - httpx
+  - uvicorn
+  - openai
+monitored_ecosystem:
+  - OpenAI Python SDK
+  - FastAPI
+  - Pydantic
+  - httpx
+focus_keywords:
+  - API compatibility
+  - structured output
+  - asyncio
+  - event loop
+  - streaming
+  - provider API
+  - validation
+ignore_keywords:
+  - consumer giveaway
+  - cryptocurrency price

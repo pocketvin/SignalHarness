@@ -1,0 +1,8 @@
+id: signalharness
+name: SignalHarness
+description: >-
+  Multi-Agent Harness / Eval / Tooling Platform. Monitor runtime, provider,
+  dependency, MCP, evaluation, observability, and checkpoint-related changes.
+project_profile: ../project_profile.yaml
+watchlist: ../watchlist.yaml
+default: true

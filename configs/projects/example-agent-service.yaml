@@ -1,0 +1,8 @@
+id: example-agent-service
+name: Example · Agent API Service
+description: >-
+  Public example proving that the same Change Radar can evaluate a different
+  project profile and Watchlist without code changes.
+project_profile: ../project_profiles/example_agent_service.yaml
+watchlist: ../watchlists/example_agent_service.yaml
+default: false

@@ -76,6 +76,15 @@ async def test_mcp_in_process_lists_and_calls_read_only_tools(
         assert context.is_error is False
         assert (context.structured_content or {})["project_profile"]["project_name"] == "SignalHarness"
 
+        example_context = await client.call_tool(
+            "signalharness_get_project_context",
+            {"project_id": "example-agent-service"},
+        )
+        assert example_context.is_error is False
+        example_payload = example_context.structured_content or {}
+        assert example_payload["project_id"] == "example-agent-service"
+        assert example_payload["project_profile"]["project_name"] == "Example Agent API Service"
+
         history = await client.call_tool(
             "signalharness_search_signal_history",
             {"query": "permission", "limit": 10},

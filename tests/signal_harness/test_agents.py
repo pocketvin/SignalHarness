@@ -189,3 +189,26 @@ async def test_noise_category_is_always_ignored(project_root) -> None:
 
     assert assessments[0].category is SignalCategory.NOISE
     assert assessments[0].decision.value == "ignore"
+
+
+def test_classifier_github_issue_related_text_does_not_override_title_category() -> None:
+    event = _event(
+        source_type="github_issue",
+        source_name="langchain-ai/langgraph",
+        title="Store filter $and/$or combinators return inconsistent results",
+        content=(
+            "The bug is about store filtering. Related issues discuss durable checkpoint "
+            "migration, but that is not the behavior reported here."
+        ),
+    )
+    result = ClassifierAgent().run(
+        event,
+        {
+            "dependencies": [],
+            "competitors": ["LangGraph"],
+            "focus_keywords": ["checkpoint", "persistence"],
+            "ignore_keywords": [],
+        },
+    )
+
+    assert result.category is SignalCategory.COMPETITOR_UPDATE

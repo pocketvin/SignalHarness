@@ -215,3 +215,53 @@ def test_dependency_relevance_does_not_match_inside_words(project_root) -> None:
     )
 
     assert direct.project_relevance_score > clean.project_relevance_score
+
+
+def test_github_issue_body_references_do_not_inflate_keyword_relevance(project_root) -> None:
+    policy = load_signal_policy(project_root / "configs" / "signal_policy.yaml")
+    event = normalize_event(
+        {
+            "event_id": "store-filter-noise",
+            "source_type": "github_issue",
+            "source_name": "langchain-ai/langgraph",
+            "title": "Store filter combinators return inconsistent results",
+            "content": (
+                "This report is about store filtering. A related issue mentions checkpoint "
+                "persistence migration, but that is not the reported failure."
+            ),
+            "url": "https://github.com/langchain-ai/langgraph/issues/1",
+            "raw_payload": {"official": True},
+            "collected_at": NOW,
+            "published_at": NOW,
+        }
+    )
+    score = score_signal(event, PROFILE, policy, now=NOW)
+
+    assert score.keyword_match_score == 20.0
+    assert score.project_relevance_score < 40.0
+
+
+def test_github_issue_title_can_match_runtime_focus_without_body_scan(project_root) -> None:
+    policy = load_signal_policy(project_root / "configs" / "signal_policy.yaml")
+    profile = {
+        **PROFILE,
+        "focus_keywords": ["event loop"],
+        "critical_modules": ["provider adapter"],
+    }
+    event = normalize_event(
+        {
+            "event_id": "event-loop-blocking",
+            "source_type": "github_issue",
+            "source_name": "openai/openai-python",
+            "title": "Blocking the event loop since 3.x?",
+            "content": "A long issue template contains unrelated checkpoint references.",
+            "url": "https://github.com/openai/openai-python/issues/1",
+            "raw_payload": {"official": True},
+            "collected_at": NOW,
+            "published_at": NOW,
+        }
+    )
+    score = score_signal(event, profile, policy, now=NOW)
+
+    assert score.keyword_match_score > 20.0
+    assert score.project_relevance_score >= 25.0

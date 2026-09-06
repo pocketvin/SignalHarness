@@ -88,6 +88,8 @@ class SignalHarnessWorkflow:
         *,
         cwd: str | Path,
         config_dir: str | Path | None = None,
+        project_profile_path: str | Path | None = None,
+        watchlist_path: str | Path | None = None,
         output_dir: str | Path | None = None,
         state_dir: str | Path | None = None,
         mode: RunMode | str = RunMode.DEMO,
@@ -97,6 +99,12 @@ class SignalHarnessWorkflow:
     ) -> None:
         self.cwd = Path(cwd).expanduser().resolve()
         self.config_dir = self._resolve(config_dir or "configs")
+        self.project_profile_path = self._resolve(
+            project_profile_path or self.config_dir / "project_profile.yaml"
+        )
+        self.watchlist_path = self._resolve(
+            watchlist_path or self.config_dir / "watchlist.yaml"
+        )
         self.output_dir = self._resolve(output_dir or "outputs")
         self.state_dir = self._resolve(state_dir or ".signal-harness")
         self.mode = RunMode(mode)
@@ -109,6 +117,8 @@ class SignalHarnessWorkflow:
             cwd=self.cwd,
             metadata={
                 "config_dir": str(self.config_dir),
+                "project_profile_path": str(self.project_profile_path),
+                "watchlist_path": str(self.watchlist_path),
                 "output_dir": str(self.output_dir),
                 "state_dir": str(self.state_dir),
                 "mode": self.mode.value,
@@ -294,6 +304,8 @@ class SignalHarnessWorkflow:
             memory_snapshot = MemoryBundle.from_paths(
                 config_dir=self.config_dir,
                 state_dir=self.state_dir,
+                project_profile_path=self.project_profile_path,
+                watchlist_path=self.watchlist_path,
             ).snapshot()
             try:
                 with self.trace.step(

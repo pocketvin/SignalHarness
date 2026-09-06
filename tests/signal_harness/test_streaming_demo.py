@@ -65,6 +65,11 @@ def test_demo_page_and_metadata(
     monkeypatch.delenv("LLM_API_KEY", raising=False)
     monkeypatch.delenv("LLM_PROVIDER", raising=False)
     monkeypatch.delenv("LLM_MODEL_PROFILE", raising=False)
+    for prefix in ("OPENAI", "QWEN", "KIMI", "DEEPSEEK"):
+        monkeypatch.delenv(f"{prefix}_API_KEY", raising=False)
+        monkeypatch.delenv(f"{prefix}_BASE_URL", raising=False)
+        monkeypatch.delenv(f"{prefix}_MODEL", raising=False)
+        monkeypatch.delenv(f"{prefix}_MODEL_PROFILE", raising=False)
     app = create_app(
         cwd=project_root,
         output_dir=tmp_path / "outputs",
@@ -73,14 +78,16 @@ def test_demo_page_and_metadata(
     with TestClient(app) as client:
         page = client.get("/demo")
         assert page.status_code == 200
-        assert "SignalHarness Flight Deck" in page.text
-        assert "看 SignalHarness 如何一步一步做出决策" in page.text
-        assert "离线五 Agent 演示" in page.text
+        assert "SignalHarness Change Radar" in page.text
+        assert "最近外部技术环境，哪些变化真的影响当前项目" in page.text
+        assert "实时 Watchlist" in page.text
+        assert "真实模型" in page.text
+        assert "发现了什么变化" in page.text
+        assert "Agent 审计过程" in page.text
         assert "面试演示建议" not in page.text
         assert "interview demos" not in page.text
         assert "中文" in page.text
         assert "new EventSource" in page.text
-        assert "live runtime evidence, not a simulated animation" in page.text
 
         meta = client.get("/demo/meta")
         assert meta.status_code == 200
@@ -93,9 +100,15 @@ def test_demo_page_and_metadata(
             "transport": "sse",
             "durability": "in-process",
         }
-        assert payload["provider"]["ready"] is False
-        assert payload["provider"]["verified"] is False
-        assert payload["provider"]["reason"] == "missing_api_key"
+        assert payload["providers"]
+        assert payload["projects"]
+        assert payload["default_project_id"] == "signalharness"
+        projects = {item["id"]: item for item in payload["projects"]}
+        assert projects["signalharness"]["name"] == "SignalHarness"
+        assert projects["signalharness"]["watchlist"]["source_count"] == 8
+        assert projects["example-agent-service"]["watchlist"]["source_count"] == 6
+        assert payload["default_provider_id"] is None
+        assert all(option["ready"] is False for option in payload["providers"])
 
 
 def test_demo_metadata_reports_configured_provider_without_network_call(
@@ -103,9 +116,11 @@ def test_demo_metadata_reports_configured_provider_without_network_call(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("LLM_API_KEY", "test-only-placeholder")
-    monkeypatch.delenv("LLM_PROVIDER", raising=False)
-    monkeypatch.delenv("LLM_MODEL_PROFILE", raising=False)
+    monkeypatch.setenv("QWEN_API_KEY", "test-only-placeholder")
+    monkeypatch.setenv("QWEN_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("QWEN_MODEL", "qwen-plus")
+    monkeypatch.setenv("QWEN_MODEL_PROFILE", "qwen")
+    monkeypatch.setenv("LLM_MODEL_PROFILE", "qwen")
     app = create_app(
         cwd=project_root,
         output_dir=tmp_path / "outputs",
@@ -115,12 +130,12 @@ def test_demo_metadata_reports_configured_provider_without_network_call(
         meta_response = client.get("/demo/meta")
         assert "test-only-placeholder" not in meta_response.text
         assert "base_url" not in meta_response.text.lower()
-        provider = meta_response.json()["provider"]
-        assert provider["ready"] is True
-        assert provider["verified"] is False
-        assert provider["provider"] == "openai_compatible"
-        assert provider["model"]
-        assert provider["reason"] is None
+        payload = meta_response.json()
+        providers = {item["id"]: item for item in payload["providers"]}
+        assert providers["qwen"]["ready"] is True
+        assert providers["qwen"]["model"] == "qwen-plus"
+        assert providers["qwen"]["reason"] is None
+        assert payload["default_provider_id"] == "qwen"
 
 
 def test_agent_stream_run_requires_provider_configuration(
@@ -128,19 +143,20 @@ def test_agent_stream_run_requires_provider_configuration(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.delenv("QWEN_API_KEY", raising=False)
+    monkeypatch.setenv("QWEN_BASE_URL", "https://example.test/v1")
     app = create_app(
         cwd=project_root,
         output_dir=tmp_path / "outputs",
         state_dir=tmp_path / "state",
     )
     with TestClient(app) as client:
-        response = client.post("/stream-runs", json={"mode": "agent"})
+        response = client.post("/stream-runs", json={"mode": "agent", "provider_id": "qwen", "data_source": "fixture"})
         assert response.status_code == 409
         detail = response.json()["detail"]
         assert detail["code"] == "agent_provider_not_ready"
         assert detail["reason"] == "missing_api_key"
-        assert "LLM_API_KEY" in detail["message"]
+        assert detail["provider_id"] == "qwen"
 
 
 def test_stream_run_replays_trace_and_final_result(
@@ -153,7 +169,7 @@ def test_stream_run_replays_trace_and_final_result(
         state_dir=tmp_path / "state",
     )
     with TestClient(app) as client:
-        created = client.post("/stream-runs", json={"mode": "mock-agent"})
+        created = client.post("/stream-runs", json={"mode": "mock-agent", "data_source": "fixture"})
         assert created.status_code == 202, created.text
         run = created.json()
         run_id = run["run_id"]
@@ -179,6 +195,8 @@ def test_stream_run_replays_trace_and_final_result(
         completed = events[-1]["data"]
         assert isinstance(completed, dict)
         assert completed["run"]["status"] == "success"
+        assert completed["run"]["project_id"] == "signalharness"
+        assert completed["run"]["project_name"] == "SignalHarness"
         assert len(completed["signals"]) == 4
         assert len(completed["assessments"]) == 4
 
@@ -201,7 +219,7 @@ def test_sse_last_event_id_replays_only_newer_events(
         state_dir=tmp_path / "state",
     )
     with TestClient(app) as client:
-        created = client.post("/stream-runs", json={"mode": "mock-agent"}).json()
+        created = client.post("/stream-runs", json={"mode": "mock-agent", "data_source": "fixture"}).json()
         with client.stream("GET", created["events_url"]) as first_response:
             first = _sse_events(first_response)
         assert first[-1]["event"] == "run.completed"
@@ -237,8 +255,11 @@ async def test_stream_disconnect_does_not_cancel_workflow(
         state_dir=tmp_path / "state",
     )
     session = manager.start(
+        source_mode="fixture",
         fixture=project_root / "examples/signal_harness/sample_events.json",
+        since=None,
         mode=RunMode.MOCK_AGENT,
+        provider_id=None,
         max_events=None,
         max_events_per_source=None,
     )
@@ -256,3 +277,55 @@ async def test_stream_disconnect_does_not_cancel_workflow(
     assert session.status == "success"
     assert session.result is not None
     await manager.shutdown()
+
+
+def test_stream_run_live_source_is_separate_from_fixture(
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    app = create_app(
+        cwd=project_root,
+        output_dir=tmp_path / "outputs",
+        state_dir=tmp_path / "state",
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            "/stream-runs",
+            json={"mode": "mock-agent", "data_source": "live", "since_days": 7},
+        )
+        assert response.status_code == 202
+        payload = response.json()
+        assert payload["status"] == "queued"
+        assert payload["source_mode"] == "live"
+        assert payload["project_id"] == "signalharness"
+        assert payload["project_name"] == "SignalHarness"
+        assert payload["since"] is not None
+
+
+def test_stream_run_accepts_selected_configured_provider_without_calling_it(
+    project_root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-only-placeholder")
+    monkeypatch.setenv("DEEPSEEK_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("DEEPSEEK_MODEL", "deepseek-chat")
+    monkeypatch.setenv("DEEPSEEK_MODEL_PROFILE", "deepseek")
+    app = create_app(
+        cwd=project_root,
+        output_dir=tmp_path / "outputs",
+        state_dir=tmp_path / "state",
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            "/stream-runs",
+            json={
+                "mode": "agent",
+                "provider_id": "deepseek",
+                "data_source": "fixture",
+            },
+        )
+        assert response.status_code == 202
+        payload = response.json()
+        assert payload["provider_id"] == "deepseek"
+        assert payload["source_mode"] == "fixture"
