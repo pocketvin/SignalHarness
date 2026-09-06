@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
 from signal_harness.runtime.tools_base import BaseTool, ToolExecutionContext, ToolResult
+from signal_harness.resources import is_allowed_fixture_path, resolve_example_path
 
 
 class WebChangeInput(BaseModel):
@@ -31,14 +31,12 @@ class WebChangeTool(BaseTool):
         arguments: WebChangeInput,
         context: ToolExecutionContext,
     ) -> ToolResult:
-        path = Path(arguments.fixture).expanduser()
-        if not path.is_absolute():
-            path = context.cwd / path
-        path = path.resolve()
-        try:
-            path.relative_to(context.cwd.resolve())
-        except ValueError:
-            return ToolResult(output="Fixture must be inside the project workspace", is_error=True)
+        path = resolve_example_path(context.cwd, arguments.fixture)
+        if not is_allowed_fixture_path(path, context.cwd):
+            return ToolResult(
+                output="Fixture must be inside the project workspace or packaged examples",
+                is_error=True,
+            )
         if not path.exists():
             return ToolResult(output=f"Fixture not found: {path}", is_error=True)
         try:

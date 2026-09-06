@@ -85,12 +85,20 @@ def test_demo_page_and_metadata(
         assert "面试演示建议" not in page.text
         assert "interview demos" not in page.text
         assert "中文" in page.text
-        assert "new EventSource" in page.text
+        assert 'href="/demo-assets/demo.css"' in page.text
+        assert 'src="/demo-assets/demo.js"' in page.text
+        assert "<style>" not in page.text
+        assert "<script>" not in page.text
+        javascript = client.get("/demo-assets/demo.js")
+        stylesheet = client.get("/demo-assets/demo.css")
+        assert javascript.status_code == 200
+        assert stylesheet.status_code == 200
+        assert "new EventSource" in javascript.text
         assert 'onclick="' not in page.text
-        assert "safeExternalUrl" in page.text
-        assert "['http:','https:']" in page.text
-        assert 'data-action="audit"' in page.text
-        assert "data-stage=" in page.text
+        assert "safeExternalUrl" in javascript.text
+        assert "['http:','https:']" in javascript.text
+        assert 'data-action="audit"' in javascript.text
+        assert "data-stage=" in javascript.text
 
         meta = client.get("/demo/meta")
         assert meta.status_code == 200

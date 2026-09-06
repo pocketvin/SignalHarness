@@ -258,6 +258,24 @@ MCP Streamable HTTP is mounted at:
 
 Each API run gets isolated output/trace directories under `service-runs/<run_id>`, while persistent memory is project-scoped under `.signal-harness/projects/<project_id>/`. The original `POST /runs` remains synchronous. Streaming demo runs are in-process asyncio tasks started by the first SSE subscriber; they continue if the browser disconnects, but live subscription history is not durable across a service restart. No Redis/Celery/worker tier is claimed.
 
+## Wheel / running outside the repository
+
+The wheel produced by `uv build` now carries the default configs, Project Catalog, model profiles, Watchlists, regression/demo fixtures, and Golden Demo static assets. Runtime resolution remains **workspace first**: a local `configs/` or `examples/signal_harness` wins when present, and only the default missing paths fall back to immutable package-owned resources. Explicit custom paths are never silently redirected.
+
+That makes the built artifact usable outside the source checkout:
+
+```bash
+uv build
+uv venv /tmp/signalharness-wheel
+uv pip install --python /tmp/signalharness-wheel/bin/python dist/signalharness-0.1.0-py3-none-any.whl
+
+cd /tmp
+/tmp/signalharness-wheel/bin/signal-harness regression-eval --mode mock-agent --enforce
+/tmp/signalharness-wheel/bin/signal-harness project-eval --enforce
+```
+
+Golden Demo no longer embeds the full HTML/CSS/JS payload in a Python raw string. `ui/demo.py` is now a small loader, while `ui/static/` owns the page, stylesheet, and JavaScript served under `/demo-assets/*`. The UI remains dependency-free while becoming independently testable and maintainable.
+
 ## Docker
 
 ```bash
@@ -317,7 +335,7 @@ mypy --strict
 uv build
 ```
 
-No API key is required and public CI does not call a live model provider.
+No API key is required and public CI does not call a live model provider. Pytest also verifies the Golden Demo HTML/static-asset wiring and the default packaged-resource fallback from a cwd outside the repository. Full Playwright browser acceptance remains a local release check so public CI stays offline and browser-download-free.
 
 ## Key files
 
@@ -327,6 +345,8 @@ src/signal_harness/agent_integration/   prompts, runner, tool loop, trace, scori
 src/signal_harness/runtime/             workflow, permissions, registry, executor
 src/signal_harness/signal/              schemas, scoring, taxonomy, text semantics
 src/signal_harness/providers/           mock + OpenAI-compatible providers/model profiles
+src/signal_harness/resources.py          workspace-first packaged-resource fallback
+src/signal_harness/ui/static/            Golden Demo HTML / CSS / JS
 src/signal_harness/mcp_server.py        read-only MCP interface
 src/signal_harness/service.py           FastAPI REST/SSE + MCP HTTP service
 src/signal_harness/service_streaming.py in-process stream-run/SSE replay manager

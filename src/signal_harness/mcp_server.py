@@ -14,6 +14,7 @@ from mcp.types import ToolAnnotations
 from signal_harness.memory import FeedbackMemory, ProjectMemory, SignalMemory
 from signal_harness.projects.catalog import default_project_id, project_option
 from signal_harness.projects.state import project_state_dir
+from signal_harness.resources import resolve_config_dir
 from signal_harness.runtime.permissions import SignalPermissionGuard
 from signal_harness.signal.policy import load_signal_policy
 
@@ -55,7 +56,7 @@ class MCPPaths:
         root = Path(cwd).expanduser().resolve()
         return cls(
             cwd=root,
-            config_dir=_resolve(root, config_dir),
+            config_dir=resolve_config_dir(root, config_dir),
             output_dir=_resolve(root, output_dir),
             state_dir=_resolve(root, state_dir),
         )

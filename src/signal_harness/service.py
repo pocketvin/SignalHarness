@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -30,6 +31,11 @@ from signal_harness.projects.catalog import (
     project_option,
 )
 from signal_harness.projects.state import prepare_project_state
+from signal_harness.resources import (
+    is_allowed_fixture_path,
+    resolve_config_dir,
+    resolve_example_path,
+)
 from signal_harness.service_streaming import StreamRunManager
 from signal_harness.runtime.permissions import SignalPermissionGuard
 from signal_harness.runtime.workflow import SignalHarnessWorkflow
@@ -40,7 +46,7 @@ from signal_harness.signal.feedback import (
 )
 from signal_harness.signal.policy import load_signal_policy
 from signal_harness.signal.schemas import FeedbackLabel
-from signal_harness.ui.demo import render_demo_page
+from signal_harness.ui.demo import demo_asset_dir, render_demo_page
 from signal_harness.utils.fs import atomic_write_text
 
 
@@ -98,7 +104,7 @@ class ServicePaths:
         root = Path(cwd).expanduser().resolve()
         return cls(
             cwd=root,
-            config_dir=_resolve(root, config_dir),
+            config_dir=resolve_config_dir(root, config_dir),
             output_dir=_resolve(root, output_dir),
             state_dir=_resolve(root, state_dir),
         )
@@ -162,6 +168,12 @@ def create_app(
         lifespan=lifespan,
     )
 
+    app.mount(
+        "/demo-assets",
+        StaticFiles(directory=str(demo_asset_dir())),
+        name="demo-assets",
+    )
+
     @app.get("/demo", response_class=HTMLResponse)
     async def demo() -> str:
         return render_demo_page()
@@ -169,7 +181,7 @@ def create_app(
     @app.get("/demo/meta")
     async def demo_meta() -> dict[str, Any]:
         evidence = _read_json(
-            paths.cwd / "examples/signal_harness/regression_baseline.json",
+            resolve_example_path(paths.cwd, "examples/signal_harness/regression_baseline.json"),
             {},
         )
         providers = provider_catalog(paths.config_dir)
@@ -485,14 +497,12 @@ def _existing_run_output(paths: ServicePaths, run_id: str) -> Path:
 
 
 def _safe_fixture(root: Path, value: str) -> Path:
-    target = Path(value).expanduser()
-    resolved = target.resolve() if target.is_absolute() else (root / target).resolve()
-    try:
-        resolved.relative_to(root)
-    except ValueError as exc:
+    resolved = resolve_example_path(root, value)
+    if not is_allowed_fixture_path(resolved, root):
         raise HTTPException(
-            status_code=400, detail="Fixture must stay inside the project root"
-        ) from exc
+            status_code=400,
+            detail="Fixture must stay inside the project root",
+        )
     if resolved.suffix.lower() != ".json" or not resolved.is_file():
         raise HTTPException(status_code=400, detail="Fixture must be an existing JSON file")
     return resolved

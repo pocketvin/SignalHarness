@@ -54,6 +54,8 @@ exclude = [
 
 [tool.hatch.build.targets.wheel.force-include]
 "src/signal_harness/py.typed" = "signal_harness/py.typed"
+"configs" = "signal_harness/_resources/configs"
+"examples/signal_harness" = "signal_harness/_resources/examples/signal_harness"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -125,8 +125,11 @@ sequenceDiagram
 - `src/signal_harness/service_streaming.py`
   in-process stream-run manager：首个 SSE subscriber 启动 queued workflow，保留 event-id 历史用于重连回放；断开浏览器不取消 run。
 
-- `src/signal_harness/ui/demo.py`
-  FastAPI 直接托管的 Golden Demo 单页。UI 只消费真实 trace append/update 事件，不维护假的 Agent 执行状态。
+- `src/signal_harness/resources.py`
+  Distribution resource resolver：workspace 本地默认资源优先；缺失时回退到 wheel 内的只读 configs/examples。显式自定义路径不被重定向。
+
+- `src/signal_harness/ui/demo.py` / `src/signal_harness/ui/static/`
+  Golden Demo loader + 独立 HTML/CSS/JS 静态资源。UI 只消费真实 trace append/update 事件，不维护假的 Agent 执行状态；FastAPI 通过 `/demo-assets/*` 提供静态资源。
 
 - `src/signal_harness/ui/dashboard.py`
   静态本地 dashboard writer。展示 summary、signals、source/tool health、model/profile/limits、trace、token/cost/latency、score breakdown、learning。
@@ -157,6 +160,10 @@ SignalHarness 的价值不是“又做了一个 dashboard”，而是展示 Agen
 SignalHarness 把验证拆成三层：`regression-eval --enforce` 验证 40 个项目 contract case；`project-eval --enforce` 用同一事件跨项目比较，证明 Project Context 会改变判断；`model-eval` 验证 provider schema、retry/fallback、tool errors、repair、latency、provider-reported token usage 和 estimated cost。三者都不是通用 LLM leaderboard。
 
 当前 `resume-v1` offline regression suite 的 committed acceptance 是 40/40 exact decision、40/40 exact category、priority precision/recall 100%、FPR/FNR 0%。这些数字来自项目特定 contract corpus。
+
+## Distribution boundary
+
+Source checkout、wheel install 与 Docker 共享同一 runtime contract。`uv build` 的 wheel force-includes 默认 configs 与 `examples/signal_harness` 到 `signal_harness/_resources/`；静态 UI 资源位于 package 自身 `ui/static/`。运行时 resolver 先检查 cwd 中的默认资源，只有缺失时才使用 package fallback，因此本地项目配置仍然拥有最高优先级。Fixture guard 只额外允许 package 自带的 immutable examples，不放宽到任意工作区外文件。
 
 ## Service and deployment boundary
 

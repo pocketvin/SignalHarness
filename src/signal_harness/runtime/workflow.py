@@ -26,6 +26,7 @@ from signal_harness.runtime.permissions import SignalPermissionGuard
 from signal_harness.runtime.tool_executor import SignalToolExecutor
 from signal_harness.runtime.tool_registry import create_signal_tool_registry
 from signal_harness.runtime.tracing import TraceListener, TraceRecorder
+from signal_harness.resources import resolve_config_dir
 from signal_harness.signal.candidates import select_candidates
 from signal_harness.signal.deltas import annotate_release_lineage
 from signal_harness.signal.deduplicator import (
@@ -101,7 +102,7 @@ class SignalHarnessWorkflow:
         trace_listener: TraceListener | None = None,
     ) -> None:
         self.cwd = Path(cwd).expanduser().resolve()
-        self.config_dir = self._resolve(config_dir or "configs")
+        self.config_dir = resolve_config_dir(self.cwd, config_dir or "configs")
         self.project_profile_path = self._resolve(
             project_profile_path or self.config_dir / "project_profile.yaml"
         )

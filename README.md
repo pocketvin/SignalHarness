@@ -460,6 +460,24 @@ uv run signal-harness learning-apply --proposal-id <id> --yes
 
 Learning proposal 不自动应用。高风险 proposal 或 replay gate failed proposal 保持 staged，需要显式 review / approval。
 
+## Wheel / 仓库外运行
+
+`uv build` 生成的 wheel 现在自带默认 `configs/`、Project Catalog、Model Profiles、Watchlists、Regression/Demo fixtures 与 Golden Demo 静态资源。运行时仍然**优先使用当前工作区自己的 `configs/`**；只有默认 `configs` / `examples/signal_harness` 在 cwd 不存在时，才回退到 package 内的只读资源。用户显式传入的其他路径不会被偷偷替换。
+
+因此 wheel 安装后可以离开源码仓库直接运行，例如：
+
+```bash
+uv build
+uv venv /tmp/signalharness-wheel
+uv pip install --python /tmp/signalharness-wheel/bin/python dist/signalharness-0.1.0-py3-none-any.whl
+
+cd /tmp
+/tmp/signalharness-wheel/bin/signal-harness regression-eval --mode mock-agent --enforce
+/tmp/signalharness-wheel/bin/signal-harness project-eval --enforce
+```
+
+Golden Demo 也不再把 40KB 级 HTML/CSS/JS 塞进 Python raw string：`demo.py` 只负责加载页面，实际资源位于 `ui/static/` 并通过 `/demo-assets/*` 提供。这样页面行为仍然保持 dependency-free，但静态资源可以被独立测试、缓存和维护。
+
 ## Docker
 
 ```bash
@@ -488,7 +506,7 @@ mypy --strict
 uv build
 ```
 
-真实 Provider smoke 由本地显式环境变量触发，不把 API Key 放进 Public CI。
+真实 Provider smoke 由本地显式环境变量触发，不把 API Key 放进 Public CI。`pytest` 同时覆盖 Golden Demo HTML/静态资源接线与仓库外默认资源 fallback；实际 Playwright 浏览器验收仍作为本地 release acceptance，避免 Public CI 为浏览器额外引入下载与环境依赖。
 
 ## 核心文件
 
@@ -502,7 +520,9 @@ src/signal_harness/providers/           mock + OpenAI-compatible provider
 src/signal_harness/mcp_server.py        只读 MCP interface
 src/signal_harness/service.py           FastAPI REST/SSE + MCP HTTP
 src/signal_harness/service_streaming.py stream-run / SSE replay manager
-src/signal_harness/ui/demo.py           中英双语 Golden Demo
+src/signal_harness/resources.py         repo-first / packaged-resource fallback
+src/signal_harness/ui/demo.py           Golden Demo HTML loader
+src/signal_harness/ui/static/           Golden Demo HTML / CSS / JS
 src/signal_harness/evals.py             Regression + Provider Contract Eval
 configs/projects/                       Project Catalog entries
 configs/project_profiles/               Additional project profiles

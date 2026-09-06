@@ -39,6 +39,7 @@ from signal_harness.providers.factory import provider_from_env
 from signal_harness.providers.mock_provider import MockProvider
 from signal_harness.projects.catalog import default_project_id, project_option
 from signal_harness.projects.state import prepare_project_state
+from signal_harness.resources import resolve_config_dir, resolve_example_path
 from signal_harness.runtime.permissions import SignalPermissionGuard
 from signal_harness.runtime.tracing import TraceRecorder
 from signal_harness.runtime.workflow import SignalHarnessWorkflow
@@ -301,7 +302,7 @@ def scan(
     """Collect, normalize, assess, trace, and report project signals."""
 
     root = cwd.expanduser().resolve()
-    config = _resolve(root, config_dir)
+    config = resolve_config_dir(root, config_dir)
     selected_project_id = project_id or default_project_id(config)
     try:
         project = project_option(selected_project_id, config)
@@ -339,7 +340,7 @@ def scan(
     async def run_scan() -> Any:
         try:
             return await workflow.scan(
-                fixture=fixture,
+                fixture=resolve_example_path(root, fixture) if fixture is not None else None,
                 since=parse_since(since),
                 max_events=max_events,
                 max_events_per_source=max_events_per_source,
@@ -451,6 +452,8 @@ def model_eval(
     _require_agent_key(mode)
     resolved_output = _resolve(root, output_dir)
     resolved_state = _resolve(root, state_dir)
+    resolved_config = resolve_config_dir(root, config_dir)
+    resolved_fixture = resolve_example_path(root, fixture)
     previous_profile = os.environ.get("LLM_MODEL_PROFILE")
     if profile:
         os.environ["LLM_MODEL_PROFILE"] = profile
@@ -464,14 +467,14 @@ def model_eval(
             )
             workflow = SignalHarnessWorkflow(
                 cwd=root,
-                config_dir=config_dir,
+                config_dir=resolved_config,
                 output_dir=resolved_output,
                 state_dir=run_state,
                 mode=mode,
             )
             result = asyncio.run(
                 workflow.scan(
-                    fixture=_resolve(root, fixture),
+                    fixture=resolved_fixture,
                 )
             )
             assessments.extend(result.assessments)
@@ -524,7 +527,7 @@ def mcp_server(
     root = cwd.expanduser().resolve()
     server = build_mcp_server(
         cwd=root,
-        config_dir=_resolve(root, config_dir),
+        config_dir=resolve_config_dir(root, config_dir),
         output_dir=_resolve(root, output_dir),
         state_dir=_resolve(root, state_dir),
     )
@@ -550,7 +553,7 @@ def serve(
     _load_project_env(root)
     api = create_app(
         cwd=root,
-        config_dir=_resolve(root, config_dir),
+        config_dir=resolve_config_dir(root, config_dir),
         output_dir=_resolve(root, output_dir),
         state_dir=_resolve(root, state_dir),
     )
@@ -593,7 +596,9 @@ def regression_eval(
     root = cwd.expanduser().resolve()
     _require_agent_key(mode)
     resolved_output = _resolve(root, output_dir)
-    suite = load_regression_suite(_resolve(root, expectations))
+    suite = load_regression_suite(resolve_example_path(root, expectations))
+    resolved_config = resolve_config_dir(root, config_dir)
+    resolved_fixture = resolve_example_path(root, fixture)
     temporary_state = (
         TemporaryDirectory(prefix="signalharness-regression-") if state_dir is None else None
     )
@@ -605,12 +610,12 @@ def regression_eval(
         )
         workflow = SignalHarnessWorkflow(
             cwd=root,
-            config_dir=config_dir,
+            config_dir=resolved_config,
             output_dir=resolved_output,
             state_dir=resolved_state,
             mode=mode,
         )
-        result = asyncio.run(workflow.scan(fixture=_resolve(root, fixture)))
+        result = asyncio.run(workflow.scan(fixture=resolved_fixture))
     finally:
         if temporary_state is not None:
             temporary_state.cleanup()
@@ -643,8 +648,8 @@ def project_eval(
 
     root = cwd.expanduser().resolve()
     summary = evaluate_project_context_suite(
-        _resolve(root, suite),
-        config_dir=_resolve(root, config_dir),
+        resolve_example_path(root, suite),
+        config_dir=resolve_config_dir(root, config_dir),
     )
     typer.echo(
         f"Project context eval: {'PASS' if summary.passed else 'FAIL'}; "
@@ -678,11 +683,11 @@ def feedback(
     known_ids = {item.event_id for item in signals} | {item.event_id for item in assessments}
     if signal_id not in known_ids and label is not FeedbackLabel.MISSED_SIGNAL:
         raise typer.BadParameter(f"Unknown signal ID: {signal_id}")
-    policy = load_signal_policy(_resolve(root, config_dir) / "signal_policy.yaml")
+    policy = load_signal_policy(resolve_config_dir(root, config_dir) / "signal_policy.yaml")
     guard = SignalPermissionGuard(policy)
     guard.require("save_feedback")
     guard.require("save_policy_proposal")
-    config = _resolve(root, config_dir)
+    config = resolve_config_dir(root, config_dir)
     selected_project_id = project_id or default_project_id(config)
     try:
         project = project_option(selected_project_id, config)
@@ -728,7 +733,7 @@ def calibrate(
     """Analyze feedback and propose, optionally approve, a policy update."""
 
     root = cwd.expanduser().resolve()
-    config = _resolve(root, config_dir)
+    config = resolve_config_dir(root, config_dir)
     selected_project_id = project_id or default_project_id(config)
     try:
         project = project_option(selected_project_id, config)
@@ -890,7 +895,7 @@ def learning_apply(
     try:
         path = apply_staged_learning(
             state_dir=_resolve(root, state_dir),
-            config_dir=_resolve(root, config_dir),
+            config_dir=resolve_config_dir(root, config_dir),
             proposal_id=proposal_id,
             yes=yes,
         )
