@@ -25,7 +25,7 @@ from signal_harness.runtime.cache import SourceFetchCache
 from signal_harness.runtime.permissions import SignalPermissionGuard
 from signal_harness.runtime.tool_executor import SignalToolExecutor
 from signal_harness.runtime.tool_registry import create_signal_tool_registry
-from signal_harness.runtime.tracing import TraceRecorder
+from signal_harness.runtime.tracing import TraceListener, TraceRecorder
 from signal_harness.signal.deduplicator import (
     deduplicate_events,
     load_seen_hashes,
@@ -93,6 +93,7 @@ class SignalHarnessWorkflow:
         mode: RunMode | str = RunMode.DEMO,
         provider: AgentProvider | None = None,
         agent_loop_limits: AgentLoopLimits | None = None,
+        trace_listener: TraceListener | None = None,
     ) -> None:
         self.cwd = Path(cwd).expanduser().resolve()
         self.config_dir = self._resolve(config_dir or "configs")
@@ -102,7 +103,7 @@ class SignalHarnessWorkflow:
         self.provider = provider
         self.agent_loop_limits = agent_loop_limits
         self.source_cache = SourceFetchCache(self.state_dir / "cache")
-        self.trace = TraceRecorder()
+        self.trace = TraceRecorder(trace_listener)
         self.executor = SignalToolExecutor(
             create_signal_tool_registry(),
             cwd=self.cwd,

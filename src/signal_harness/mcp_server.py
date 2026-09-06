@@ -15,6 +15,14 @@ from signal_harness.memory import FeedbackMemory, ProjectMemory, SignalMemory
 from signal_harness.runtime.permissions import SignalPermissionGuard
 from signal_harness.signal.policy import load_signal_policy
 
+MCP_TOOL_NAMES = (
+    "signalharness_get_project_context",
+    "signalharness_search_signal_history",
+    "signalharness_get_latest_assessments",
+    "signalharness_get_run_trace",
+    "signalharness_get_feedback_memory",
+)
+
 _RUN_ID = re.compile(r"^run-[A-Za-z0-9_-]{1,64}$")
 _READ_ONLY = ToolAnnotations(
     read_only_hint=True,

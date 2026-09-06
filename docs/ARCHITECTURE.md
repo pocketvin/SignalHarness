@@ -1,6 +1,6 @@
 # SignalHarness Architecture
 
-SignalHarness 是一个 project-centric signal intelligence Agent Harness。它把外部变化源转成可审计的 assessment、digest、dashboard、trace 和 review-only learning proposal，并通过 CLI、REST 与只读 MCP 暴露同一套 domain/runtime 能力。
+SignalHarness 是一个 project-centric signal intelligence Agent Harness。它把外部变化源转成可审计的 assessment、digest、dashboard、trace 和 review-only learning proposal，并通过 CLI、REST、SSE Golden Demo 与只读 MCP 暴露同一套 domain/runtime 能力。
 
 ## Workflow flowchart
 
@@ -23,6 +23,7 @@ flowchart TD
     K --> P["Review-only Learning"]
     K --> R["Regression / Provider Eval"]
     K --> S["CLI / REST / MCP"]
+    O --> T["Trace Event Sink / SSE / Golden Demo"]
 
     Q["Python Runtime<br/>schema validation / permissions / scoring / fallback / file writes"] -. guards .-> F
     Q -. guards .-> G
@@ -108,7 +109,13 @@ sequenceDiagram
   五个结构化只读 MCP tools；读取 project context、signal history、assessment、trace 和 feedback，且不能绕过 permission policy。
 
 - `src/signal_harness/service.py`
-  FastAPI REST + MCP Streamable HTTP 服务层；每次 run 隔离 output/state，复用同一 Workflow。
+  FastAPI REST + SSE + MCP Streamable HTTP 服务层；每次 run 隔离 output/state，复用同一 Workflow。
+
+- `src/signal_harness/service_streaming.py`
+  in-process stream-run manager：首个 SSE subscriber 启动 queued workflow，保留 event-id 历史用于重连回放；断开浏览器不取消 run。
+
+- `src/signal_harness/ui/demo.py`
+  FastAPI 直接托管的 Golden Demo 单页。UI 只消费真实 trace append/update 事件，不维护假的 Agent 执行状态。
 
 - `src/signal_harness/ui/dashboard.py`  
   静态本地 dashboard writer。展示 summary、signals、source/tool health、model/profile/limits、trace、token/cost/latency、score breakdown、learning。
@@ -131,6 +138,6 @@ SignalHarness 把“模型是否稳定”和“产品行为是否正确”拆成
 
 ## Service and deployment boundary
 
-`signal-harness serve` 启动 FastAPI，提供 health、run、trace、signals、feedback REST endpoints，并挂载 `/mcp` Streamable HTTP。`signal-harness mcp` 提供 stdio MCP。服务 MVP 在请求内同步完成 scan，不伪装成未实现的队列/worker。Docker 镜像运行相同入口并包含 `/health` healthcheck。
+`signal-harness serve` 启动 FastAPI，提供 health、同步 run、trace、assessment、signals、feedback，以及 `/demo` Golden Demo；`/stream-runs/{id}/events` 使用 SSE 推送同一 `TraceRecorder` 的真实 append/update。原 `POST /runs` 仍同步；stream-run 是进程内 asyncio task，不是持久化队列。首个 SSE subscriber 才启动 queued run，断线后任务继续，`Last-Event-ID` 可补发内存事件历史。服务重启后 live subscription history 不恢复。Docker 镜像运行相同入口并包含 `/health` healthcheck。
 
 MCP 是只读第二入口，不是新的副作用平面。所有可写行为仍由原有 Workflow、permission guard 和 learning gate 控制。

@@ -1,0 +1,12 @@
+{
+  "suite": "resume-v1",
+  "case_count": 40,
+  "passed": true,
+  "decision_accuracy": 1.0,
+  "category_accuracy": 1.0,
+  "priority_precision": 1.0,
+  "priority_recall": 1.0,
+  "false_positive_rate": 0.0,
+  "false_negative_rate": 0.0,
+  "evidence": "Committed resume-v1 regression evidence; CI re-runs regression-eval --enforce on every push."
+}

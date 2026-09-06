@@ -19,6 +19,7 @@ Run with:
 uv run signal-harness scan --mode demo|mock-agent|agent
 uv run signal-harness trace
 uv run signal-harness calibrate --mode mock-agent
+uv run signal-harness serve --host 127.0.0.1 --port 8000  # /demo + REST/SSE + /mcp
 ```
 
 Rules:

@@ -83,7 +83,9 @@ audit default, not evidence that the skipped downstream Agent ran.
 
 ## Operational and service layer
 
-The CLI remains the simplest one-shot execution surface, but SignalHarness now also exposes a thin FastAPI service and MCP. `signal-harness serve` provides health/run/trace/signal/feedback REST endpoints plus `/mcp` Streamable HTTP; `signal-harness mcp` provides stdio MCP. Every service run gets isolated output/state directories and still calls the same Workflow. The MVP deliberately executes scans inside the request rather than claiming an unimplemented distributed queue.
+The CLI remains the simplest one-shot execution surface. `signal-harness serve` adds three interfaces over the same Workflow: synchronous REST, a Golden Demo backed by Server-Sent Events, and `/mcp` Streamable HTTP; `signal-harness mcp` provides stdio MCP. Every service run gets isolated output/state directories.
+
+The original `POST /runs` stays synchronous. `POST /stream-runs` creates an in-process queued run; the first SSE subscriber starts the workflow, so `/stream-runs/{id}/events` delivers real TraceRecorder append/update events rather than a finished-run animation. Event IDs support reconnect replay, and disconnecting the browser does not cancel the task. The replay buffer is intentionally memory-only and is not described as a durable queue or distributed worker system.
 
 The MCP surface is read-only and exposes project context, signal history, assessments, trace, and feedback. It does not create a second write/permission path. Docker runs the same service entry point and has a `/health` healthcheck. Scheduled execution remains external to the core process.
 
@@ -169,4 +171,4 @@ The optional agent-mode adapter targets structured JSON responses through
 `LLM_API_KEY`, `LLM_MODEL`, `LLM_MODEL_PROFILE`, and optional `LLM_BASE_URL`.
 Evidence Agents receive collected primary-source context and can declare tool
 requests, but broad live search is not enabled in the restricted SignalHarness
-tool registry. Source clustering is rule-based rather than semantic. REST has no production auth/multi-tenancy or distributed job queue. Proposals are deliberately review-only. The project does not claim provider-native function calling, fully autonomous self-evolution, horizontal production scale, or a fully conversational multi-Agent debate runtime.
+tool registry. Source clustering is rule-based rather than semantic. REST/SSE has no production auth/multi-tenancy or durable distributed job queue; live SSE replay state is lost on service restart. Proposals are deliberately review-only. The project does not claim provider-native function calling, fully autonomous self-evolution, horizontal production scale, or a fully conversational multi-Agent debate runtime.

@@ -48,13 +48,22 @@ SignalHarness 可以从三个角度讲。
 
 ## 现场 Demo 推荐顺序
 
-1. `uv run signal-harness regression-eval --mode mock-agent --enforce`：先展示 40-case gate 和 confusion/FPR/FNR。
-2. `uv run signal-harness scan --fixture examples/signal_harness/sample_events.json --mode mock-agent` + `trace`：展示五 Agent、工具请求、permission、fallback/usage 字段。
-3. `uv run signal-harness serve --host 127.0.0.1 --port 8000`：展示 `/health`、`POST /runs`、trace/signal API。
-4. 用 MCP Client 连接 `/mcp` 或 `signal-harness mcp`：展示五个 read-only structured tools。
-5. 最后说明 Docker 跑的是同一个 service entry point，不是另外一套 demo。
+先启动：
 
-如果时间只有 2-3 分钟，优先展示 regression gate + trace；API/MCP 用架构图解释即可。
+```bash
+uv run signal-harness serve --host 127.0.0.1 --port 8000
+```
+
+浏览器打开 `http://127.0.0.1:8000/demo`。
+
+1. 先指顶部 40-case regression evidence 和 5 个 read-only MCP tools，说明这是当前 committed/CI evidence，不是通用 LLM benchmark。
+2. 点击 **Run Golden Demo**。stream-run 在 SSE 连接建立后才启动，因此五 Agent、Tool Guard、Trace 的变化来自真实 runtime event，不是前端定时器。
+3. 点击 `ContextEvidenceAgent`，展示 schema valid、requested/executed tools、permission checks、fallback/retry。
+4. 看右侧 Final decisions，解释 LLM 提供 semantics，但 Python owns the final score/decision。
+5. 下拉到 Live trace ledger，说明同一份 TraceRecorder 同时写审计 JSON 和推 SSE；断线后 workflow 继续，浏览器可用 `Last-Event-ID` 补事件。
+6. 最后说明 `/mcp`、同步 REST 和 Docker 都复用同一 Workflow；SSE 是 in-process observability/demo layer，不冒充 Redis/Celery durable queue。
+
+如果时间只有 2-3 分钟，只展示 `/demo` 的一次 mock-agent run + Evidence Tool Guard + Final decisions。终端 regression command 作为追问时的第二证据。
 
 ## 面试官可能追问
 

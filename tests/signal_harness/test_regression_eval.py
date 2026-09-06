@@ -53,3 +53,21 @@ def test_resume_regression_suite_passes_full_mock_agent_gate(
     assert summary["false_negative_rate"] == 0.0
     assert summary["passed"] is True
     assert summary["mismatches"] == []
+
+    baseline = json.loads(
+        (project_root / "examples/signal_harness/regression_baseline.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert baseline["suite"] == summary["suite"]
+    assert baseline["case_count"] == summary["case_count"]
+    for key in (
+        "decision_accuracy",
+        "category_accuracy",
+        "priority_precision",
+        "priority_recall",
+        "false_positive_rate",
+        "false_negative_rate",
+        "passed",
+    ):
+        assert baseline[key] == summary[key]

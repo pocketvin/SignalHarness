@@ -16,7 +16,7 @@ SignalHarness watches external engineering changes, decides whether they matter 
 | Eval | 40-case labelled Agent regression suite + multi-provider contract eval |
 | Observability | Local trace for Agent calls, schema/retry/fallback, tools, latency, provider-reported tokens, and estimated cost |
 | MCP | Five read-only structured tools for project context, signal history, assessments, trace, and feedback |
-| Service | FastAPI REST API plus MCP Streamable HTTP transport |
+| Service | FastAPI REST API + replayable SSE streaming runs + MCP Streamable HTTP |
 | Deployment | Docker image with health check; package/CLI remains usable without a server |
 | Learning | Review-only proposals → risk classification → replay gate → explicit human apply |
 
@@ -71,7 +71,7 @@ flowchart LR
     Learning[LearningPolicyAgent]
     Guard[Python constraint plane]
     Output[Assessment / Trace / Dashboard / Digest]
-    Interfaces[CLI / REST / MCP]
+    Interfaces[CLI / REST / SSE Demo / MCP]
 
     Sources --> Collect --> Supervisor --> Evidence --> Impact --> Action --> Learning --> Output
     Evidence --> Tools --> Evidence
@@ -180,6 +180,18 @@ Available tools:
 
 Each tool returns structured content, is annotated read-only/idempotent/closed-world, validates service run IDs, and passes through SignalHarness permission policy.
 
+## Golden Demo UI + SSE
+
+Start the same service and open `http://127.0.0.1:8000/demo`:
+
+```bash
+uv run signal-harness serve --host 127.0.0.1 --port 8000
+```
+
+The Golden Demo is dependency-free HTML/CSS/JS served by FastAPI. Clicking **Run Golden Demo** creates a queued stream run; the workflow starts only after the browser establishes the SSE subscription, so the page consumes live runtime events rather than replaying a finished animation. `TraceRecorder` append/update events feed an in-process replay buffer, and browser reconnects can resume with `Last-Event-ID`. Disconnecting the browser does not cancel the workflow.
+
+The UI shows the five Agent stages, Python tool guard, schema/fallback/retry state, tool requests/execution/permission checks, final decisions, runtime health, the committed 40-case regression evidence, and the five read-only MCP tools. The stream is intentionally in-process: it is not a durable queue or distributed worker system.
+
 ## REST API + MCP HTTP
 
 ```bash
@@ -193,8 +205,14 @@ GET  /health
 POST /runs
 GET  /runs/{run_id}
 GET  /runs/{run_id}/trace
+GET  /runs/{run_id}/assessments
 GET  /signals?run_id=...
 POST /feedback
+POST /stream-runs
+GET  /stream-runs/{run_id}
+GET  /stream-runs/{run_id}/events
+GET  /demo
+GET  /demo/meta
 ```
 
 MCP Streamable HTTP is mounted at:
@@ -203,7 +221,7 @@ MCP Streamable HTTP is mounted at:
 /mcp
 ```
 
-Each API run gets isolated output/state directories under `service-runs/<run_id>`. The service intentionally executes a scan inside the request for this MVP; it does not pretend to have a queue or distributed worker that is not implemented.
+Each API run gets isolated output/state directories under `service-runs/<run_id>`. The original `POST /runs` remains synchronous. Streaming demo runs are in-process asyncio tasks started by the first SSE subscriber; they continue if the browser disconnects, but live subscription history is not durable across a service restart. No Redis/Celery/worker tier is claimed.
 
 ## Docker
 
@@ -234,7 +252,7 @@ uv run signal-harness trace
 uv run signal-harness dashboard
 ```
 
-The static dashboard surfaces runtime health without requiring a hosted observability product.
+The static dashboard surfaces runtime health without requiring a hosted observability product. The Golden Demo consumes the same observable trace through SSE, so UI state is derived from runtime evidence instead of a separate simulated Agent state machine.
 
 ## Feedback and guarded learning
 
@@ -275,9 +293,10 @@ src/signal_harness/runtime/             workflow, permissions, registry, executo
 src/signal_harness/signal/              schemas, scoring, taxonomy, text semantics
 src/signal_harness/providers/           mock + OpenAI-compatible providers/model profiles
 src/signal_harness/mcp_server.py        read-only MCP interface
-src/signal_harness/service.py           FastAPI + MCP HTTP service
+src/signal_harness/service.py           FastAPI REST/SSE + MCP HTTP service
+src/signal_harness/service_streaming.py in-process stream-run/SSE replay manager
 src/signal_harness/evals.py             model and regression evaluation
-src/signal_harness/ui/                  dashboard/digest/trace views
+src/signal_harness/ui/                  Golden Demo + dashboard/digest/trace views
 configs/                                project, policy, watchlist, model profiles
 examples/signal_harness/                demo and regression fixtures
 tests/signal_harness/                   unit/integration/regression coverage
@@ -294,7 +313,8 @@ SignalHarness is maintained as its own project and the current package does not 
 - no provider-native tool execution that can bypass Python controls;
 - no autonomous high-risk policy mutation;
 - no claim that the 40-case regression fixture is a general LLM benchmark;
-- no claim that static dashboard/API service equals a horizontally scaled production platform.
+- no claim that static dashboard/API/SSE service equals a horizontally scaled production platform;
+- no claim that the in-process SSE replay buffer is a durable job queue.
 
 ## Interview material
 
