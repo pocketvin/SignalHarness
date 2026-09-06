@@ -57,7 +57,14 @@ def test_trace_recorder_notifies_append_and_update() -> None:
     ]
 
 
-def test_demo_page_and_metadata(project_root: Path, tmp_path: Path) -> None:
+def test_demo_page_and_metadata(
+    project_root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("LLM_MODEL_PROFILE", raising=False)
     app = create_app(
         cwd=project_root,
         output_dir=tmp_path / "outputs",
@@ -68,7 +75,9 @@ def test_demo_page_and_metadata(project_root: Path, tmp_path: Path) -> None:
         assert page.status_code == 200
         assert "SignalHarness Flight Deck" in page.text
         assert "看 SignalHarness 如何一步一步做出决策" in page.text
-        assert "离线五 Agent 演示（推荐）" in page.text
+        assert "离线五 Agent 演示" in page.text
+        assert "面试演示建议" not in page.text
+        assert "interview demos" not in page.text
         assert "中文" in page.text
         assert "new EventSource" in page.text
         assert "live runtime evidence, not a simulated animation" in page.text

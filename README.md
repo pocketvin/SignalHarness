@@ -64,7 +64,7 @@ flowchart LR
 
 核心边界：**Agent 负责语义推理；Python constraint plane 负责可验证规则和外部副作用。**
 
-## Golden Demo：最推荐的面试入口
+## Golden Demo：实时运行入口
 
 启动服务：
 
@@ -80,10 +80,10 @@ uv run signal-harness serve \
 http://127.0.0.1:8001/demo
 ```
 
-页面默认是**中文**，右上角可切换 `EN`。推荐面试时使用：
+页面默认是**中文**，右上角可切换 `EN`。默认运行模式是：
 
 ```text
-离线五 Agent 演示（推荐） / mock-agent
+离线五 Agent 演示 / mock-agent
 ```
 
 它不需要 API Key，但仍然走真实五 Agent orchestration、Schema、Tool Guard、Trace、SSE 和 Python scoring，因此适合稳定展示真实 Harness 行为。
@@ -145,7 +145,7 @@ SSE
 
 ## 三种运行模式
 
-### 1. `mock-agent`：离线五 Agent 演示（推荐）
+### 1. `mock-agent`：离线五 Agent 演示
 
 ```bash
 uv run signal-harness scan \
@@ -173,9 +173,9 @@ LLM_API_KEY=... uv run signal-harness scan \
   --mode agent
 ```
 
-Golden Demo 会先检查**非敏感配置状态**。如果没有配置 `LLM_API_KEY` 或 Model Profile，无需先启动一次失败 Run，页面会直接提示“真实模型未配置”，并推荐使用离线五 Agent 模式。
+`signal-harness serve` 启动时会自动读取项目根目录的 `.env`，但不会覆盖已经显式 export 的环境变量。Golden Demo 会先检查**非敏感配置状态**；如果缺少 `LLM_API_KEY` 或 Model Profile，页面会直接提示“真实模型未配置”。
 
-页面不会暴露 API Key 或 Base URL；“已配置”也只表示本地配置完整，真实网络连接仍在 Run 时验证。
+页面不会暴露 API Key、Base URL 或本地配置路径；“已配置”也只表示本地配置完整，真实网络连接仍在 Run 时验证。`.env` 已被 Git 和 Docker build context 排除。
 
 ## 五个 Agent 分别做什么
 
@@ -479,7 +479,7 @@ SignalHarness 当前 package 不 vendor、也不 import OpenHarness runtime code
 
 准确表述是：**借鉴现代 Agent Harness 模式，并围绕 Signal Intelligence 场景进行了实质性重构和独立实现。** 不声称项目从历史上完全没有 upstream 来源。
 
-## 面试与技术文档
+## 技术与项目文档
 
 - `docs/ARCHITECTURE.md`
 - `docs/EVALS.md`
@@ -491,4 +491,4 @@ SignalHarness 当前 package 不 vendor、也不 import OpenHarness runtime code
 - `docs/PROJECT_STAR.md`
 - `docs/RESUME_GUIDE.md`
 
-如果是面试现场，推荐顺序：**Golden Demo → 40-case Eval → Trace/Tool Guard → MCP → 架构边界**。
+建议从 **Golden Demo → 40-case Eval → Trace/Tool Guard → MCP → 架构边界** 依次理解项目。

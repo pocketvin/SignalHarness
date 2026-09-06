@@ -191,11 +191,11 @@ Start the same service and open `http://127.0.0.1:8000/demo`:
 uv run signal-harness serve --host 127.0.0.1 --port 8000
 ```
 
-The Golden Demo is dependency-free HTML/CSS/JS served by FastAPI. It opens in **Chinese by default** and can switch to English in place. For interviews, `mock-agent` is the recommended default because it requires no API key while still exercising the real five-Agent orchestration, schemas, tool guard, trace, SSE, and Python scoring.
+The Golden Demo is dependency-free HTML/CSS/JS served by FastAPI. It opens in **Chinese by default** and can switch to English in place. `mock-agent` is the default demo path because it requires no API key while still exercising the real five-Agent orchestration, schemas, tool guard, trace, SSE, and Python scoring.
 
 Clicking **Run Golden Demo** creates a queued stream run; the workflow starts only after the browser establishes the SSE subscription, so the page consumes live runtime events rather than replaying a finished animation. `TraceRecorder` append/update events feed an in-process replay buffer, and browser reconnects can resume with `Last-Event-ID`. Disconnecting the browser does not cancel the workflow.
 
-The UI shows the five Agent stages, Python tool guard, schema/fallback/retry state, tool requests/execution/permission checks, final decisions, runtime health, the committed 40-case regression evidence, and the five read-only MCP tools. Real `agent` mode is enabled only when the local provider configuration is complete. `/demo/meta` exposes non-secret readiness metadata only; it never returns the API key or base URL, and readiness does not claim network connectivity before a run. The stream is intentionally in-process: it is not a durable queue or distributed worker system.
+The UI shows the five Agent stages, Python tool guard, schema/fallback/retry state, tool requests/execution/permission checks, final decisions, runtime health, the committed 40-case regression evidence, and the five read-only MCP tools. `signal-harness serve` automatically loads an optional project-root `.env` without overriding variables already exported by the caller. Real `agent` mode is enabled only when the local provider configuration is complete. `/demo/meta` exposes non-secret readiness metadata only; it never returns API keys, base URLs, or local config paths, and readiness does not claim network connectivity before a run. `.env` is excluded from Git and the Docker build context. The stream is intentionally in-process: it is not a durable queue or distributed worker system.
 
 ## REST API + MCP HTTP
 

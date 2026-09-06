@@ -17,7 +17,7 @@ from signal_harness.agent_integration.schemas import (
     SupervisorOutput,
 )
 from signal_harness.agent_team.signal_supervisor import SignalSupervisorAgent
-from signal_harness.cli import app
+from signal_harness.cli import _load_project_env, app
 from signal_harness.memory import (
     FeedbackMemory,
     PolicyMemory,
@@ -59,6 +59,25 @@ def _workflow(
         mode=RunMode.MOCK_AGENT,
         provider=provider,
     )
+
+
+def test_project_env_loader_reads_dotenv_without_overriding_explicit_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".env").write_text(
+        "LLM_API_KEY=from-dotenv\nLLM_PROVIDER=openai_compatible\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+
+    assert _load_project_env(tmp_path) is True
+    assert __import__("os").environ["LLM_API_KEY"] == "from-dotenv"
+
+    monkeypatch.setenv("LLM_API_KEY", "explicit-value")
+    assert _load_project_env(tmp_path) is True
+    assert __import__("os").environ["LLM_API_KEY"] == "explicit-value"
 
 
 def test_demo_mode_needs_no_llm_key(

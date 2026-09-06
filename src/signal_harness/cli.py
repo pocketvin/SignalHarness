@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import typer
+from dotenv import load_dotenv
 
 from signal_harness.utils.fs import atomic_write_text
 from signal_harness.agent_integration.mode import RunMode
@@ -67,6 +68,15 @@ app = typer.Typer(
 
 def _resolve(root: Path, value: Path) -> Path:
     return value.expanduser().resolve() if value.is_absolute() else (root / value).resolve()
+
+
+def _load_project_env(root: Path) -> bool:
+    """Load an optional project .env without overriding explicit process env."""
+
+    env_path = root / ".env"
+    if not env_path.is_file():
+        return False
+    return bool(load_dotenv(env_path, override=False))
 
 
 def _load_outputs(output_dir: Path) -> tuple[list[SignalEvent], list[SignalAssessment]]:
@@ -502,6 +512,7 @@ def serve(
     from signal_harness.service import create_app
 
     root = cwd.expanduser().resolve()
+    _load_project_env(root)
     api = create_app(
         cwd=root,
         config_dir=_resolve(root, config_dir),
