@@ -24,7 +24,7 @@ Python runtime 是安全边界：它负责 schema validation、permission guard�
 
 如果 fallback 出现，SignalHarness 会明确展示，而不是隐藏。因为这类系统真正重要的是 auditability：面试时我会强调 fallback 不是“失败要掩盖”，而是系统在模型不稳定时仍能给出可追踪、保守、安全的审计输出。Learning 也是 review-only，不会自动改配置，因为高风险配置变更必须有人审查。
 
-最近 v4 live OpenAI showcase 的结果是：collected signals 12，alerts 0，action_required 0，save 3，ignore 9，fallback_count 0，schema_failures 0，tool_error_count 0。有一个 RSS source failure 被 Source health 诚实展示。这说明系统不是把所有外部信息都升级成告警，而是把普通信息保留为 observed signals，把真正高风险 signal 才推高。
+我现在会优先展示 regression evidence：`resume-v1` 有 40 个标签 case，当前 offline mock-agent contract gate 是 decision/category 40/40，priority precision/recall 都是 100%，FPR/FNR 都是 0%。第一版 baseline 只有 75% decision accuracy、28.57% priority recall，回归集真实暴露了 category 权重重复、mock context 漏接和否定语义误判，修复后才达到当前结果。这个数字只代表 SignalHarness 项目 contract，不包装成通用 LLM benchmark。
 
 ## 5 分钟版本
 
@@ -43,7 +43,18 @@ SignalHarness 可以从三个角度讲。
 - LLM 不能决定最终分数；最终 score 由 deterministic base、semantic relevance、evidence confidence 和 policy multiplier 组合。
 - Learning proposal 不能自动 apply；必须 review，且高风险或 replay gate failed 的 proposal 不会自动生效。
 
-v4 live showcase 可以这么讲：本轮 collected signals 12，alerts 0，action_required 0，save 3，ignore 9。fallback_count=0、schema_failures=0、tool_error_count=0，说明 real OpenAI path 在这轮是稳定的。有一个 RSS source failure，dashboard 没有隐藏，而是在 Source health 里展示。这就是我想展示的工程态度：Agent 系统应该诚实暴露不确定性，而不是把失败藏在漂亮页面后面。
+工程证据可以分三层讲：第一层是 40-case regression gate，验证产品决策；第二层是 model-eval，验证 provider schema/retry/fallback/tool/latency/token/cost contract；第三层是 service/MCP/Docker，证明 Harness 能作为真实接口被外部 Agent 或服务调用。历史 live provider 结果仍可以作为 dated snapshot 展示，但不会把一次 live run 当成长期质量证明。
+
+
+## 现场 Demo 推荐顺序
+
+1. `uv run signal-harness regression-eval --mode mock-agent --enforce`：先展示 40-case gate 和 confusion/FPR/FNR。
+2. `uv run signal-harness scan --fixture examples/signal_harness/sample_events.json --mode mock-agent` + `trace`：展示五 Agent、工具请求、permission、fallback/usage 字段。
+3. `uv run signal-harness serve --host 127.0.0.1 --port 8000`：展示 `/health`、`POST /runs`、trace/signal API。
+4. 用 MCP Client 连接 `/mcp` 或 `signal-harness mcp`：展示五个 read-only structured tools。
+5. 最后说明 Docker 跑的是同一个 service entry point，不是另外一套 demo。
+
+如果时间只有 2-3 分钟，优先展示 regression gate + trace；API/MCP 用架构图解释即可。
 
 ## 面试官可能追问
 

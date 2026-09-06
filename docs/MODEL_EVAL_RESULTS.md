@@ -35,6 +35,8 @@ The summary includes:
 - tool plan valid rate, blocked tools, budget blocks, and tool errors;
 - decision counts, action-required count, and alert count;
 - average LLM latency;
+- provider-reported prompt/completion/total tokens when available;
+- estimated cost when the selected model profile has pricing metadata;
 - repair requested, executed, blocked, and fallback counts.
 
 ## Reading the result
@@ -50,6 +52,10 @@ SignalHarness constraints:
 
 Because the summary is local and deterministic around the Harness, no Langfuse,
 Ragas, hosted dashboard, Redis, Postgres, or vector database is required.
+
+## Relationship to regression eval
+
+`model-eval` is the provider/Harness contract layer. Product decision correctness is evaluated separately by `signal-harness regression-eval --enforce` against the 40-case labelled `resume-v1` corpus. See `docs/EVALS.md`.
 
 ## Boundary
 

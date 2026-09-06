@@ -237,3 +237,43 @@ def test_model_eval_summary_classifies_provider_errors() -> None:
         "json_parse_error": 1,
         "rate_limited": 1,
     }
+
+
+def test_model_eval_summary_aggregates_token_and_cost_observability() -> None:
+    summary = build_model_eval_summary(
+        assessments=[],
+        trace=[
+            TraceStep(
+                step="llm_agent_call",
+                status="success",
+                duration_ms=25,
+                prompt_tokens=100,
+                completion_tokens=40,
+                total_tokens=140,
+                estimated_cost_usd=0.000039,
+                usage_source="provider_reported_with_profile_pricing",
+            ),
+            TraceStep(
+                step="llm_agent_call",
+                status="success",
+                duration_ms=35,
+                prompt_tokens=120,
+                completion_tokens=60,
+                total_tokens=180,
+                estimated_cost_usd=0.000054,
+                usage_source="provider_reported_with_profile_pricing",
+            ),
+        ],
+        runs=1,
+        provider="openai-compatible",
+        model="test-model",
+        model_profile="test-profile",
+    )
+
+    assert summary.prompt_tokens == 220
+    assert summary.completion_tokens == 100
+    assert summary.total_tokens == 320
+    assert summary.estimated_cost_usd == 0.000093
+    assert summary.usage_reported_call_count == 2
+    assert summary.average_tokens_per_llm_call == 160.0
+    assert summary.average_latency_ms == 30.0

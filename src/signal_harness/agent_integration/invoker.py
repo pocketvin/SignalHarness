@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from signal_harness.agent_integration.mode import RunMode
 from signal_harness.agent_integration.schemas import LearningPolicyOutput
 from signal_harness.agent_integration.trace import append_llm_trace
-from signal_harness.providers.adapter import AgentCall, AgentProvider
+from signal_harness.providers.adapter import AgentCall, AgentProvider, ProviderUsage
 from signal_harness.runtime.tracing import TraceRecorder
 
 OutputT = TypeVar("OutputT", bound=BaseModel)
@@ -61,6 +61,7 @@ class AgentInvoker:
         error: str | None = None
         schema_error: str | None = None
         retry_count = 0
+        usage_before = _provider_usage_snapshot(self.provider)
 
         def parse_response(response: str) -> OutputT:
             return output_model.model_validate(_json_object(response))
@@ -114,6 +115,7 @@ class AgentInvoker:
                     fallback_used = True
                     output = fallback()
         duration_ms = max(0, round((time.perf_counter() - started) * 1000))
+        usage = _provider_usage_snapshot(self.provider).delta(usage_before)
         source_types, requested, executed, tool_errors = _trace_tools(output)
         index = append_llm_trace(
             self.trace,
@@ -133,6 +135,7 @@ class AgentInvoker:
             retry_count=retry_count,
             schema_error=schema_error,
             error=error,
+            usage=usage,
         )
         return output, index
 
@@ -197,3 +200,11 @@ def _trace_tools(output: BaseModel) -> tuple[list[str], list[str], list[str], li
         list(dict.fromkeys(executed)),
         list(dict.fromkeys(errors)),
     )
+
+
+def _provider_usage_snapshot(provider: AgentProvider) -> ProviderUsage:
+    snapshot = getattr(provider, "usage_snapshot", None)
+    if not callable(snapshot):
+        return ProviderUsage()
+    value = snapshot()
+    return value if isinstance(value, ProviderUsage) else ProviderUsage()

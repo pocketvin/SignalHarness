@@ -1,0 +1,14 @@
+.git
+.github
+.venv
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.signal-harness
+outputs
+dist
+build
+.env
+__pycache__
+*.pyc
+.DS_Store

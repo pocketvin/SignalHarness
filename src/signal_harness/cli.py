@@ -16,7 +16,13 @@ from signal_harness.agent_integration.mode import RunMode
 from signal_harness.agent_integration.runner import LLMAgentTeamRunner
 from signal_harness.agent_integration.schemas import LearningPolicyOutput, ReplayEvaluation
 from signal_harness.agent_team.learning_policy import LearningPolicyAgent
-from signal_harness.evals import build_model_eval_summary, write_model_eval_summary
+from signal_harness.evals import (
+    build_model_eval_summary,
+    evaluate_regression_suite,
+    load_regression_suite,
+    write_model_eval_summary,
+    write_regression_eval_summary,
+)
 from signal_harness.memory import FeedbackMemory, MemoryBundle
 from signal_harness.memory.replay import evaluate_policy_replay
 from signal_harness.learning import (
@@ -457,6 +463,110 @@ def model_eval(
     paths = write_model_eval_summary(resolved_output, summary)
     typer.echo(f"Model eval JSON: {paths['json']}")
     typer.echo(f"Model eval Markdown: {paths['markdown']}")
+
+
+@app.command("mcp")
+def mcp_server(
+    cwd: Path = typer.Option(Path.cwd(), "--cwd", hidden=True),
+    config_dir: Path = typer.Option(Path("configs"), "--config-dir"),
+    output_dir: Path = typer.Option(Path("outputs"), "--output-dir"),
+    state_dir: Path = typer.Option(Path(".signal-harness"), "--state-dir"),
+) -> None:
+    """Serve SignalHarness read-only context and traces over MCP stdio."""
+
+    from signal_harness.mcp_server import build_mcp_server
+
+    root = cwd.expanduser().resolve()
+    server = build_mcp_server(
+        cwd=root,
+        config_dir=_resolve(root, config_dir),
+        output_dir=_resolve(root, output_dir),
+        state_dir=_resolve(root, state_dir),
+    )
+    server.run(transport="stdio")
+
+
+@app.command()
+def serve(
+    host: str = typer.Option("127.0.0.1", "--host"),
+    port: int = typer.Option(8000, "--port", min=1, max=65535),
+    cwd: Path = typer.Option(Path.cwd(), "--cwd", hidden=True),
+    config_dir: Path = typer.Option(Path("configs"), "--config-dir"),
+    output_dir: Path = typer.Option(Path("outputs"), "--output-dir"),
+    state_dir: Path = typer.Option(Path(".signal-harness"), "--state-dir"),
+) -> None:
+    """Run the local REST API and Streamable HTTP MCP endpoint."""
+
+    import uvicorn
+
+    from signal_harness.service import create_app
+
+    root = cwd.expanduser().resolve()
+    api = create_app(
+        cwd=root,
+        config_dir=_resolve(root, config_dir),
+        output_dir=_resolve(root, output_dir),
+        state_dir=_resolve(root, state_dir),
+    )
+    uvicorn.run(api, host=host, port=port)
+
+
+@app.command("regression-eval")
+def regression_eval(
+    fixture: Path = typer.Option(
+        Path("examples/signal_harness/regression_events.json"),
+        "--fixture",
+        help="Labelled regression event fixture",
+    ),
+    expectations: Path = typer.Option(
+        Path("examples/signal_harness/regression_expectations.json"),
+        "--expectations",
+        help="Regression expectations and gate thresholds",
+    ),
+    mode: RunMode = typer.Option(
+        RunMode.MOCK_AGENT,
+        "--mode",
+        help="demo, mock-agent, or agent",
+    ),
+    enforce: bool = typer.Option(
+        False,
+        "--enforce",
+        help="Exit non-zero when the regression gate fails",
+    ),
+    cwd: Path = typer.Option(Path.cwd(), "--cwd", hidden=True),
+    config_dir: Path = typer.Option(Path("configs"), "--config-dir"),
+    output_dir: Path = typer.Option(Path("outputs/regression-eval"), "--output-dir"),
+    state_dir: Path = typer.Option(
+        Path(".signal-harness/regression-eval"), "--state-dir"
+    ),
+) -> None:
+    """Run labelled product-level Agent regression cases through the Harness."""
+
+    root = cwd.expanduser().resolve()
+    _require_agent_key(mode)
+    resolved_output = _resolve(root, output_dir)
+    resolved_state = _resolve(root, state_dir)
+    suite = load_regression_suite(_resolve(root, expectations))
+    workflow = SignalHarnessWorkflow(
+        cwd=root,
+        config_dir=config_dir,
+        output_dir=resolved_output,
+        state_dir=resolved_state,
+        mode=mode,
+    )
+    result = asyncio.run(workflow.scan(fixture=_resolve(root, fixture)))
+    summary = evaluate_regression_suite(assessments=result.assessments, suite=suite)
+    paths = write_regression_eval_summary(resolved_output, summary)
+    typer.echo(
+        f"Regression eval: {'PASS' if summary.passed else 'FAIL'}; "
+        f"decision_accuracy={summary.decision_accuracy:.4f}; "
+        f"priority_precision={summary.priority_precision:.4f}; "
+        f"priority_recall={summary.priority_recall:.4f}"
+    )
+    typer.echo(f"Regression eval JSON: {paths['json']}")
+    typer.echo(f"Regression eval Markdown: {paths['markdown']}")
+    if enforce and not summary.passed:
+        raise typer.Exit(code=1)
 
 
 @app.command()

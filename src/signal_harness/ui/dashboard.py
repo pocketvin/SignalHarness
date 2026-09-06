@@ -261,6 +261,12 @@ def _render_dashboard(
             f"<li>retry_total: {health['retry_total']}</li>",
             f"<li>timeout_count: {health['timeout_count']}</li>",
             f"<li>tool_error_count: {tool_health['total_tool_error_count']}</li>",
+            f"<li>prompt_tokens: {health['prompt_tokens']}</li>",
+            f"<li>completion_tokens: {health['completion_tokens']}</li>",
+            f"<li>total_tokens: {health['total_tokens']}</li>",
+            f"<li>estimated_cost_usd: {health['estimated_cost_usd']:.8f}</li>",
+            f"<li>usage_reported_call_count: {health['usage_reported_call_count']}</li>",
+            f"<li>average_llm_latency_ms: {health['average_llm_latency_ms']:.2f}</li>",
             f"<li>limits: {_e(limit_step.get('detail') or 'n/a')}</li>",
         ]
     )
@@ -556,6 +562,23 @@ def _llm_health(trace: list[dict[str, Any]]) -> dict[str, Any]:
         ).lower()
         if "timeout" in text or "timed out" in text:
             timeout_count += 1
+    prompt_tokens = sum(int(step.get("prompt_tokens") or 0) for step in llm_steps)
+    completion_tokens = sum(int(step.get("completion_tokens") or 0) for step in llm_steps)
+    total_tokens = sum(int(step.get("total_tokens") or 0) for step in llm_steps)
+    estimated_cost_usd = round(
+        sum(float(step.get("estimated_cost_usd") or 0.0) for step in llm_steps),
+        8,
+    )
+    usage_reported_call_count = sum(
+        1
+        for step in llm_steps
+        if step.get("usage_source") not in {None, "unavailable", "mock_unavailable"}
+    )
+    average_llm_latency_ms = (
+        sum(float(step.get("duration_ms") or 0) for step in llm_steps) / len(llm_steps)
+        if llm_steps
+        else 0.0
+    )
     return {
         "llm_agent_call_count": len(llm_steps),
         "schema_failures": sum(
@@ -579,6 +602,12 @@ def _llm_health(trace: list[dict[str, Any]]) -> dict[str, Any]:
         "agent_team_run_timeout": any(
             step.get("step") == "agent_team_run_timeout" for step in trace
         ),
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+        "estimated_cost_usd": estimated_cost_usd,
+        "usage_reported_call_count": usage_reported_call_count,
+        "average_llm_latency_ms": average_llm_latency_ms,
     }
 
 

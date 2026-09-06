@@ -24,3 +24,11 @@ judgment and proposes adding “checkpoint” to suggested focus terms. The
 proposal is reviewable JSON and does not alter the YAML policy until explicitly
 approved. LearningPolicyAgent also proposes skill and watchlist changes, while a
 deterministic replay evaluator compares old and proposed policy behavior.
+
+## Regression gate
+
+The `resume-v1` corpus contains 40 labelled product cases. The current offline mock-agent gate passes 40/40 decisions and categories with 100% priority precision/recall and zero priority false positives/negatives. This is product contract evidence, not a general model benchmark.
+
+## External interface showcase
+
+`signal-harness serve` exposes REST run/trace/signal/feedback endpoints and MCP Streamable HTTP. `signal-harness mcp` exposes the same five read-only MCP tools over stdio. Both reuse the core domain/runtime instead of introducing a second scoring or permission implementation.

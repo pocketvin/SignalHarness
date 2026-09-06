@@ -30,6 +30,14 @@ jobs:
       - name: Tests
         run: uv run --extra dev python -m pytest tests/signal_harness -q
 
+      - name: Agent regression gate
+        run: >-
+          uv run signal-harness regression-eval
+          --mode mock-agent
+          --enforce
+          --output-dir /tmp/signalharness-regression-ci
+          --state-dir /tmp/signalharness-regression-ci-state
+
       - name: Ruff
         run: uv run --extra dev ruff check src/signal_harness tests/signal_harness
 

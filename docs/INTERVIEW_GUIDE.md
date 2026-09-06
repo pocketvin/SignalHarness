@@ -21,8 +21,7 @@ permission, scoring, replay, and traceability.
 ## Public CI and real API tests
 
 Public CI is intentionally offline and SignalHarness-focused: it runs
-`python -m pytest tests/signal_harness -q`, Ruff, mypy, and `uv build` on
-Python 3.11. It does not set `LLM_API_KEY`, run `--mode agent`, call live
+`python -m pytest tests/signal_harness -q`, the 40-case `regression-eval --enforce` gate, Ruff, mypy, and `uv build` on Python 3.11. It does not set `LLM_API_KEY`, run `--mode agent`, call live
 providers, or depend on real network/API availability.
 
 Real provider smoke testing is manual and documented in
@@ -50,9 +49,7 @@ Mock-agent and agent scans persist
 
 ## Project independence
 
-SignalHarness is an independent project inspired by general agent harness
-design patterns. It does not vendor or depend on OpenHarness code. The public
-package contains only SignalHarness core.
+SignalHarness is maintained as its own project and the current package does not vendor or import OpenHarness runtime code. The repository retains an upstream remote/common Git ancestry from an earlier exploration stage, so the accurate provenance claim is that SignalHarness was substantially reworked around its own signal-intelligence use case rather than claiming no upstream history.
 
 ## Multi-step evidence reasoning
 
@@ -71,15 +68,11 @@ whole Agent-team run timeout. Provider timeout falls back deterministically and
 is visible in trace as `provider_timeout`; whole-run timeout is visible as
 `agent_team_run_timeout`.
 
-## Model eval
+## Evaluation
 
-`signal-harness model-eval` runs the same fixture through the Harness and
-writes `outputs/model_eval_summary.json` plus Markdown. The point is not a
-large benchmark; it is a consistent local comparison across models using
-schema valid rate, retry/fallback rate, timeout count, tool budget blocks,
-blocked tools, tool errors, decisions, repair counts, run-state isolation mode,
-and latency. For `--runs N` greater than one, state is isolated per run under
-`.signal-harness/model-eval/run-001`, `run-002`, and so on.
+SignalHarness has two eval layers. `regression-eval --enforce` is the product-level contract gate: the committed 40-case `resume-v1` corpus currently passes 40/40 exact decisions, 40/40 categories, 100% priority precision/recall, and 0% FPR/FNR in offline mock-agent mode. This is project-specific regression evidence, not a general LLM benchmark.
+
+`model-eval` is the provider contract eval. It records schema valid rate, retry/fallback/timeout, tool validation/block/budget/runtime errors, repair counts, run-state isolation, latency, provider-reported tokens, and estimated cost when pricing metadata exists. For `--runs N` greater than one, state is isolated per run. Historical real-provider snapshots are dated evidence only. See `docs/EVALS.md`.
 
 ## Skipped routes and audit defaults
 
@@ -88,16 +81,11 @@ skips an event or stage, deterministic fallback can still populate the stored
 assessment so every input has a complete audit record. That fallback is an
 audit default, not evidence that the skipped downstream Agent ran.
 
-## Operational layer
+## Operational and service layer
 
-SignalHarness is still a one-shot scan engine. Scheduled runs are delegated to
-GitHub Actions, cron, or launchd. A deterministic `AlertPolicy` writes
-`outputs/alerts.json`, `outputs/alerts.md`, and
-`.signal-harness/alert_state.json`; it does not send external notifications.
-`signal-harness dashboard` writes a static `outputs/dashboard.html`, and
-`signal-harness digest --period daily|weekly` writes Markdown review digests.
-The dashboard includes Agent repair pass status, guarded score breakdowns,
-model/profile/limit metadata, and staged learning proposals.
+The CLI remains the simplest one-shot execution surface, but SignalHarness now also exposes a thin FastAPI service and MCP. `signal-harness serve` provides health/run/trace/signal/feedback REST endpoints plus `/mcp` Streamable HTTP; `signal-harness mcp` provides stdio MCP. Every service run gets isolated output/state directories and still calls the same Workflow. The MVP deliberately executes scans inside the request rather than claiming an unimplemented distributed queue.
+
+The MCP surface is read-only and exposes project context, signal history, assessments, trace, and feedback. It does not create a second write/permission path. Docker runs the same service entry point and has a `/health` healthcheck. Scheduled execution remains external to the core process.
 
 ## Bounded repair boundary
 
@@ -181,7 +169,4 @@ The optional agent-mode adapter targets structured JSON responses through
 `LLM_API_KEY`, `LLM_MODEL`, `LLM_MODEL_PROFILE`, and optional `LLM_BASE_URL`.
 Evidence Agents receive collected primary-source context and can declare tool
 requests, but broad live search is not enabled in the restricted SignalHarness
-tool registry. Source clustering is rule-based rather than semantic. Proposals
-are deliberately review-only. The project does not claim
-provider-native function calling, fully autonomous self-evolution, or a fully
-conversational multi-Agent debate runtime.
+tool registry. Source clustering is rule-based rather than semantic. REST has no production auth/multi-tenancy or distributed job queue. Proposals are deliberately review-only. The project does not claim provider-native function calling, fully autonomous self-evolution, horizontal production scale, or a fully conversational multi-Agent debate runtime.

@@ -1,449 +1,309 @@
 # SignalHarness
 
-SignalHarness is a project-centric signal intelligence harness for small
-developer teams. It watches external change sources, filters noisy updates,
-asks a routed LLM Agent team to add context, and turns the result into a local
-dashboard, trace, digest, alert file, and review-only learning proposals.
+**A production-oriented multi-agent harness for project-level signal intelligence, with controlled tool use, regression evals, observability, MCP, and a thin service layer.**
 
-The default inputs are GitHub repositories, RSS/Atom feeds, and fixture-backed
-web-change sources. The runtime is deliberately inspectable: Python owns source
-collection, read-only tool execution, permission checks, schema validation,
-fallback, trace recording, deterministic scoring, and all file writes. LLM
-Agents contribute classification, evidence synthesis, impact reasoning, action
-planning, and learning proposals inside those guardrails.
+SignalHarness watches external engineering changes, decides whether they matter to a project, and turns them into auditable assessments instead of another noisy feed. The signal-intelligence use case is the business carrier; the engineering focus is the Agent Harness itself: orchestration, structured contracts, tool guardrails, deterministic fallback, evaluation, traceability, and human-gated learning.
 
-## Interview / Demo materials
+## At a glance
 
-- [Demo guide](docs/DEMO_GUIDE.md)
-- [Architecture overview](docs/ARCHITECTURE.md)
-- [Interview demo script](docs/INTERVIEW_DEMO_SCRIPT.md)
-- [Project STAR stories](docs/PROJECT_STAR.md)
+| Area | What is implemented |
+| --- | --- |
+| Agent orchestration | Fixed five-Agent route: Supervisor → Evidence → Impact → Action → Learning |
+| Tool use | Two-turn evidence tool plan; Python owns allowlist, permission checks, budgets, execution, and observations |
+| Reliability | Pydantic structured outputs, schema retry, deterministic fallback, bounded repair, run timeout limits |
+| Guarded decisions | LLM contributes semantics; Python owns final scoring and a primary-source high-risk alert floor |
+| Memory | Project, Signal, Feedback, and Policy memory; no chat-memory abstraction |
+| Eval | 40-case labelled Agent regression suite + multi-provider contract eval |
+| Observability | Local trace for Agent calls, schema/retry/fallback, tools, latency, provider-reported tokens, and estimated cost |
+| MCP | Five read-only structured tools for project context, signal history, assessments, trace, and feedback |
+| Service | FastAPI REST API plus MCP Streamable HTTP transport |
+| Deployment | Docker image with health check; package/CLI remains usable without a server |
+| Learning | Review-only proposals → risk classification → replay gate → explicit human apply |
 
-## Core architecture
+## Resume Edition evidence
 
-The real Agent path is implemented in `src/signal_harness/agent_team/`:
+The committed `resume-v1` regression suite contains **40 product-level cases** covering:
 
-1. `SignalSupervisorAgent` classifies and routes the event batch.
-2. `ContextEvidenceAgent` enriches context and verifies evidence.
-3. `ImpactAnalystAgent` judges affected modules, semantic relevance, and risk.
-4. `ActionPlannerAgent` proposes bounded actions and critic notes.
-5. `LearningPolicyAgent` reflects over memory and creates approval-gated
-   policy, skill, and watchlist proposals.
+- high-risk direct-dependency changes;
+- routine dependency releases and negated risk language;
+- policy, permission, tool-calling, provider, and structured-output issues;
+- expert RSS signals and source-collection noise;
+- competitor/web changes;
+- explicit irrelevant/giveaway/crypto/gaming noise.
 
-Memory is infrastructure, not an Agent. The four stores are `ProjectMemory`,
-`SignalMemory`, `FeedbackMemory`, and `PolicyMemory`.
+The offline `mock-agent` gate currently passes all labelled expectations:
 
-## Safety boundaries
+```text
+cases                  40 / 40 assessed
+decision accuracy      1.0000
+category accuracy      1.0000
+priority precision     1.0000
+priority recall        1.0000
+false-positive rate    0.0000
+false-negative rate    0.0000
+```
 
-- LLM Agents return structured JSON; Python validates every schema.
-- LLM Agents request tools; Python owns allowlists, permission checks, budgets,
-  execution, and observations.
-- `ImpactAnalystAgent` cannot emit the authoritative `final_score`.
-- `LearningPolicyAgent` only creates review-only proposals.
-- Repair is bounded by Python-owned run limits. Agents may suggest only
-  Impact→Evidence or Action→Impact repair; there is no recursive handoff loop.
-- `mock-agent` runs offline with mock-safe tool outputs and no API key.
-- Provider-native function calling is intentionally disabled today:
-  `ModelProfile.supports_native_tool_calling` remains false and tool execution
-  stays in the controlled Python loop.
+This is intentionally a **project-specific regression/contract suite**, not a claim of general model intelligence. Public CI runs it offline with the real five-Agent architecture and scripted provider. The same fixture can be run manually in real `agent` mode.
+
+## Problem
+
+Small engineering teams are exposed to GitHub releases/issues, RSS feeds, provider/API changes, security advisories, and ecosystem updates. Collection is easy; the hard part is deciding:
+
+1. Is this source trustworthy enough to use?
+2. Does the change affect this project rather than the ecosystem in general?
+3. Is it an observation, something worth saving, an alert, or an action item?
+4. Can the decision be explained after the run?
+5. What happens when the model times out, returns invalid JSON, or requests the wrong tool?
+
+SignalHarness treats those questions as an Agent-runtime problem rather than a chatbot problem.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    Sources[GitHub / RSS / Web change / fixture]
+    Collect[Collect + Normalize + Deduplicate + Noise Filter]
+    Supervisor[SignalSupervisorAgent]
+    Evidence[ContextEvidenceAgent]
+    Tools[Controlled read-only tool loop]
+    Impact[ImpactAnalystAgent]
+    Action[ActionPlannerAgent]
+    Learning[LearningPolicyAgent]
+    Guard[Python constraint plane]
+    Output[Assessment / Trace / Dashboard / Digest]
+    Interfaces[CLI / REST / MCP]
+
+    Sources --> Collect --> Supervisor --> Evidence --> Impact --> Action --> Learning --> Output
+    Evidence --> Tools --> Evidence
+    Guard -. schema / permission / budgets / fallback / score .-> Supervisor
+    Guard -.-> Evidence
+    Guard -.-> Impact
+    Guard -.-> Action
+    Guard -.-> Learning
+    Output --> Interfaces
+```
+
+### Five-Agent responsibilities
+
+1. **SignalSupervisorAgent** — classifies each event and decides which downstream stages are required.
+2. **ContextEvidenceAgent** — plans bounded read-only tool requests, receives observations, and produces evidence/confidence.
+3. **ImpactAnalystAgent** — estimates semantic relevance, affected modules, conflicts, and risk. It cannot emit the authoritative final score.
+4. **ActionPlannerAgent** — proposes reversible actions and approval notes; Python re-checks requested high-risk actions.
+5. **LearningPolicyAgent** — reads memory and proposes policy/skill/watchlist changes for review only.
+
+Memory is infrastructure, not a sixth Agent.
+
+## Python-owned guardrails
+
+The model is deliberately not the authority for external effects or the final business decision.
+
+- Agent JSON is validated against strict Pydantic schemas.
+- One schema retry is allowed by default; repeated invalid output falls back deterministically.
+- Tool requests are checked against an allowlist, permission policy, run/event budgets, and read-only boundaries.
+- Repair is bounded; it cannot become an unbounded recursive Agent handoff loop.
+- Final scoring blends deterministic relevance, model semantics, and evidence confidence in Python.
+- Category weighting is applied once at the guarded blend boundary.
+- Explicit official CVE/vulnerability/supply-chain signals can receive a policy-configured alert floor so model under-scoring cannot silently suppress them.
+- Learning proposals never auto-apply; replay and explicit approval remain mandatory.
 
 ## Run modes
 
 ```bash
-# Offline deterministic fallback for CI and demos
+# Fully deterministic offline baseline
 uv run signal-harness scan \
   --fixture examples/signal_harness/sample_events.json \
   --mode demo
 
-# Offline scripted provider, but the real five-Agent architecture
+# Offline scripted provider through the real five-Agent architecture
 uv run signal-harness scan \
   --fixture examples/signal_harness/sample_events.json \
   --mode mock-agent
 
-# Real provider path through the SignalHarness OpenAI-compatible HTTP adapter
+# Real OpenAI-compatible provider
 LLM_API_KEY=... uv run signal-harness scan \
   --fixture examples/signal_harness/sample_events.json \
   --mode agent
 ```
 
-`demo` is the deterministic offline baseline. `mock-agent` and `agent` use the
-same routed five-Agent architecture. A single Agent may have multiple turns:
-ContextEvidenceAgent first proposes tool requests and then reads controlled
-observations before producing final evidence.
+`demo` is deterministic fallback logic. `mock-agent` is the CI-safe orchestration path. `agent` uses the same schemas, runner, tool boundary, scoring, and trace with a real provider.
 
-## Demo paths
-
-Use the fixture path when you need a stable offline demo or CI-safe run:
+## Agent regression eval
 
 ```bash
-uv run signal-harness scan \
+uv run signal-harness regression-eval \
+  --mode mock-agent \
+  --enforce
+```
+
+Inputs:
+
+- `examples/signal_harness/regression_events.json`
+- `examples/signal_harness/regression_expectations.json`
+
+Outputs:
+
+- `outputs/regression-eval/regression_eval_summary.json`
+- `outputs/regression-eval/regression_eval_summary.md`
+
+Metrics include exact decision/category accuracy, priority precision/recall, FPR/FNR, TP/FP/TN/FN, decision confusion, missing assessments, and mismatch details. `--enforce` exits non-zero when configured thresholds fail.
+
+## Provider contract eval
+
+`model-eval` answers a different question: **can this provider participate safely in the SignalHarness structured Agent contract?**
+
+```bash
+uv run signal-harness model-eval \
   --fixture examples/signal_harness/sample_events.json \
-  --mode mock-agent
+  --mode mock-agent \
+  --runs 2
 ```
 
-`examples/signal_harness/sample_events.json` is intentionally fixture-backed
-and may contain demo links. `configs/watchlist_demo.yaml` preserves a
-fixture-backed watchlist variant for local demo experiments.
+It records schema-valid rate, retry/fallback/timeout counts, tool validation/block/budget/runtime errors, repair behavior, decisions, latency, provider-reported token totals, and estimated cost when the selected model profile contains pricing metadata.
 
-For a live OpenAI showcase, run without `--fixture` so SignalHarness reads the
-live `configs/watchlist.yaml` watchlist:
+Real-provider results are local snapshots, not a universal leaderboard. See `docs/EVALS.md` and `docs/MODEL_EVAL_REPORT.md`.
+
+## MCP
+
+SignalHarness exposes a narrow **read-only** MCP surface; MCP does not bypass the existing runtime guardrails.
 
 ```bash
-SINCE="$(uv run python - <<'PY'
-from datetime import datetime, timedelta, timezone
-print((datetime.now(timezone.utc) - timedelta(days=14)).replace(microsecond=0).isoformat().replace("+00:00", "Z"))
-PY
-)"
-
-uv run signal-harness scan \
-  --mode agent \
-  --since "$SINCE" \
-  --max-events 20 \
-  --max-events-per-source 8 \
-  --output-dir outputs/openai-live-showcase \
-  --state-dir .signal-harness/openai-live-showcase
+uv run signal-harness mcp
 ```
 
-Live provider runs can hit context limits, rate limits, schema retries, or
-timeouts. The dashboard makes fallback, retry, timeout, source-health, and
-tool-health status explicit so the run remains explainable.
+Available tools:
 
-Optional real-provider environment variables:
+- `signalharness_get_project_context`
+- `signalharness_search_signal_history`
+- `signalharness_get_latest_assessments`
+- `signalharness_get_run_trace`
+- `signalharness_get_feedback_memory`
 
-- `LLM_PROVIDER` (default: `openai_compatible`)
-- `LLM_API_KEY`
-- `LLM_MODEL` (default: `gpt-4o-mini`)
-- `LLM_BASE_URL` for an OpenAI-compatible endpoint
-- `LLM_MODEL_PROFILE` (`openai_gpt4o_mini`, `kimi`, `qwen`, `deepseek`, or a
-  YAML path under `configs/model_profiles/`)
+Each tool returns structured content, is annotated read-only/idempotent/closed-world, validates service run IDs, and passes through SignalHarness permission policy.
 
-`ModelProfile` documents conservative model capabilities such as JSON mode,
-system prompt support, token limits, and strategy names. The default
-`tool_strategy` is `controlled_tool_request`; provider-native tool execution is
-outside the current runtime boundary.
-
-## Public-safe CI and secrets policy
-
-Public CI is SignalHarness-focused and offline: it runs
-`python -m pytest tests/signal_harness -q`, Ruff, mypy, and `uv build` on
-Python 3.11. It does not set `LLM_API_KEY`, does not run `--mode agent`, and
-must not call live providers. Scripted `mock-agent` behavior is covered by the
-SignalHarness test suite and local acceptance commands, while real provider
-checks remain manual smoke tests documented in `docs/SMOKE_TEST_AGENT_MODE.md`.
-
-Hardcoded API keys and secret-looking fallback credentials are forbidden. Use
-environment variables such as `LLM_API_KEY`, or provider-specific local
-variables such as `OPENAI_KEY`, `QWEN_KEY`, `KIMI_KEY`, and `DEEPSEEK_KEY`, for
-manual smoke tests. Keep `.env`, runtime outputs, caches, and build artifacts
-out of git.
-
-For local real-provider evaluation, copy `.env.example` to `.env` and fill only
-local keys. The `.env` file is ignored by git and must not be committed.
+## REST API + MCP HTTP
 
 ```bash
-cp .env.example .env
-bash scripts/model_eval_matrix.sh --providers openai,qwen,deepseek --runs 3
-bash scripts/model_eval_matrix.sh --providers kimi --runs 1 --sleep 10
+uv run signal-harness serve --host 127.0.0.1 --port 8000
 ```
 
-The matrix script sources `.env`, maps provider-specific keys into
-`LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` / `LLM_MODEL_PROFILE`, and writes
-per-provider local outputs. It does not print keys. See
-[`docs/MODEL_EVAL_REPORT.md`](docs/MODEL_EVAL_REPORT.md) and
-[`docs/AGENT_HARNESS_REVIEW.md`](docs/AGENT_HARNESS_REVIEW.md).
-
-## Guarded score
-
-The LLM supplies semantic relevance and evidence confidence, but it cannot emit
-the authoritative final score. Python calculates a deterministic base score,
-validates every Agent schema, blends approved components with policy weights,
-and applies the category multiplier:
+REST endpoints:
 
 ```text
-guarded_final_score =
-  (
-      deterministic_base * 0.70
-    + semantic_relevance * 0.20
-    + evidence_confidence * 0.10
-  ) * policy_multiplier
+GET  /health
+POST /runs
+GET  /runs/{run_id}
+GET  /runs/{run_id}/trace
+GET  /signals?run_id=...
+POST /feedback
 ```
 
-`ImpactAnalystAgent` has no `final_score` field in its output schema. Extra
-fields fail validation and trigger deterministic fallback.
+MCP Streamable HTTP is mounted at:
 
-## Feedback and learning
+```text
+/mcp
+```
+
+Each API run gets isolated output/state directories under `service-runs/<run_id>`. The service intentionally executes a scan inside the request for this MVP; it does not pretend to have a queue or distributed worker that is not implemented.
+
+## Docker
+
+```bash
+docker build -t signalharness:local .
+docker run --rm -p 8000:8000 signalharness:local
+```
+
+The container runs the same `signal-harness serve` entry point and exposes a `/health` Docker health check.
+
+## Observability
+
+Every LLM trace record can include:
+
+- Agent, model, mode, prompt version, input IDs, output schema;
+- schema validity, retry count, fallback reason, timeout state;
+- tools requested/executed/blocked, permission checks, budget blocks, tool errors;
+- repair status and bounded-repair metadata;
+- prompt/static/dynamic context hashes;
+- duration;
+- provider-reported prompt/completion/total tokens;
+- estimated USD cost when profile pricing metadata is configured.
+
+Mock runs deliberately do **not** fabricate token counts.
+
+```bash
+uv run signal-harness trace
+uv run signal-harness dashboard
+```
+
+The static dashboard surfaces runtime health without requiring a hosted observability product.
+
+## Feedback and guarded learning
 
 ```bash
 uv run signal-harness feedback \
   --signal-id demo-001 \
   --label useful \
-  --note "checkpoint and memory signals are important"
+  --note "checkpoint signals matter"
 
 uv run signal-harness calibrate --mode mock-agent
-```
-
-Calibration writes review-only artifacts under `.signal-harness/`:
-
-- `policy_update_proposal.json`
-- `skill_update_proposal.md`
-- `watchlist_update_proposal.json`
-- `replay_evaluation.json`
-
-`.signal-harness/` remains the state source of truth. For demos, calibration
-also copies the latest read-only snapshots to:
-
-- `outputs/latest_policy_update_proposal.json`
-- `outputs/latest_skill_update_proposal.md`
-- `outputs/latest_watchlist_update_proposal.json`
-- `outputs/latest_replay_evaluation.json`
-
-These snapshots do not mean that any proposal was applied.
-
-`mock-agent` and `agent` scans also save the latest learning observation to
-`.signal-harness/latest_learning_observation.json` and
-`outputs/latest_learning_observation.json`. This records what
-LearningPolicyAgent proposed for review; it does not apply policy, edit
-watchlists, or modify skills.
-
-No proposal is applied automatically. `signal_policy.yaml`, skill files, and
-`watchlist.yaml` change only through a separate explicit approval path.
-`calibrate --apply` also goes through this staging gate: without `--yes` it
-stages and prints review/apply instructions; with `--yes`, only a low-risk
-proposal with a passing replay gate can be applied through the same
-`learning-apply` safeguards.
-The staged approval path is:
-
-```bash
 uv run signal-harness learning-stage
 uv run signal-harness learning-review
 uv run signal-harness learning-apply --proposal-id <id> --yes
 ```
 
-`learning-stage` writes `.signal-harness/learning_staging.json` and a demo copy
-at `outputs/latest_learning_staging.json`, plus
-`outputs/latest_learning_risk_report.md`. The deterministic risk classifier
-marks threshold, permission, watchlist deletion, external notification, GitHub
-issue, project profile, and tool-permission changes as high risk. A replay gate
-must pass before a low-risk proposal can be applied; missing replay keeps the
-proposal staged for review.
+Policy/skill/watchlist proposals remain staged unless replay and risk gates allow an explicit apply. High-risk proposals remain human-reviewed.
 
-## Trace and outputs
+## CI
 
-```bash
-uv run signal-harness report
-uv run signal-harness trace
-```
-
-Every scan writes:
+Public GitHub Actions are offline with respect to LLM providers. CI runs:
 
 ```text
-outputs/
-├── signals.json
-├── impact_scores.json
-├── action_items.json
-├── task_trace.json
-├── alerts.json
-├── alerts.md
-├── dashboard.html
-├── radar_digest.md
-└── run_summary.txt
-```
-
-Each LLM trace record includes Agent name, mode, model, prompt version, input
-event IDs, output schema, schema validity, retry count, schema error,
-fallback status, duration, requested and executed tools, budget-blocked tools,
-blocked tools, permission checks, cache events, context hashes, and errors.
-Deterministic stages remain visible alongside
-`llm_agent_call` records.
-`AgentLoopLimits` bounds schema retries, per-Agent provider call timeout, whole
-Agent-team run timeout, tool request budget, tool output size, and bounded
-repair pass limits. Provider timeouts are recorded in trace as
-`provider_timeout` schema/error details. Whole-run timeouts are recorded as
-`agent_team_run_timeout`. Both paths trigger deterministic fallback instead of
-hanging.
-
-## Operational layer
-
-SignalHarness stays a one-shot scan engine. Scheduling is handled by external
-platforms such as GitHub Actions, cron, or launchd; see
-[Scheduled runs](docs/SCHEDULED_RUNS.md).
-
-```bash
-uv run signal-harness dashboard
-uv run signal-harness digest --period daily
-uv run signal-harness digest --period weekly
-uv run signal-harness model-eval \
-  --fixture examples/signal_harness/sample_events.json \
-  --mode mock-agent
-```
-
-The deterministic `AlertPolicy` writes:
-
-- `outputs/alerts.json`
-- `outputs/alerts.md`
-- `.signal-harness/alert_state.json`
-
-Alert dispatch defaults to local files only. The LLM cannot directly send
-notifications, and no Slack/Discord/Telegram/Feishu dependency is included.
-
-`model-eval` writes `outputs/model_eval_summary.json` and
-`outputs/model_eval_summary.md`. It compares models under the same Harness
-metrics: schema valid rate, retry/fallback rate, timeout count, tool budget
-blocks, blocked tools, tool errors, decision counts, repair counts, run-state
-isolation mode, and average LLM latency. When `--runs N` is greater than one,
-each run gets an isolated state directory under
-`.signal-harness/model-eval/run-001`, `run-002`, and so on; the summary remains
-under `outputs/`.
-
-## Controlled evidence tools and context
-
-ContextEvidenceAgent uses a two-turn controlled loop:
-
-1. The model returns `ToolRequest` objects.
-2. Python validates the read-only allowlist and permission policy.
-3. Python applies lightweight budgets: at most 20 tool requests per run, 3 per
-   event, and 1000 output characters per observation by default.
-4. SignalHarness local `SignalToolExecutor` tools run.
-5. `ToolObservation` objects are appended to the second Agent turn.
-6. Failed, blocked, or budget-blocked tools increase uncertainty and cap
-   confidence.
-
-This is controlled orchestration by the SignalHarness runner, not
-provider-native function calling and not a complete handoff-as-tool system.
-
-## Bounded repair pass
-
-SignalHarness keeps the main pipeline fixed:
-
-```text
-Supervisor → Evidence plan/tools/final → Impact
-  → optional Evidence repair → optional Impact rerun
-  → Action → optional Impact repair → optional Action rerun
-  → Learning
-```
-
-Only two repair directions exist:
-
-- `ImpactAnalystAgent` may suggest `target_agent=context_evidence` when evidence
-  is too weak for a high-risk impact claim.
-- `ActionPlannerAgent` may suggest `target_agent=impact` when actions and
-  impact risk appear inconsistent.
-
-Python decides whether repair runs. `max_repair_rounds_per_run`,
-`max_repair_events_per_run`, and the shared tool budget are enforced by the
-runner; budgets do not reset for repair. Repair events are merged back into the
-existing evidence/impact/action outputs. Learning cannot repair upstream Agents,
-and repair never becomes provider-native function calling.
-
-Prompt context is layered as static instructions, stable project/policy
-summary, semi-stable memory summary, dynamic task data, and volatile run
-metadata. Trace records stable-prefix and dynamic-context hashes; no
-provider-specific prompt-cache API is required.
-
-## Lightweight engineering choices
-
-The pre-LLM `NoiseFilter` downweights or routes obvious noise without deleting
-raw signals. `SignalClusterer` groups related GitHub, RSS, and web-change events
-only when token overlap and time proximity agree; same source or same domain is
-not enough by itself. Local JSON source caching and per-run tool-observation
-caching require no service process. Concurrent source tasks record duration,
-output count, cache hits, and independent failures.
-
-LangGraph, CrewAI, AutoGen, LangChain, LlamaIndex, Haystack, DSPy, Langfuse,
-Ragas, Redis, Postgres, Celery, vector databases, and embedding databases are
-intentionally excluded from this project.
-
-## Provider integration
-
-`src/signal_harness/providers/openai_compatible_provider.py` is the default
-real-provider path for `--mode agent`. It uses the existing `httpx` dependency
-and standard `/v1/chat/completions`-style assistant text. That text is still
-parsed by the existing schema retry/fallback path.
-
-SignalHarness does not ship an upstream framework compatibility provider. The
-real-provider path is the SignalHarness-native OpenAI-compatible HTTP adapter.
-
-The deterministic layer retains normalization, deduplication, base scoring,
-schema validation, permission enforcement, reporting, persistence, replay
-evaluation, and fallback behavior.
-
-When Supervisor routing skips an event or downstream stage, deterministic audit
-completion may still populate evidence, impact, or action-shaped fields so the
-stored assessment remains complete. Those values are audit defaults, not
-downstream LLM Agent execution; new traces mark this as
-`skipped_stage_audit_completion`. Older traces with
-`skipped_event_audit_fallback` are still readable for compatibility.
-
-## Dashboard explainability
-
-`signal-harness dashboard` writes a static local HTML file with high-priority
-signals, alerts, source health, top modules, Agent trace/tool controls, Agent
-repair pass status, guarded score breakdowns, model/profile/limit metadata, and
-learning staging status. If no repair pass was triggered, the dashboard says so
-explicitly.
-
-The dashboard includes a deterministic Signal Summary that answers what
-changed, why it matters, and what to do next. High-priority tables are balanced
-by source/category so dependency releases do not crowd out provider/API
-changes, runtime/tooling issues, structured-output signals, security or
-supply-chain risk, evaluation trends, and broader engineering insights. Tool
-errors are shown in Tool health rather than repeated inside every signal reason.
-
-## Project structure
-
-```text
-src/signal_harness/
-├── agent_team/         # The fixed five LLM Agents
-├── agent_integration/  # Prompts, schemas, mode, runner, LLM trace
-├── providers/          # Mock adapter and OpenAI-compatible provider integration
-├── memory/             # Four memory stores and replay evaluation
-├── agents/             # Legacy deterministic fallback specialists
-├── runtime/            # Workflow, permission, tools, trace
-├── signal/             # Schemas, normalization, noise, clustering, scoring
-├── tools/              # SignalHarness domain tools
-└── ui/                 # Terminal and trace views
-```
-
-## Verification
-
-```bash
-uv run --extra dev python -m pytest tests/signal_harness -q
-uv run --extra dev ruff check src/signal_harness tests/signal_harness
-uv run --extra dev mypy src/signal_harness
-uv run signal-harness scan --fixture examples/signal_harness/sample_events.json --mode demo
-uv run signal-harness scan --fixture examples/signal_harness/sample_events.json --mode mock-agent
-uv run signal-harness trace
-uv run signal-harness dashboard
-uv run signal-harness digest --period daily
-uv run signal-harness digest --period weekly
-uv run signal-harness model-eval --fixture examples/signal_harness/sample_events.json --mode mock-agent
-uv run signal-harness calibrate --mode mock-agent
+pytest tests/signal_harness
+40-case mock-agent regression gate --enforce
+Ruff
+mypy --strict
 uv build
 ```
 
-Scripted eval tests use `MockProvider(strategy="scripted")` and the
-multi-source fixture. They evaluate routing, evidence, tool controls, noise,
-caching, clustering, guardrails, and proposal safety—not model intelligence.
-Real `agent` mode remains a manual smoke test and is not part of public CI.
+No API key is required and public CI does not call a live model provider.
 
-See:
+## Key files
 
-- [Run modes](docs/RUN_MODES.md)
-- [Demo script](docs/DEMO_SCRIPT.md)
-- [LLM Agent architecture](docs/LLM_AGENT_ARCHITECTURE.md)
-- [Self-improvement loop](docs/SELF_IMPROVEMENT_LOOP.md)
-- [Bounded repair pass](docs/REPAIR_PASS.md)
-- [Model eval results](docs/MODEL_EVAL_RESULTS.md)
-- [Current real model eval report](docs/MODEL_EVAL_REPORT.md)
-- [Agent harness review](docs/AGENT_HARNESS_REVIEW.md)
-- [Provider integration](docs/PROVIDER_INTEGRATION.md)
-- [Interview guide](docs/INTERVIEW_GUIDE.md)
-- [Real agent-mode smoke test](docs/SMOKE_TEST_AGENT_MODE.md)
-- [Real source smoke test](docs/REAL_SOURCE_SMOKE.md)
-- [Example fixtures](examples/signal_harness/README.md)
+```text
+src/signal_harness/agent_team/          five Agent roles
+src/signal_harness/agent_integration/   prompts, runner, tool loop, trace, scoring bridge
+src/signal_harness/runtime/             workflow, permissions, registry, executor
+src/signal_harness/signal/              schemas, scoring, taxonomy, text semantics
+src/signal_harness/providers/           mock + OpenAI-compatible providers/model profiles
+src/signal_harness/mcp_server.py        read-only MCP interface
+src/signal_harness/service.py           FastAPI + MCP HTTP service
+src/signal_harness/evals.py             model and regression evaluation
+src/signal_harness/ui/                  dashboard/digest/trace views
+configs/                                project, policy, watchlist, model profiles
+examples/signal_harness/                demo and regression fixtures
+tests/signal_harness/                   unit/integration/regression coverage
+```
 
-## Independence
+## Provenance and independence
 
-SignalHarness is an independent project inspired by general agent harness
-design patterns. It does not vendor or depend on OpenHarness code. See
-[NOTICE.md](NOTICE.md) for the concise project notice.
+SignalHarness is maintained as its own project and the current package does not vendor or import OpenHarness runtime code. The repository does retain an `upstream` remote/common Git ancestry with HKUDS/OpenHarness from the project’s earlier exploration stage. The accurate description is therefore: **inspired by modern Agent Harness patterns and substantially reworked around the SignalHarness signal-intelligence use case**, rather than claiming a from-scratch origin with no upstream history.
+
+## Deliberate non-goals
+
+- no LangGraph/CrewAI/AutoGen dependency for orchestration;
+- no database, queue, Redis, vector store, or embedding layer without a demonstrated need;
+- no provider-native tool execution that can bypass Python controls;
+- no autonomous high-risk policy mutation;
+- no claim that the 40-case regression fixture is a general LLM benchmark;
+- no claim that static dashboard/API service equals a horizontally scaled production platform.
+
+## Interview material
+
+- `docs/ARCHITECTURE.md`
+- `docs/EVALS.md`
+- `docs/REPAIR_PASS.md`
+- `docs/MODEL_EVAL_RESULTS.md`
+- `docs/REAL_SOURCE_SMOKE.md`
+- `docs/INTERVIEW_GUIDE.md`
+- `docs/INTERVIEW_DEMO_SCRIPT.md`
+- `docs/PROJECT_STAR.md`
+- `docs/RESUME_GUIDE.md`

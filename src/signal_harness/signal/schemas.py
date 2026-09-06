@@ -269,4 +269,9 @@ class TraceStep(BaseModel):
     cache_hit: bool | None = None
     cache_events: list[str] = Field(default_factory=list)
     source_tasks: list[SourceTask] = Field(default_factory=list)
+    prompt_tokens: int | None = Field(default=None, ge=0)
+    completion_tokens: int | None = Field(default=None, ge=0)
+    total_tokens: int | None = Field(default=None, ge=0)
+    estimated_cost_usd: float | None = Field(default=None, ge=0)
+    usage_source: str | None = None
     error: str | None = None

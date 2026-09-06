@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -21,6 +22,7 @@ from signal_harness.agent_integration.schemas import (
     ToolObservation,
     ToolRequest,
 )
+from signal_harness.agents.classifier import ClassifierAgent
 from signal_harness.agent_team import (
     ActionPlannerAgent,
     ContextEvidenceAgent,
@@ -28,7 +30,7 @@ from signal_harness.agent_team import (
     LearningPolicyAgent,
     SignalSupervisorAgent,
 )
-from signal_harness.providers.adapter import AgentCall
+from signal_harness.providers.adapter import AgentCall, ProviderUsage
 from signal_harness.signal.schemas import (
     PolicyUpdateProposal,
     SignalCategory,
@@ -36,6 +38,7 @@ from signal_harness.signal.schemas import (
     SignalEvent,
     SourceQuality,
 )
+from signal_harness.signal.text_semantics import any_affirmed_term
 
 
 class MockProvider:
@@ -74,7 +77,10 @@ class MockProvider:
     def _scripted_response(self, call: AgentCall) -> str:
         payload = call.input_payload
         if call.output_schema == "SupervisorOutput":
-            return self._scripted_supervisor(payload).model_dump_json()
+            return self._scripted_supervisor(
+                payload,
+                project_profile=self._project_profile(call),
+            ).model_dump_json()
         if call.output_schema == "EvidenceToolPlan":
             return self._scripted_tool_plan(payload).model_dump_json()
         if call.output_schema == "ContextEvidenceOutput":
@@ -90,10 +96,11 @@ class MockProvider:
     def _fallback_response(self, call: AgentCall) -> str:
         payload = call.input_payload
         events = self._events(payload)
+        project_profile = self._project_profile(call)
         if call.agent_name == SignalSupervisorAgent.name:
             return SignalSupervisorAgent().fallback(
                 events,
-                dict(payload.get("project_profile", {})),
+                project_profile,
             ).model_dump_json()
         if call.output_schema == "EvidenceToolPlan":
             return ContextEvidenceAgent().fallback_plan(events).model_dump_json()
@@ -111,7 +118,7 @@ class MockProvider:
         if call.agent_name == ImpactAnalystAgent.name:
             return ImpactAnalystAgent().fallback(
                 events,
-                dict(payload.get("project_profile", {})),
+                project_profile,
                 {},
             ).model_dump_json()
         if call.agent_name == ActionPlannerAgent.name:
@@ -121,7 +128,12 @@ class MockProvider:
             return LearningPolicyAgent().fallback(payload).model_dump_json()
         raise ValueError(f"Unknown fallback Agent: {call.agent_name}")
 
-    def _scripted_supervisor(self, payload: dict[str, Any]) -> SupervisorOutput:
+    def _scripted_supervisor(
+        self,
+        payload: dict[str, Any],
+        *,
+        project_profile: dict[str, Any],
+    ) -> SupervisorOutput:
         noise_by_id = {
             str(item["event_id"]): item
             for item in payload.get("noise_assessments", [])
@@ -136,27 +148,14 @@ class MockProvider:
         routes: list[SupervisorRoute] = []
         for event in self._events(payload):
             noise = noise_by_id.get(event.event_id, {})
-            text = f"{event.source_name} {event.title} {event.content}".lower()
             if noise.get("is_noise_candidate"):
                 category = SignalCategory.NOISE
-            elif event.source_type == "github_release":
-                category = SignalCategory.DEPENDENCY_UPDATE
-            elif event.source_type == "github_issue":
-                category = (
-                    SignalCategory.POLICY_SIGNAL
-                    if any(term in text for term in ("policy", "permission", "restrict"))
-                    else SignalCategory.TEAM_UPDATE
-                )
-            elif event.source_type == "rss":
-                category = SignalCategory.EXPERT_OPINION
-            elif any(term in text for term in ("policy", "license", "compliance")):
-                category = SignalCategory.POLICY_SIGNAL
             else:
-                category = SignalCategory.MARKET_SIGNAL
+                category = ClassifierAgent().run(event, project_profile).category
             if category is SignalCategory.NOISE:
                 required: list[RequiredAgent] = []
                 analyze = False
-            elif category is SignalCategory.EXPERT_OPINION:
+            elif category is SignalCategory.EXPERT_OPINION or event.source_type == "rss":
                 required = ["context_evidence", "impact", "learning_observation"]
                 analyze = True
             else:
@@ -345,7 +344,28 @@ class MockProvider:
         results: list[ImpactItem] = []
         for event in self._events(payload):
             text = f"{event.title} {event.content}".lower()
-            semantic = 90.0 if "checkpoint" in text else 72.0 if "tool" in text else 55.0
+            if any_affirmed_term(text, ("cve", "vulnerability", "supply chain")):
+                semantic = 92.0
+            elif "checkpoint" in text:
+                semantic = 90.0
+            elif any_affirmed_term(
+                text,
+                (
+                    "breaking",
+                    "migration",
+                    "api compatibility",
+                    "regression",
+                    "json schema",
+                    "validation",
+                ),
+            ):
+                semantic = 82.0
+            elif any(term in text for term in ("evaluation", "benchmark", "observability")):
+                semantic = 72.0
+            elif "tool" in text:
+                semantic = 72.0
+            else:
+                semantic = 55.0
             cluster = cluster_by_event.get(event.event_id)
             conflicts = (
                 ["Secondary source expresses uncertainty about the primary claim."]
@@ -424,11 +444,28 @@ class MockProvider:
         )
 
     @staticmethod
+    def _project_profile(call: AgentCall) -> dict[str, Any]:
+        try:
+            payload = json.loads(call.system_prompt)
+        except json.JSONDecodeError:
+            return {}
+        stable = payload.get("stable_project_context", {})
+        if not isinstance(stable, dict):
+            return {}
+        project = stable.get("project", {})
+        return dict(project) if isinstance(project, dict) else {}
+
+    @staticmethod
     def _events(payload: dict[str, Any]) -> list[SignalEvent]:
         return [
             SignalEvent.model_validate(item)
             for item in payload.get("events", [])
         ]
+
+    def usage_snapshot(self) -> ProviderUsage:
+        """Mock runs intentionally report no fabricated token usage."""
+
+        return ProviderUsage(source="mock_unavailable")
 
     async def close(self) -> None:
         return None

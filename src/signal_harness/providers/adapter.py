@@ -7,6 +7,28 @@ from typing import Any, Protocol
 
 
 @dataclass(frozen=True)
+class ProviderUsage:
+    """Cumulative provider-reported token usage and estimated cost."""
+
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost_usd: float = 0.0
+    source: str = "unavailable"
+
+    def delta(self, previous: "ProviderUsage") -> "ProviderUsage":
+        return ProviderUsage(
+            prompt_tokens=max(0, self.prompt_tokens - previous.prompt_tokens),
+            completion_tokens=max(0, self.completion_tokens - previous.completion_tokens),
+            total_tokens=max(0, self.total_tokens - previous.total_tokens),
+            estimated_cost_usd=max(
+                0.0, round(self.estimated_cost_usd - previous.estimated_cost_usd, 8)
+            ),
+            source=self.source,
+        )
+
+
+@dataclass(frozen=True)
 class AgentCall:
     """One structured Agent invocation passed to a provider."""
 

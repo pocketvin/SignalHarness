@@ -6,25 +6,41 @@ tech_stack:
   - Python 3.10+
   - Pydantic
   - Typer
+  - FastAPI
+  - MCP Python SDK
   - SignalHarness runtime
 critical_modules:
   - signal normalization
   - evidence verification
   - impact scoring
   - feedback memory
+  - mcp
+  - agent eval
+  - evaluation
+  - observability
+  - latency
   - permission control
   - checkpoint persistence
+  - agent regression evaluation
+  - MCP integration
+  - token cost latency observability
+  - API service
 dependencies:
   - pydantic
   - typer
   - httpx
   - rich
   - pyyaml
+  - fastapi
+  - mcp
+  - uvicorn
 monitored_ecosystem:
   - langchain-ai/langgraph
   - LangGraph
   - OpenAI-compatible provider APIs
   - agent tool-calling ecosystem
+  - Model Context Protocol
+  - agent evaluation and observability ecosystem
 competitors:
   - LangGraph
   - CrewAI

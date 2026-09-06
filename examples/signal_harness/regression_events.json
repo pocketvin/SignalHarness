@@ -1,0 +1,562 @@
+[
+  {
+    "event_id": "reg-001",
+    "source_type": "github_release",
+    "source_name": "pydantic",
+    "title": "Critical schema migration for structured output",
+    "content": "Breaking schema migration changes JSON validation and structured output compatibility for agent harness checkpoint persistence.",
+    "url": "https://example.com/regression/reg-001",
+    "published_at": "2026-09-05T11:00:00Z",
+    "raw_payload": {
+      "official": true,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-05T11:00:00Z"
+  },
+  {
+    "event_id": "reg-002",
+    "source_type": "github_release",
+    "source_name": "httpx",
+    "title": "Security regression in provider transport",
+    "content": "Security vulnerability and regression affect OpenAI-compatible provider API transport used by the agent harness.",
+    "url": "https://example.com/regression/reg-002",
+    "published_at": "2026-09-05T10:00:00Z",
+    "raw_payload": {
+      "official": true,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-05T10:00:00Z"
+  },
+  {
+    "event_id": "reg-003",
+    "source_type": "github_release",
+    "source_name": "typer",
+    "title": "Breaking CLI migration for tool registry",
+    "content": "Breaking migration changes CLI integration around tool registry and permission guard workflows.",
+    "url": "https://example.com/regression/reg-003",
+    "published_at": "2026-09-05T09:00:00Z",
+    "raw_payload": {
+      "official": true,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-05T09:00:00Z"
+  },
+  {
+    "event_id": "reg-004",
+    "source_type": "github_release",
+    "source_name": "pyyaml",
+    "title": "Supply chain advisory for YAML loader",
+    "content": "CVE vulnerability and supply chain security advisory affects project configuration loading.",
+    "url": "https://example.com/regression/reg-004",
+    "published_at": "2026-09-05T08:00:00Z",
+    "raw_payload": {
+      "official": true,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-05T08:00:00Z"
+  },
+  {
+    "event_id": "reg-005",
+    "source_type": "github_release",
+    "source_name": "pydantic",
+    "title": "Checkpoint model compatibility fix",
+    "content": "Migration and compatibility changes affect checkpoint persistence models and structured output validation.",
+    "url": "https://example.com/regression/reg-005",
+    "published_at": "2026-09-05T07:00:00Z",
+    "raw_payload": {
+      "official": true,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-05T07:00:00Z"
+  },
+  {
+    "event_id": "reg-006",
+    "source_type": "github_release",
+    "source_name": "httpx",
+    "title": "Provider API compatibility regression",
+    "content": "Breaking API compatibility regression impacts provider calls, tool calling evidence, and agent harness reliability.",
+    "url": "https://example.com/regression/reg-006",
+    "published_at": "2026-09-05T06:00:00Z",
+    "raw_payload": {
+      "official": true,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-05T06:00:00Z"
+  },
+  {
+    "event_id": "reg-007",
+    "source_type": "github_release",
+    "source_name": "rich",
+    "title": "Security fix in rendering dependency",
+    "content": "Security vulnerability fix affects a direct dependency used by SignalHarness reporting.",
+    "url": "https://example.com/regression/reg-007",
+    "published_at": "2026-09-05T05:00:00Z",
+    "raw_payload": {
+      "official": true,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-05T05:00:00Z"
+  },
+  {
+    "event_id": "reg-008",
+    "source_type": "github_release",
+    "source_name": "pydantic",
+    "title": "JSON schema validation regression",
+    "content": "Breaking JSON schema validation regression impacts structured output and multi-agent contracts.",
+    "url": "https://example.com/regression/reg-008",
+    "published_at": "2026-09-05T04:00:00Z",
+    "raw_payload": {
+      "official": true,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-05T04:00:00Z"
+  },
+  {
+    "event_id": "reg-009",
+    "source_type": "github_release",
+    "source_name": "pydantic",
+    "title": "Routine maintenance release",
+    "content": "Routine maintenance and documentation cleanup with no breaking API change.",
+    "url": "https://example.com/regression/reg-009",
+    "published_at": "2026-09-05T03:00:00Z",
+    "raw_payload": {
+      "official": true,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-05T03:00:00Z"
+  },
+  {
+    "event_id": "reg-010",
+    "source_type": "github_release",
+    "source_name": "httpx",
+    "title": "Minor connection pooling improvements",
+    "content": "Performance improvements without migration, security, or compatibility impact.",
+    "url": "https://example.com/regression/reg-010",
+    "published_at": "2026-09-05T02:00:00Z",
+    "raw_payload": {
+      "official": true,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-05T02:00:00Z"
+  },
+  {
+    "event_id": "reg-011",
+    "source_type": "github_release",
+    "source_name": "typer",
+    "title": "CLI docs refresh",
+    "content": "Documentation and examples refresh for commands.",
+    "url": "https://example.com/regression/reg-011",
+    "published_at": "2026-09-05T01:00:00Z",
+    "raw_payload": {
+      "official": true,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-05T01:00:00Z"
+  },
+  {
+    "event_id": "reg-012",
+    "source_type": "github_release",
+    "source_name": "rich",
+    "title": "Rendering polish release",
+    "content": "Minor rendering polish and typo fixes.",
+    "url": "https://example.com/regression/reg-012",
+    "published_at": "2026-09-05T00:00:00Z",
+    "raw_payload": {
+      "official": true,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-05T00:00:00Z"
+  },
+  {
+    "event_id": "reg-013",
+    "source_type": "github_release",
+    "source_name": "pyyaml",
+    "title": "Maintenance release",
+    "content": "Small internal cleanup with no behavior change.",
+    "url": "https://example.com/regression/reg-013",
+    "published_at": "2026-09-04T23:00:00Z",
+    "raw_payload": {
+      "official": true,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-04T23:00:00Z"
+  },
+  {
+    "event_id": "reg-014",
+    "source_type": "github_release",
+    "source_name": "pydantic",
+    "title": "New optional helper",
+    "content": "Adds an optional helper unrelated to structured output contracts.",
+    "url": "https://example.com/regression/reg-014",
+    "published_at": "2026-09-04T22:00:00Z",
+    "raw_payload": {
+      "official": true,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-04T22:00:00Z"
+  },
+  {
+    "event_id": "reg-015",
+    "source_type": "github_release",
+    "source_name": "httpx",
+    "title": "Examples updated",
+    "content": "Updates examples and comments only.",
+    "url": "https://example.com/regression/reg-015",
+    "published_at": "2026-09-04T21:00:00Z",
+    "raw_payload": {
+      "official": true,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-04T21:00:00Z"
+  },
+  {
+    "event_id": "reg-016",
+    "source_type": "github_release",
+    "source_name": "typer",
+    "title": "Shell completion polish",
+    "content": "Minor shell completion ergonomics.",
+    "url": "https://example.com/regression/reg-016",
+    "published_at": "2026-09-04T20:00:00Z",
+    "raw_payload": {
+      "official": true,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-04T20:00:00Z"
+  },
+  {
+    "event_id": "reg-017",
+    "source_type": "github_release",
+    "source_name": "rich",
+    "title": "Color formatting update",
+    "content": "Cosmetic formatting improvement.",
+    "url": "https://example.com/regression/reg-017",
+    "published_at": "2026-09-04T19:00:00Z",
+    "raw_payload": {
+      "official": true,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-04T19:00:00Z"
+  },
+  {
+    "event_id": "reg-018",
+    "source_type": "github_release",
+    "source_name": "pyyaml",
+    "title": "Build metadata refresh",
+    "content": "Build metadata and packaging housekeeping.",
+    "url": "https://example.com/regression/reg-018",
+    "published_at": "2026-09-04T18:00:00Z",
+    "raw_payload": {
+      "official": true,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-04T18:00:00Z"
+  },
+  {
+    "event_id": "reg-019",
+    "source_type": "github_issue",
+    "source_name": "pydantic",
+    "title": "Proposal: restrict unsafe validation hooks",
+    "content": "Policy and permission proposal to restrict runtime hooks used by tools.",
+    "url": "https://example.com/regression/reg-019",
+    "published_at": "2026-09-04T17:00:00Z",
+    "raw_payload": {
+      "official": true,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-04T17:00:00Z"
+  },
+  {
+    "event_id": "reg-020",
+    "source_type": "github_issue",
+    "source_name": "httpx",
+    "title": "Tool calling timeout behavior",
+    "content": "Issue discusses tool calling timeout handling and provider retry semantics.",
+    "url": "https://example.com/regression/reg-020",
+    "published_at": "2026-09-04T16:00:00Z",
+    "raw_payload": {
+      "official": true,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-04T16:00:00Z"
+  },
+  {
+    "event_id": "reg-021",
+    "source_type": "github_issue",
+    "source_name": "typer",
+    "title": "Permission guard CLI proposal",
+    "content": "Policy proposal for explicit approval before destructive CLI actions.",
+    "url": "https://example.com/regression/reg-021",
+    "published_at": "2026-09-04T15:00:00Z",
+    "raw_payload": {
+      "official": true,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-04T15:00:00Z"
+  },
+  {
+    "event_id": "reg-022",
+    "source_type": "github_issue",
+    "source_name": "pydantic",
+    "title": "Structured output edge case",
+    "content": "Issue reports JSON schema behavior for nested structured output.",
+    "url": "https://example.com/regression/reg-022",
+    "published_at": "2026-09-04T14:00:00Z",
+    "raw_payload": {
+      "official": true,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-04T14:00:00Z"
+  },
+  {
+    "event_id": "reg-023",
+    "source_type": "github_issue",
+    "source_name": "httpx",
+    "title": "Provider response timeout",
+    "content": "Issue reports an OpenAI-compatible provider timeout under load.",
+    "url": "https://example.com/regression/reg-023",
+    "published_at": "2026-09-04T13:00:00Z",
+    "raw_payload": {
+      "official": true,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-04T13:00:00Z"
+  },
+  {
+    "event_id": "reg-024",
+    "source_type": "github_issue",
+    "source_name": "rich",
+    "title": "Small docs issue",
+    "content": "Documentation typo with no runtime impact.",
+    "url": "https://example.com/regression/reg-024",
+    "published_at": "2026-09-04T12:00:00Z",
+    "raw_payload": {
+      "official": true,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-04T12:00:00Z"
+  },
+  {
+    "event_id": "reg-025",
+    "source_type": "rss",
+    "source_name": "Engineering Feed",
+    "title": "Why eval traces matter",
+    "content": "Expert discussion of evaluation benchmark design, traces, and reproducible agent evals.",
+    "url": "https://example.com/regression/reg-025",
+    "published_at": "2026-09-04T11:00:00Z",
+    "raw_payload": {
+      "official": false,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-04T11:00:00Z"
+  },
+  {
+    "event_id": "reg-026",
+    "source_type": "rss",
+    "source_name": "Security Feed",
+    "title": "Agent supply-chain lessons",
+    "content": "Expert article about CVE triage and supply chain controls for agent systems.",
+    "url": "https://example.com/regression/reg-026",
+    "published_at": "2026-09-04T10:00:00Z",
+    "raw_payload": {
+      "official": false,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-04T10:00:00Z"
+  },
+  {
+    "event_id": "reg-027",
+    "source_type": "rss",
+    "source_name": "LLM Ops Feed",
+    "title": "Structured outputs in production",
+    "content": "Analysis of structured output, JSON schema, retry, and fallback patterns.",
+    "url": "https://example.com/regression/reg-027",
+    "published_at": "2026-09-04T09:00:00Z",
+    "raw_payload": {
+      "official": false,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-04T09:00:00Z"
+  },
+  {
+    "event_id": "reg-028",
+    "source_type": "rss",
+    "source_name": "Systems Feed",
+    "title": "Checkpoint durability patterns",
+    "content": "Expert opinion on checkpoint persistence and durable state in multi-agent runtimes.",
+    "url": "https://example.com/regression/reg-028",
+    "published_at": "2026-09-04T08:00:00Z",
+    "raw_payload": {
+      "official": false,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-04T08:00:00Z"
+  },
+  {
+    "event_id": "reg-029",
+    "source_type": "rss",
+    "source_name": "General AI Feed",
+    "title": "Weekly AI roundup",
+    "content": "Broad AI news roundup without direct project impact.",
+    "url": "https://example.com/regression/reg-029",
+    "published_at": "2026-09-04T07:00:00Z",
+    "raw_payload": {
+      "official": false,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-04T07:00:00Z"
+  },
+  {
+    "event_id": "reg-030",
+    "source_type": "rss",
+    "source_name": "Product Feed",
+    "title": "New chatbot themes",
+    "content": "Consumer chatbot UI theme trends and marketing examples.",
+    "url": "https://example.com/regression/reg-030",
+    "published_at": "2026-09-04T06:00:00Z",
+    "raw_payload": {
+      "official": false,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-04T06:00:00Z"
+  },
+  {
+    "event_id": "reg-031",
+    "source_type": "rss",
+    "source_name": "Engineering Feed",
+    "title": "Tool observability notes",
+    "content": "Expert notes on tool calling traces, latency, and error budgets.",
+    "url": "https://example.com/regression/reg-031",
+    "published_at": "2026-09-04T05:00:00Z",
+    "raw_payload": {
+      "official": false,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-04T05:00:00Z"
+  },
+  {
+    "event_id": "reg-032",
+    "source_type": "rss",
+    "source_name": "General Feed",
+    "title": "Conference recap",
+    "content": "General conference recap with no concrete engineering change.",
+    "url": "https://example.com/regression/reg-032",
+    "published_at": "2026-09-04T04:00:00Z",
+    "raw_payload": {
+      "official": false,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-04T04:00:00Z"
+  },
+  {
+    "event_id": "reg-033",
+    "source_type": "web_change",
+    "source_name": "Provider status page",
+    "title": "JSON mode documentation changed",
+    "content": "Provider documentation changes JSON mode compatibility and structured output guidance.",
+    "url": "https://example.com/regression/reg-033",
+    "published_at": "2026-09-04T03:00:00Z",
+    "raw_payload": {
+      "official": false,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-04T03:00:00Z"
+  },
+  {
+    "event_id": "reg-034",
+    "source_type": "web_change",
+    "source_name": "CrewAI",
+    "title": "Agent runtime adds tool allowlist",
+    "content": "Competitor update documents a tool registry allowlist and permission guard.",
+    "url": "https://example.com/regression/reg-034",
+    "published_at": "2026-09-04T02:00:00Z",
+    "raw_payload": {
+      "official": false,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-04T02:00:00Z"
+  },
+  {
+    "event_id": "reg-035",
+    "source_type": "web_change",
+    "source_name": "Product page",
+    "title": "Dashboard wording changed",
+    "content": "Small dashboard copy change with no runtime impact.",
+    "url": "https://example.com/regression/reg-035",
+    "published_at": "2026-09-04T01:00:00Z",
+    "raw_payload": {
+      "official": false,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-04T01:00:00Z"
+  },
+  {
+    "event_id": "reg-036",
+    "source_type": "web_change",
+    "source_name": "Market page",
+    "title": "Enterprise agent pricing update",
+    "content": "Market pricing announcement without implementation impact.",
+    "url": "https://example.com/regression/reg-036",
+    "published_at": "2026-09-04T00:00:00Z",
+    "raw_payload": {
+      "official": false,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-04T00:00:00Z"
+  },
+  {
+    "event_id": "reg-037",
+    "source_type": "rss",
+    "source_name": "Promo Feed",
+    "title": "Gaming promotion giveaway",
+    "content": "Gaming promotion consumer giveaway cryptocurrency price contest.",
+    "url": "https://example.com/regression/reg-037",
+    "published_at": "2026-09-03T23:00:00Z",
+    "raw_payload": {
+      "official": false,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-03T23:00:00Z"
+  },
+  {
+    "event_id": "reg-038",
+    "source_type": "rss",
+    "source_name": "Promo Feed",
+    "title": "Consumer giveaway",
+    "content": "Consumer giveaway for gaming accessories.",
+    "url": "https://example.com/regression/reg-038",
+    "published_at": "2026-09-03T22:00:00Z",
+    "raw_payload": {
+      "official": false,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-03T22:00:00Z"
+  },
+  {
+    "event_id": "reg-039",
+    "source_type": "rss",
+    "source_name": "Market Feed",
+    "title": "Cryptocurrency price update",
+    "content": "Cryptocurrency price movement and trading promotion.",
+    "url": "https://example.com/regression/reg-039",
+    "published_at": "2026-09-03T21:00:00Z",
+    "raw_payload": {
+      "official": false,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-03T21:00:00Z"
+  },
+  {
+    "event_id": "reg-040",
+    "source_type": "rss",
+    "source_name": "Gaming Feed",
+    "title": "Weekend gaming promotion",
+    "content": "Gaming promotion and consumer giveaway weekend event.",
+    "url": "https://example.com/regression/reg-040",
+    "published_at": "2026-09-03T20:00:00Z",
+    "raw_payload": {
+      "official": false,
+      "suite": "resume-v1"
+    },
+    "collected_at": "2026-09-03T20:00:00Z"
+  }
+]

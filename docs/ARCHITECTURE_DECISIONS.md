@@ -146,3 +146,14 @@ deterministic and policy-controlled.
 - Optional provider integrations only when necessary.
 - No framework adapter unless the workflow genuinely needs a more complex
   state model.
+## Evaluation boundary: regression vs provider contract
+
+SignalHarness deliberately keeps two eval layers. `regression-eval` is a labelled product contract gate and may fail CI; `model-eval` measures provider behaviour under the Harness contract. Regression metrics must not be presented as general model intelligence, and dated real-provider snapshots must not be treated as permanent rankings.
+
+## MCP and service boundary
+
+MCP is a narrow read-only projection over SignalHarness domain artifacts. It cannot write policy/watchlist/project files or bypass the existing permission plane. FastAPI is a thin orchestration surface that calls the same `SignalHarnessWorkflow`; service runs isolate output/state by run ID. No queue, database, multi-tenant control plane, or background worker is claimed in this MVP.
+
+## Usage observability boundary
+
+Token counts are recorded only when reported by the provider. Mock providers do not fabricate usage. Estimated cost is derived from configured model-profile pricing metadata and is explicitly an estimate rather than billing truth.

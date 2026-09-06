@@ -30,6 +30,8 @@ class ModelProfile:
     schema_strategy: SchemaStrategy = "prompt_json_retry"
     tool_strategy: ToolStrategy = "controlled_tool_request"
     output_token_parameter: OutputTokenParameter = "max_tokens"
+    input_cost_per_million_usd: float | None = None
+    output_cost_per_million_usd: float | None = None
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "ModelProfile":
@@ -59,6 +61,12 @@ class ModelProfile:
             output_token_parameter=_output_token_parameter(
                 payload.get("output_token_parameter")
             ),
+            input_cost_per_million_usd=_optional_non_negative_float(
+                payload.get("input_cost_per_million_usd")
+            ),
+            output_cost_per_million_usd=_optional_non_negative_float(
+                payload.get("output_cost_per_million_usd")
+            ),
         )
         if not profile.model:
             raise ValueError("Model profile requires a non-empty model")
@@ -85,6 +93,8 @@ class ModelProfile:
             schema_strategy=self.schema_strategy,
             tool_strategy=self.tool_strategy,
             output_token_parameter=self.output_token_parameter,
+            input_cost_per_million_usd=self.input_cost_per_million_usd,
+            output_cost_per_million_usd=self.output_cost_per_million_usd,
         )
 
 
@@ -127,6 +137,17 @@ def _tool_strategy(value: object) -> ToolStrategy:
     if value in (None, "controlled_tool_request"):
         return "controlled_tool_request"
     raise ValueError(f"Unsupported tool_strategy: {value}")
+
+
+def _optional_non_negative_float(value: object) -> float | None:
+    if value is None:
+        return None
+    if not isinstance(value, (str, int, float)):
+        raise ValueError("Model profile cost metadata must be numeric")
+    parsed = float(value)
+    if parsed < 0:
+        raise ValueError("Model profile cost metadata must be non-negative")
+    return parsed
 
 
 def _output_token_parameter(value: object) -> OutputTokenParameter:

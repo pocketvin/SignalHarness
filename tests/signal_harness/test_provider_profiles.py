@@ -240,3 +240,43 @@ def test_mock_provider_needs_no_llm_api_key(monkeypatch) -> None:
     monkeypatch.delenv("LLM_API_KEY", raising=False)
 
     assert isinstance(provider_from_env(RunMode.MOCK_AGENT), MockProvider)
+
+
+def test_openai_provider_records_reported_usage_and_profile_cost(
+    project_root: Path,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": '{"routes":[],"batch_summary":"ok"}'}}],
+                "usage": {
+                    "prompt_tokens": 1000,
+                    "completion_tokens": 500,
+                    "total_tokens": 1500,
+                },
+            },
+        )
+
+    profile = load_model_profile("openai_gpt4o_mini", config_dir=project_root / "configs")
+    assert profile.input_cost_per_million_usd == 0.15
+    assert profile.output_cost_per_million_usd == 0.60
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    provider = OpenAICompatibleProvider(
+        api_key="test-key",
+        base_url="https://example.test",
+        profile=profile,
+        client=client,
+    )
+    try:
+        asyncio.run(provider.complete(_call()))
+        usage = provider.usage_snapshot()
+    finally:
+        asyncio.run(client.aclose())
+
+    assert usage.prompt_tokens == 1000
+    assert usage.completion_tokens == 500
+    assert usage.total_tokens == 1500
+    assert usage.estimated_cost_usd == 0.00045
+    assert usage.source == "provider_reported_with_profile_pricing"

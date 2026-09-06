@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from signal_harness.agent_integration.mode import RunMode
-from signal_harness.providers.adapter import AgentCall, AgentProvider
+from signal_harness.providers.adapter import AgentCall, AgentProvider, ProviderUsage
 from signal_harness.runtime.tracing import TraceRecorder
 from signal_harness.signal.schemas import TraceStep
 
@@ -29,6 +29,7 @@ def append_llm_trace(
     retry_count: int = 0,
     schema_error: str | None = None,
     error: str | None = None,
+    usage: ProviderUsage | None = None,
 ) -> int:
     """Append one complete LLM invocation record and return its index."""
 
@@ -60,6 +61,11 @@ def append_llm_trace(
             dynamic_context_hash=call.dynamic_context_hash or None,
             context_packet_version=call.context_packet_version or None,
             cache_strategy=call.cache_strategy,
+            prompt_tokens=usage.prompt_tokens if usage is not None else None,
+            completion_tokens=usage.completion_tokens if usage is not None else None,
+            total_tokens=usage.total_tokens if usage is not None else None,
+            estimated_cost_usd=(usage.estimated_cost_usd if usage is not None else None),
+            usage_source=usage.source if usage is not None else None,
             error=error,
             status="success",
             input_count=input_count,

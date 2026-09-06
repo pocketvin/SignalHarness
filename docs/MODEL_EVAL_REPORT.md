@@ -2,6 +2,8 @@
 
 Last updated: 2026-07-01 20:08 CST
 
+**Historical snapshot notice:** the table below records a real-provider run from 2026-07-01. It is preserved as dated evidence and is not the current product regression result. Current regression evidence lives in `docs/EVALS.md`.
+
 This report records a current local fixture result. It is not a permanent model
 ranking and should be re-run when fixtures, prompts, provider models, or API
 settings change.

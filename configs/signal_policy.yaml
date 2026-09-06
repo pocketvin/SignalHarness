@@ -34,7 +34,13 @@ keyword_weights:
   cve: 1.5
   vulnerability: 1.4
   supply chain: 1.3
-  benchmark: 0.8
+  benchmark: 0.9
+  evaluation: 1.0
+  agent eval: 1.1
+  observability: 1.1
+  latency: 0.8
+  mcp: 1.2
+  security: 1.2
 
 suggested_focus_keywords: []
 
@@ -52,7 +58,7 @@ category_weights:
   provider_compatibility_signal: 0.90
   source_collection_signal: 0.78
   security_supply_chain: 1.00
-  evaluation_benchmark_signal: 0.72
+  evaluation_benchmark_signal: 0.82
   docs_change_signal: 0.70
   competitor_update: 0.78
   market_signal: 0.68
@@ -65,6 +71,18 @@ thresholds:
   action_required: 88
   alert: 80
   save: 45
+
+priority_floor:
+  enabled: true
+  official_only: true
+  categories:
+    - dependency_update
+    - security_supply_chain
+  terms:
+    - cve
+    - vulnerability
+    - supply chain
+  min_score: 80
 
 feedback_adjustments:
   useful: 5
@@ -103,6 +121,11 @@ permission_policy:
     - read_rss
     - read_mock_web_change
     - read_config
+    - read_project_context
+    - read_signal_history
+    - read_assessments
+    - read_run_trace
+    - read_feedback_memory
     - write_local_report
     - write_task_trace
   require_confirmation:

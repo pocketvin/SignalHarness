@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
@@ -12,6 +11,7 @@ from signal_harness.signal.schemas import (
     SignalCategory,
     SignalEvent,
 )
+from signal_harness.signal.text_semantics import any_affirmed_term, contains_affirmed_term
 
 DEPENDENCY_IMPACT_TERMS = (
     "breaking",
@@ -42,17 +42,12 @@ def _keywords(profile: dict[str, Any], key: str) -> list[str]:
 
 
 def _matched(text: str, keywords: Iterable[str]) -> list[str]:
-    matched: list[str] = []
-    for keyword in keywords:
-        pattern = rf"(?<![a-z0-9]){re.escape(keyword)}(?![a-z0-9])"
-        if re.search(pattern, text):
-            matched.append(keyword)
-    return matched
+    return [keyword for keyword in keywords if contains_affirmed_term(text, keyword)]
 
 
 def _has_dependency_impact_terms(event: SignalEvent) -> bool:
     text = f"{event.source_name} {event.title} {event.content}".lower()
-    return any(term in text for term in DEPENDENCY_IMPACT_TERMS)
+    return any_affirmed_term(text, DEPENDENCY_IMPACT_TERMS)
 
 
 def source_score(event: SignalEvent, policy: dict[str, Any]) -> float:
@@ -189,7 +184,9 @@ def urgency_score(event: SignalEvent, *, now: datetime | None = None) -> float:
         age_days = max(0, (current - published).days)
         base = max(10.0, 100.0 - age_days * 5)
     text = f"{event.title} {event.content}".lower()
-    if any(word in text for word in ("security", "breaking", "deprecated", "urgent", "migration")):
+    if any_affirmed_term(
+        text, ("security", "breaking", "deprecated", "urgent", "migration")
+    ):
         base += 15
     return _bounded(base)
 

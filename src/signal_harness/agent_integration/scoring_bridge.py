@@ -14,6 +14,7 @@ from signal_harness.agent_integration.schemas import (
 from signal_harness.runtime.permissions import SignalPermissionGuard
 from signal_harness.signal.policy import decision_for_score
 from signal_harness.signal.scorer import score_signal
+from signal_harness.signal.text_semantics import any_affirmed_term
 from signal_harness.signal.schemas import (
     AgentScoreBreakdown,
     FeedbackRecord,
@@ -84,12 +85,24 @@ def guarded_assessments(
         )
         if noise is not None:
             policy_multiplier *= noise.score_multiplier
+        deterministic_base_score = min(
+            100.0,
+            base.final_score / max(base.category_weight, 0.01),
+        )
         blended = (
-            base.final_score * deterministic_weight
+            deterministic_base_score * deterministic_weight
             + impact_item.semantic_relevance * semantic_weight
             + evidence_item.confidence * 100 * evidence_weight
         )
         final_score = round(max(0.0, min(100.0, blended * policy_multiplier)), 2)
+        priority_floor = _priority_floor_score(
+            event=event,
+            category=route.category,
+            source_quality=evidence_item.source_quality.value,
+            policy=policy,
+        )
+        if priority_floor is not None:
+            final_score = max(final_score, priority_floor)
         decision = decision_for_score(final_score, policy)
         if route.category is SignalCategory.NOISE or not route.analyze:
             decision = SignalDecision.IGNORE
@@ -123,7 +136,7 @@ def guarded_assessments(
             action_items = []
 
         agent_score = AgentScoreBreakdown(
-            deterministic_base_score=base.final_score,
+            deterministic_base_score=round(deterministic_base_score, 2),
             semantic_relevance=impact_item.semantic_relevance,
             evidence_confidence_score=round(evidence_item.confidence * 100, 2),
             deterministic_weight=round(deterministic_weight, 4),
@@ -191,3 +204,27 @@ def _is_tool_debug_text(text: str) -> bool:
         "syntax error: line",
     )
     return any(marker in lowered for marker in debug_markers)
+
+
+def _priority_floor_score(
+    *,
+    event: SignalEvent,
+    category: SignalCategory,
+    source_quality: str,
+    policy: dict[str, Any],
+) -> float | None:
+    """Protect explicit high-severity primary-source signals from model under-scoring."""
+
+    config = policy.get("priority_floor", {})
+    if not isinstance(config, dict) or not config.get("enabled", False):
+        return None
+    categories = {str(value) for value in config.get("categories", [])}
+    if category.value not in categories:
+        return None
+    if bool(config.get("official_only", True)) and source_quality != "official":
+        return None
+    text = f"{event.title} {event.content}".lower()
+    terms = [str(value).strip().lower() for value in config.get("terms", [])]
+    if not any_affirmed_term(text, (term for term in terms if term)):
+        return None
+    return max(0.0, min(100.0, float(config.get("min_score", 80.0))))

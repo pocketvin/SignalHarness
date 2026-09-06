@@ -1,6 +1,6 @@
 # SignalHarness Architecture
 
-SignalHarness 是一个 project-centric signal intelligence Agent Harness。它把外部变化源转成可审计的本地 assessment、digest、dashboard、trace 和 review-only learning proposal。
+SignalHarness 是一个 project-centric signal intelligence Agent Harness。它把外部变化源转成可审计的 assessment、digest、dashboard、trace 和 review-only learning proposal，并通过 CLI、REST 与只读 MCP 暴露同一套 domain/runtime 能力。
 
 ## Workflow flowchart
 
@@ -21,6 +21,8 @@ flowchart TD
     K --> N["Dashboard"]
     K --> O["Trace"]
     K --> P["Review-only Learning"]
+    K --> R["Regression / Provider Eval"]
+    K --> S["CLI / REST / MCP"]
 
     Q["Python Runtime<br/>schema validation / permissions / scoring / fallback / file writes"] -. guards .-> F
     Q -. guards .-> G
@@ -99,8 +101,17 @@ sequenceDiagram
 - `src/signal_harness/agent_integration/scoring_bridge.py`  
   将 Agent outputs 转成 guarded `SignalAssessment`，并由 Python runtime 计算 final decision。
 
+- `src/signal_harness/evals.py`
+  两类 eval：40-case 产品 regression gate 与 provider contract/model eval。
+
+- `src/signal_harness/mcp_server.py`
+  五个结构化只读 MCP tools；读取 project context、signal history、assessment、trace 和 feedback，且不能绕过 permission policy。
+
+- `src/signal_harness/service.py`
+  FastAPI REST + MCP Streamable HTTP 服务层；每次 run 隔离 output/state，复用同一 Workflow。
+
 - `src/signal_harness/ui/dashboard.py`  
-  静态本地 dashboard writer。展示 summary、signals、source health、tool health、model/profile/limits、trace、score breakdown、learning。
+  静态本地 dashboard writer。展示 summary、signals、source/tool health、model/profile/limits、trace、token/cost/latency、score breakdown、learning。
 
 - `outputs/dashboard.html`  
   本地 dashboard 产物。用于 demo，不提交。
@@ -111,3 +122,15 @@ sequenceDiagram
 ## 面试展示重点
 
 SignalHarness 的价值不是“又做了一个 dashboard”，而是展示 Agent Harness 的工程边界：LLM 做推理，Python 做约束；模型输出可审计，工具使用可追踪，fallback 不隐藏，learning 不自动改配置。
+
+## Evaluation and observability
+
+SignalHarness 把“模型是否稳定”和“产品行为是否正确”拆成两层。`regression-eval --enforce` 使用 40 个标签 case 验证 decision/category、priority precision/recall、FPR/FNR；`model-eval` 则验证 provider schema、retry/fallback、tool errors、repair、latency、provider-reported token usage 和 estimated cost。二者都不是通用 LLM leaderboard。
+
+当前 `resume-v1` offline regression suite 的 committed acceptance 是 40/40 exact decision、40/40 exact category、priority precision/recall 100%、FPR/FNR 0%。这些数字来自项目特定 contract corpus。
+
+## Service and deployment boundary
+
+`signal-harness serve` 启动 FastAPI，提供 health、run、trace、signals、feedback REST endpoints，并挂载 `/mcp` Streamable HTTP。`signal-harness mcp` 提供 stdio MCP。服务 MVP 在请求内同步完成 scan，不伪装成未实现的队列/worker。Docker 镜像运行相同入口并包含 `/health` healthcheck。
+
+MCP 是只读第二入口，不是新的副作用平面。所有可写行为仍由原有 Workflow、permission guard 和 learning gate 控制。

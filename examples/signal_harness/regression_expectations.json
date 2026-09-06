@@ -1,0 +1,292 @@
+{
+  "suite": "resume-v1",
+  "description": "40 project-specific cases covering direct dependency risk, routine releases, policy/tool issues, expert feeds, web changes, and explicit noise.",
+  "thresholds": {
+    "decision_accuracy": 0.9,
+    "category_accuracy": 0.85,
+    "priority_precision": 0.9,
+    "priority_recall": 0.85
+  },
+  "cases": [
+    {
+      "event_id": "reg-001",
+      "expected_decision": "alert",
+      "expected_category": "dependency_update",
+      "expected_priority": true,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-002",
+      "expected_decision": "alert",
+      "expected_category": "dependency_update",
+      "expected_priority": true,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-003",
+      "expected_decision": "save",
+      "expected_category": "dependency_update",
+      "expected_priority": false,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-004",
+      "expected_decision": "alert",
+      "expected_category": "dependency_update",
+      "expected_priority": true,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-005",
+      "expected_decision": "alert",
+      "expected_category": "dependency_update",
+      "expected_priority": true,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-006",
+      "expected_decision": "alert",
+      "expected_category": "dependency_update",
+      "expected_priority": true,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-007",
+      "expected_decision": "alert",
+      "expected_category": "dependency_update",
+      "expected_priority": true,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-008",
+      "expected_decision": "alert",
+      "expected_category": "dependency_update",
+      "expected_priority": true,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-009",
+      "expected_decision": "ignore",
+      "expected_category": "ecosystem_issue",
+      "expected_priority": false,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-010",
+      "expected_decision": "ignore",
+      "expected_category": "ecosystem_issue",
+      "expected_priority": false,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-011",
+      "expected_decision": "ignore",
+      "expected_category": "docs_change_signal",
+      "expected_priority": false,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-012",
+      "expected_decision": "ignore",
+      "expected_category": "ecosystem_issue",
+      "expected_priority": false,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-013",
+      "expected_decision": "ignore",
+      "expected_category": "ecosystem_issue",
+      "expected_priority": false,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-014",
+      "expected_decision": "save",
+      "expected_category": "structured_output_signal",
+      "expected_priority": false,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-015",
+      "expected_decision": "ignore",
+      "expected_category": "ecosystem_issue",
+      "expected_priority": false,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-016",
+      "expected_decision": "ignore",
+      "expected_category": "ecosystem_issue",
+      "expected_priority": false,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-017",
+      "expected_decision": "ignore",
+      "expected_category": "ecosystem_issue",
+      "expected_priority": false,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-018",
+      "expected_decision": "ignore",
+      "expected_category": "ecosystem_issue",
+      "expected_priority": false,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-019",
+      "expected_decision": "save",
+      "expected_category": "policy_signal",
+      "expected_priority": false,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-020",
+      "expected_decision": "save",
+      "expected_category": "tool_calling_signal",
+      "expected_priority": false,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-021",
+      "expected_decision": "save",
+      "expected_category": "policy_signal",
+      "expected_priority": false,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-022",
+      "expected_decision": "save",
+      "expected_category": "dependency_update",
+      "expected_priority": false,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-023",
+      "expected_decision": "save",
+      "expected_category": "provider_compatibility_signal",
+      "expected_priority": false,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-024",
+      "expected_decision": "ignore",
+      "expected_category": "docs_change_signal",
+      "expected_priority": false,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-025",
+      "expected_decision": "save",
+      "expected_category": "evaluation_benchmark_signal",
+      "expected_priority": false,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-026",
+      "expected_decision": "save",
+      "expected_category": "security_supply_chain",
+      "expected_priority": false,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-027",
+      "expected_decision": "save",
+      "expected_category": "structured_output_signal",
+      "expected_priority": false,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-028",
+      "expected_decision": "save",
+      "expected_category": "checkpoint_persistence_signal",
+      "expected_priority": false,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-029",
+      "expected_decision": "ignore",
+      "expected_category": "expert_opinion",
+      "expected_priority": false,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-030",
+      "expected_decision": "ignore",
+      "expected_category": "expert_opinion",
+      "expected_priority": false,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-031",
+      "expected_decision": "save",
+      "expected_category": "tool_calling_signal",
+      "expected_priority": false,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-032",
+      "expected_decision": "ignore",
+      "expected_category": "expert_opinion",
+      "expected_priority": false,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-033",
+      "expected_decision": "save",
+      "expected_category": "structured_output_signal",
+      "expected_priority": false,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-034",
+      "expected_decision": "save",
+      "expected_category": "competitor_update",
+      "expected_priority": false,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-035",
+      "expected_decision": "ignore",
+      "expected_category": "market_signal",
+      "expected_priority": false,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-036",
+      "expected_decision": "ignore",
+      "expected_category": "market_signal",
+      "expected_priority": false,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-037",
+      "expected_decision": "ignore",
+      "expected_category": "noise",
+      "expected_priority": false,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-038",
+      "expected_decision": "ignore",
+      "expected_category": "noise",
+      "expected_priority": false,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-039",
+      "expected_decision": "ignore",
+      "expected_category": "noise",
+      "expected_priority": false,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    },
+    {
+      "event_id": "reg-040",
+      "expected_decision": "ignore",
+      "expected_category": "noise",
+      "expected_priority": false,
+      "rationale": "Product-level expectation frozen for the resume-v1 regression suite."
+    }
+  ]
+}

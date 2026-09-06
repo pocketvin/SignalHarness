@@ -10,7 +10,7 @@ from typing import Any
 
 import httpx
 
-from signal_harness.providers.adapter import AgentCall
+from signal_harness.providers.adapter import AgentCall, ProviderUsage
 from signal_harness.providers.model_profile import ModelProfile, load_model_profile
 
 HTTP_AUTH_HEADER = "Authori" + "zation"
@@ -41,6 +41,7 @@ class OpenAICompatibleProvider:
         self._client = client or httpx.AsyncClient(timeout=httpx.Timeout(60.0))
         self._owns_client = client is None
         self._request_sleep_seconds = max(0.0, request_sleep_seconds)
+        self._usage = ProviderUsage(source="provider_reported")
 
     @classmethod
     def from_env(
@@ -81,7 +82,41 @@ class OpenAICompatibleProvider:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             raise RuntimeError(_safe_http_status_error(exc)) from exc
-        return _assistant_text(response.json(), agent_name=call.agent_name)
+        payload = response.json()
+        self._record_usage(payload)
+        return _assistant_text(payload, agent_name=call.agent_name)
+
+    def usage_snapshot(self) -> ProviderUsage:
+        """Return cumulative provider usage for trace delta calculation."""
+
+        return self._usage
+
+    def _record_usage(self, payload: Any) -> None:
+        usage = payload.get("usage") if isinstance(payload, dict) else None
+        if not isinstance(usage, dict):
+            return
+        prompt_tokens = _non_negative_int(usage.get("prompt_tokens"))
+        completion_tokens = _non_negative_int(usage.get("completion_tokens"))
+        total_tokens = _non_negative_int(usage.get("total_tokens"))
+        if total_tokens == 0:
+            total_tokens = prompt_tokens + completion_tokens
+        cost = _estimated_cost_usd(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            profile=self.profile,
+        )
+        self._usage = ProviderUsage(
+            prompt_tokens=self._usage.prompt_tokens + prompt_tokens,
+            completion_tokens=self._usage.completion_tokens + completion_tokens,
+            total_tokens=self._usage.total_tokens + total_tokens,
+            estimated_cost_usd=round(self._usage.estimated_cost_usd + cost, 8),
+            source=(
+                "provider_reported_with_profile_pricing"
+                if self.profile.input_cost_per_million_usd is not None
+                and self.profile.output_cost_per_million_usd is not None
+                else "provider_reported_no_pricing"
+            ),
+        )
 
     async def close(self) -> None:
         if self._owns_client:
@@ -158,4 +193,33 @@ def _redact_sensitive_response_text(text: str) -> str:
         rf"{re.escape(SENSITIVE_KEY_PREFIX)}[A-Za-z0-9._~-]+",
         "[redacted-key]",
         redacted,
+    )
+
+
+def _non_negative_int(value: object) -> int:
+    if value is None:
+        return 0
+    if not isinstance(value, (str, int, float)):
+        return 0
+    try:
+        return max(0, int(value))
+    except ValueError:
+        return 0
+
+
+def _estimated_cost_usd(
+    *,
+    prompt_tokens: int,
+    completion_tokens: int,
+    profile: ModelProfile,
+) -> float:
+    if (
+        profile.input_cost_per_million_usd is None
+        or profile.output_cost_per_million_usd is None
+    ):
+        return 0.0
+    return round(
+        prompt_tokens / 1_000_000 * profile.input_cost_per_million_usd
+        + completion_tokens / 1_000_000 * profile.output_cost_per_million_usd,
+        8,
     )

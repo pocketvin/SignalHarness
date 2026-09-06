@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 from signal_harness.agents.models import ClassificationResult
+from signal_harness.signal.text_semantics import any_affirmed_term
 from signal_harness.signal.schemas import SignalCategory, SignalEvent
 
 DEPENDENCY_IMPACT_TERMS = (
@@ -35,6 +36,8 @@ def _term_in_text(text: str, term: str) -> bool:
     return re.search(pattern, text) is not None
 
 
+
+
 class ClassifierAgent:
     """Assign a business category while making noise decisions explicit."""
 
@@ -46,6 +49,7 @@ class ClassifierAgent:
         project_profile: dict[str, Any],
     ) -> ClassificationResult:
         text = f"{event.source_name} {event.title} {event.content}".lower()
+        content_text = f"{event.title} {event.content}".lower()
         ignore_terms = [
             str(value).lower() for value in project_profile.get("ignore_keywords", [])
         ]
@@ -55,12 +59,24 @@ class ClassifierAgent:
                 reason="Matched a project ignore keyword.",
             )
 
+        if (
+            event.source_type == "github_issue"
+            and any(
+                value in content_text
+                for value in ("policy", "permission", "regulation", "license", "compliance")
+            )
+        ):
+            return ClassificationResult(
+                category=SignalCategory.POLICY_SIGNAL,
+                reason="The GitHub issue proposes a policy, permission, or compliance change.",
+            )
+
         dependencies = [str(value).lower() for value in project_profile.get("dependencies", [])]
         competitors = [
             str(value).lower() for value in project_profile.get("competitors", [])
         ]
         direct_dependency = any(_term_in_text(text, value) for value in dependencies)
-        dependency_impact = any(value in text for value in DEPENDENCY_IMPACT_TERMS)
+        dependency_impact = any_affirmed_term(text, DEPENDENCY_IMPACT_TERMS)
         if direct_dependency and dependency_impact:
             category = SignalCategory.DEPENDENCY_UPDATE
             reason = (
@@ -85,9 +101,18 @@ class ClassifierAgent:
         elif any(value in text for value in ("benchmark", "evaluation", "eval", "leaderboard")):
             category = SignalCategory.EVALUATION_BENCHMARK_SIGNAL
             reason = "The signal is related to evaluation or benchmark behavior."
-        elif any(value in text for value in ("rss", "feed", "source collection", "crawler")):
+        elif any(
+            value in content_text
+            for value in ("rss parser", "feed parser", "source collection", "crawler")
+        ):
             category = SignalCategory.SOURCE_COLLECTION_SIGNAL
             reason = "The signal affects source collection or feed reliability."
+        elif (
+            any(value in content_text for value in ("documentation", "docs", "readme"))
+            and any(value in content_text for value in ("typo", "wording", "copy", "example"))
+        ):
+            category = SignalCategory.DOCS_CHANGE_SIGNAL
+            reason = "The signal is a documentation-only change without runtime impact."
         elif direct_dependency and event.source_type == "github_release":
             category = SignalCategory.ECOSYSTEM_ISSUE
             reason = (

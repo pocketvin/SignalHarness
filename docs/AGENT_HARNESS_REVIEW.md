@@ -68,19 +68,9 @@ errors are visible in trace and model-eval summaries.
 
 ## Evals and tracing
 
-`signal-harness model-eval` compares providers with local metrics:
+SignalHarness separates product regression from provider contract evaluation. `regression-eval --enforce` runs the committed 40-case labelled corpus and gates exact decision/category behaviour plus priority precision/recall and FPR/FNR. `model-eval` compares provider participation in the Harness contract: schema validity, retry/fallback/timeout, tool errors, repair, latency, provider-reported token usage, and estimated cost when pricing metadata is available.
 
-- schema valid rate;
-- retry/fallback rate;
-- timeout count;
-- latency;
-- repair requested/executed/blocked/fallback counts;
-- tool validation/blocked/budget/runtime/total errors.
-
-Tracing is local and file-based. It records Agent names, schemas, prompt
-versions, retries, true LLM fallback, tool requests/execution/errors,
-permission checks, repair summary steps, and skipped-stage deterministic audit
-completion semantics.
+Tracing is local and file-based. It records Agent names, schemas, prompt versions, retries, true LLM fallback, tool requests/execution/errors, permission checks, repair summary steps, skipped-stage deterministic audit completion semantics, latency, and usage/cost metadata. Mock providers do not fabricate token usage.
 
 ## Retry and bounded repair
 
@@ -106,10 +96,11 @@ staged for human review.
 
 ## Independence
 
-SignalHarness is an independent project inspired by general agent harness
-design patterns. It does not vendor or depend on OpenHarness code.
+SignalHarness is maintained as its own project and the current package does not vendor or import OpenHarness runtime code. The repository retains an upstream remote/common Git ancestry from an earlier exploration stage, so provenance should be described transparently rather than as no upstream history.
 
-## Next steps
+## Current service surface and next steps
+
+The Harness is accessible through CLI, a thin FastAPI REST service, and five read-only MCP tools. Docker runs the same service entry point. MCP does not add a second write permission plane.
 
 - Add richer fixtures for long-context and conflicting-evidence model eval.
 - Keep real provider eval manual and public CI offline.

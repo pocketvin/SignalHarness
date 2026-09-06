@@ -55,6 +55,69 @@ class EvalSummary(BaseModel):
     proposal_safety_passed: bool
 
 
+class RegressionThresholds(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decision_accuracy: float = Field(default=0.9, ge=0, le=1)
+    category_accuracy: float = Field(default=0.85, ge=0, le=1)
+    priority_precision: float = Field(default=0.9, ge=0, le=1)
+    priority_recall: float = Field(default=0.85, ge=0, le=1)
+
+
+class RegressionCase(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    event_id: str = Field(min_length=1)
+    expected_decision: SignalDecision
+    expected_category: SignalCategory | None = None
+    expected_priority: bool
+    rationale: str = ""
+
+
+class RegressionSuite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    suite: str = Field(min_length=1)
+    description: str = ""
+    thresholds: RegressionThresholds = Field(default_factory=RegressionThresholds)
+    cases: list[RegressionCase] = Field(min_length=1)
+
+
+class RegressionMismatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    event_id: str
+    expected_decision: SignalDecision
+    actual_decision: SignalDecision | None
+    expected_category: SignalCategory | None
+    actual_category: SignalCategory | None
+    expected_priority: bool
+    actual_priority: bool | None
+
+
+class RegressionEvalSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    suite: str
+    case_count: int = Field(ge=1)
+    assessed_count: int = Field(ge=0)
+    missing_event_ids: list[str] = Field(default_factory=list)
+    decision_accuracy: float = Field(ge=0, le=1)
+    category_accuracy: float = Field(ge=0, le=1)
+    priority_precision: float = Field(ge=0, le=1)
+    priority_recall: float = Field(ge=0, le=1)
+    false_positive_rate: float = Field(ge=0, le=1)
+    false_negative_rate: float = Field(ge=0, le=1)
+    true_positive: int = Field(ge=0)
+    false_positive: int = Field(ge=0)
+    true_negative: int = Field(ge=0)
+    false_negative: int = Field(ge=0)
+    decision_confusion: dict[str, int] = Field(default_factory=dict)
+    thresholds: RegressionThresholds
+    passed: bool
+    mismatches: list[RegressionMismatch] = Field(default_factory=list)
+
+
 class ModelEvalSummary(BaseModel):
     """Comparable per-model Harness metrics computed from local outputs."""
 
@@ -84,6 +147,12 @@ class ModelEvalSummary(BaseModel):
     action_required_count: int = Field(ge=0)
     alert_count: int = Field(ge=0)
     average_latency_ms: float = Field(ge=0)
+    prompt_tokens: int = Field(ge=0)
+    completion_tokens: int = Field(ge=0)
+    total_tokens: int = Field(ge=0)
+    estimated_cost_usd: float = Field(ge=0)
+    usage_reported_call_count: int = Field(ge=0)
+    average_tokens_per_llm_call: float = Field(ge=0)
     repair_requested_count: int = Field(ge=0)
     repair_executed_count: int = Field(ge=0)
     repair_blocked_count: int = Field(ge=0)
@@ -236,6 +305,18 @@ def build_model_eval_summary(
         and step.fallback_used
     )
     decisions = Counter(item.decision.value for item in assessments)
+    prompt_tokens = sum(step.prompt_tokens or 0 for step in llm_steps)
+    completion_tokens = sum(step.completion_tokens or 0 for step in llm_steps)
+    total_tokens = sum(step.total_tokens or 0 for step in llm_steps)
+    estimated_cost_usd = round(
+        sum(step.estimated_cost_usd or 0.0 for step in llm_steps),
+        8,
+    )
+    usage_reported_call_count = sum(
+        1
+        for step in llm_steps
+        if step.usage_source not in {None, "unavailable", "mock_unavailable"}
+    )
     return ModelEvalSummary(
         runs=runs,
         provider=provider,
@@ -270,6 +351,14 @@ def build_model_eval_summary(
         )
         if llm_steps
         else 0.0,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=total_tokens,
+        estimated_cost_usd=estimated_cost_usd,
+        usage_reported_call_count=usage_reported_call_count,
+        average_tokens_per_llm_call=(
+            round(total_tokens / len(llm_steps), 2) if llm_steps else 0.0
+        ),
         repair_requested_count=repair_requested_count,
         repair_executed_count=repair_executed_count,
         repair_blocked_count=repair_blocked_count,
@@ -423,3 +512,183 @@ def _repair_step_name(step: TraceStep) -> str:
         if repair.get("blocked_reason"):
             return "repair_blocked"
     return step.step
+
+
+def load_regression_suite(path: str | Path) -> RegressionSuite:
+    """Load a labelled regression suite from JSON."""
+
+    payload = json.loads(Path(path).expanduser().resolve().read_text(encoding="utf-8"))
+    return RegressionSuite.model_validate(payload)
+
+
+def evaluate_regression_suite(
+    *,
+    assessments: list[SignalAssessment],
+    suite: RegressionSuite,
+) -> RegressionEvalSummary:
+    """Compare Harness decisions against stable product-level expectations."""
+
+    by_id = {item.event_id: item for item in assessments}
+    missing: list[str] = []
+    mismatches: list[RegressionMismatch] = []
+    decision_matches = 0
+    category_matches = 0
+    category_total = 0
+    tp = fp = tn = fn = 0
+    confusion: Counter[str] = Counter()
+
+    for case in suite.cases:
+        actual = by_id.get(case.event_id)
+        if actual is None:
+            missing.append(case.event_id)
+        actual_decision = actual.decision if actual is not None else None
+        actual_category = actual.category if actual is not None else None
+        actual_priority = (
+            actual_decision in {SignalDecision.ALERT, SignalDecision.ACTION_REQUIRED}
+            if actual_decision is not None
+            else False
+        )
+        if actual_decision is case.expected_decision:
+            decision_matches += 1
+        if case.expected_category is not None:
+            category_total += 1
+            if actual_category is case.expected_category:
+                category_matches += 1
+
+        if case.expected_priority and actual_priority:
+            tp += 1
+        elif case.expected_priority and not actual_priority:
+            fn += 1
+        elif not case.expected_priority and actual_priority:
+            fp += 1
+        else:
+            tn += 1
+        confusion[
+            f"{case.expected_decision.value}->{actual_decision.value if actual_decision else 'missing'}"
+        ] += 1
+
+        if (
+            actual_decision is not case.expected_decision
+            or (
+                case.expected_category is not None
+                and actual_category is not case.expected_category
+            )
+            or actual_priority != case.expected_priority
+        ):
+            mismatches.append(
+                RegressionMismatch(
+                    event_id=case.event_id,
+                    expected_decision=case.expected_decision,
+                    actual_decision=actual_decision,
+                    expected_category=case.expected_category,
+                    actual_category=actual_category,
+                    expected_priority=case.expected_priority,
+                    actual_priority=actual_priority if actual is not None else None,
+                )
+            )
+
+    decision_accuracy = _rate(decision_matches, len(suite.cases))
+    category_accuracy = _rate(category_matches, category_total, default=1.0)
+    priority_precision = _rate(tp, tp + fp, default=1.0)
+    priority_recall = _rate(tp, tp + fn, default=1.0)
+    false_positive_rate = _rate(fp, fp + tn)
+    false_negative_rate = _rate(fn, fn + tp)
+    thresholds = suite.thresholds
+    passed = (
+        not missing
+        and decision_accuracy >= thresholds.decision_accuracy
+        and category_accuracy >= thresholds.category_accuracy
+        and priority_precision >= thresholds.priority_precision
+        and priority_recall >= thresholds.priority_recall
+    )
+    return RegressionEvalSummary(
+        suite=suite.suite,
+        case_count=len(suite.cases),
+        assessed_count=len(suite.cases) - len(missing),
+        missing_event_ids=missing,
+        decision_accuracy=decision_accuracy,
+        category_accuracy=category_accuracy,
+        priority_precision=priority_precision,
+        priority_recall=priority_recall,
+        false_positive_rate=false_positive_rate,
+        false_negative_rate=false_negative_rate,
+        true_positive=tp,
+        false_positive=fp,
+        true_negative=tn,
+        false_negative=fn,
+        decision_confusion=dict(sorted(confusion.items())),
+        thresholds=thresholds,
+        passed=passed,
+        mismatches=mismatches,
+    )
+
+
+def write_regression_eval_summary(
+    output_dir: str | Path,
+    summary: RegressionEvalSummary,
+) -> dict[str, Path]:
+    """Write machine-readable and interview-friendly regression evidence."""
+
+    root = Path(output_dir).expanduser().resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    json_path = root / "regression_eval_summary.json"
+    md_path = root / "regression_eval_summary.md"
+    atomic_write_text(
+        json_path,
+        json.dumps(summary.model_dump(mode="json"), indent=2, ensure_ascii=False) + "\n",
+    )
+    atomic_write_text(md_path, _render_regression_eval_markdown(summary))
+    return {"json": json_path, "markdown": md_path}
+
+
+def _render_regression_eval_markdown(summary: RegressionEvalSummary) -> str:
+    lines = [
+        f"# SignalHarness Regression Eval — {summary.suite}",
+        "",
+        f"**Result:** {'PASS' if summary.passed else 'FAIL'}",
+        "",
+        "## Core metrics",
+        "",
+        f"- cases: {summary.case_count}",
+        f"- assessed: {summary.assessed_count}",
+        f"- decision_accuracy: {summary.decision_accuracy:.4f}",
+        f"- category_accuracy: {summary.category_accuracy:.4f}",
+        f"- priority_precision: {summary.priority_precision:.4f}",
+        f"- priority_recall: {summary.priority_recall:.4f}",
+        f"- false_positive_rate: {summary.false_positive_rate:.4f}",
+        f"- false_negative_rate: {summary.false_negative_rate:.4f}",
+        f"- confusion: TP={summary.true_positive}, FP={summary.false_positive}, "
+        f"TN={summary.true_negative}, FN={summary.false_negative}",
+        "",
+        "## Gate thresholds",
+        "",
+        f"- decision_accuracy >= {summary.thresholds.decision_accuracy:.2f}",
+        f"- category_accuracy >= {summary.thresholds.category_accuracy:.2f}",
+        f"- priority_precision >= {summary.thresholds.priority_precision:.2f}",
+        f"- priority_recall >= {summary.thresholds.priority_recall:.2f}",
+        "",
+        "## Mismatches",
+        "",
+    ]
+    if not summary.mismatches:
+        lines.append("- none")
+    else:
+        for item in summary.mismatches:
+            lines.append(
+                "- "
+                f"{item.event_id}: decision {item.expected_decision.value} -> "
+                f"{item.actual_decision.value if item.actual_decision else 'missing'}; "
+                f"category {item.expected_category.value if item.expected_category else 'n/a'} -> "
+                f"{item.actual_category.value if item.actual_category else 'missing'}; "
+                f"priority {item.expected_priority} -> {item.actual_priority}"
+            )
+    if summary.missing_event_ids:
+        lines.extend(["", "## Missing events", ""])
+        lines.extend(f"- {event_id}" for event_id in summary.missing_event_ids)
+    lines.extend(
+        [
+            "",
+            "This is a project-specific regression suite, not a general model benchmark.",
+        ]
+    )
+    return "\n".join(lines).rstrip() + "\n"

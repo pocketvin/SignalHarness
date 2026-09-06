@@ -1,11 +1,6 @@
 # Scheduled Runs
 
-SignalHarness core is a one-shot scan engine. Scheduling is intentionally left
-to the platform around it: GitHub Actions, cron, launchd, or systemd timers.
-
-There is no built-in daemon because external schedulers are easier to deploy,
-debug, disable, and explain in an interview. This also avoids Redis, Celery,
-APScheduler, Postgres, and long-running service state.
+The core scan remains a bounded one-shot operation. SignalHarness also has a long-running FastAPI/MCP service surface, but it does not include an internal scheduler or distributed worker. Recurring execution is intentionally delegated to GitHub Actions, cron, launchd, or systemd timers. This keeps scheduling separate from the Harness and avoids claiming Redis/Celery/Postgres infrastructure that is not needed for the MVP.
 
 ## Common commands
 

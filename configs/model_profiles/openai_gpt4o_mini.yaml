@@ -9,3 +9,5 @@ max_output_tokens: 4096
 recommended_temperature: 0.0
 schema_strategy: prompt_json_retry
 tool_strategy: controlled_tool_request
+input_cost_per_million_usd: 0.15
+output_cost_per_million_usd: 0.60
