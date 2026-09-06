@@ -22,6 +22,7 @@ class SignalPermissionGuard:
             "read_github_issue",
             "read_rss",
             "read_mock_web_change",
+            "read_web_change",
             "read_config",
             "read_project_context",
             "read_signal_history",
@@ -47,9 +48,10 @@ class SignalPermissionGuard:
 
     def __init__(self, policy: dict[str, Any] | None = None) -> None:
         configured = (policy or {}).get("permission_policy", {})
-        self.auto_allow = frozenset(
-            configured.get("auto_allow", self.DEFAULT_AUTO_ALLOW)
-        ) | {"save_feedback", "save_policy_proposal"}
+        self.auto_allow = frozenset(configured.get("auto_allow", self.DEFAULT_AUTO_ALLOW)) | {
+            "save_feedback",
+            "save_policy_proposal",
+        }
         self.require_confirmation = frozenset(
             configured.get(
                 "require_confirmation",

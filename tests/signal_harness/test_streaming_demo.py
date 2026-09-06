@@ -99,6 +99,9 @@ def test_demo_page_and_metadata(
         assert "['http:','https:']" in javascript.text
         assert 'data-action="audit"' in javascript.text
         assert "data-stage=" in javascript.text
+        assert "project-drafts" in javascript.text
+        assert "SAFE_PROJECT_MANIFESTS" in javascript.text
+        assert 'id="draftInput"' in page.text
 
         meta = client.get("/demo/meta")
         assert meta.status_code == 200
@@ -116,8 +119,8 @@ def test_demo_page_and_metadata(
         assert payload["default_project_id"] == "signalharness"
         projects = {item["id"]: item for item in payload["projects"]}
         assert projects["signalharness"]["name"] == "SignalHarness"
-        assert projects["signalharness"]["watchlist"]["source_count"] == 8
-        assert projects["example-agent-service"]["watchlist"]["source_count"] == 6
+        assert projects["signalharness"]["watchlist"]["source_count"] == 9
+        assert projects["example-agent-service"]["watchlist"]["source_count"] == 7
         assert payload["default_provider_id"] is None
         assert all(option["ready"] is False for option in payload["providers"])
 

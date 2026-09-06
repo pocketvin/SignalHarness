@@ -29,3 +29,10 @@ rss:
     - name: Simon Willison
       official: false
       url: https://simonwillison.net/atom/everything/
+
+web_changes:
+  sources:
+    - name: MCP Specification
+      adapter: http
+      url: https://modelcontextprotocol.io/specification/latest
+      official: true

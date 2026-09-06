@@ -542,21 +542,42 @@ class SignalHarnessWorkflow:
                 )
             )
         for source in watchlist.get("web_changes", {}).get("sources", []):
-            if source.get("adapter") != "fixture":
-                continue
-            guard.require("read_mock_web_change")
-            jobs.append(
-                SourceJob(
-                    tool_name="web_change",
-                    arguments={
-                        "action": "load_fixture",
-                        "fixture": str(source.get("fixture", "")),
-                    },
-                    source_name=str(source.get("name") or source.get("fixture") or "web-change"),
-                    source_type="web_change",
-                    ttl_seconds=0,
-                )
+            adapter = str(source.get("adapter") or "").strip().lower()
+            source_name = str(
+                source.get("name") or source.get("url") or source.get("fixture") or "web-change"
             )
+            if adapter == "fixture":
+                guard.require("read_mock_web_change")
+                jobs.append(
+                    SourceJob(
+                        tool_name="web_change",
+                        arguments={
+                            "action": "load_fixture",
+                            "fixture": str(source.get("fixture", "")),
+                        },
+                        source_name=source_name,
+                        source_type="web_change",
+                        ttl_seconds=0,
+                    )
+                )
+            elif adapter in {"http", "snapshot"}:
+                guard.require("read_web_change")
+                jobs.append(
+                    SourceJob(
+                        tool_name="web_change",
+                        arguments={
+                            "action": "fetch_snapshot",
+                            "url": str(source.get("url", "")),
+                            "source_name": source_name,
+                            "official": bool(source.get("official", False)),
+                            "max_bytes": int(source.get("max_bytes") or 750000),
+                        },
+                        source_name=source_name,
+                        source_type="web_change",
+                        ttl_seconds=0,
+                        official=(bool(source.get("official")) if "official" in source else None),
+                    )
+                )
 
         results = await asyncio.gather(*(self._run_source_job(job) for job in jobs))
         collected: list[dict[str, Any]] = []
@@ -590,6 +611,12 @@ class SignalHarnessWorkflow:
                         }
                     )
         if not collected:
+            if any(task.status == "success" for task in source_tasks):
+                return CollectionBatch(
+                    events=[],
+                    failed_sources=failures,
+                    source_tasks=source_tasks,
+                )
             if failures:
                 raise RuntimeError("All configured signal sources failed: " + "; ".join(failures))
             raise RuntimeError("No events were collected from the configured watchlist")

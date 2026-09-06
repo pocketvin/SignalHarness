@@ -73,8 +73,8 @@ class ContextEvidenceAgent:
         },
         "web_change": {
             "required": ["action"],
-            "common_valid_actions": ["load_fixture"],
-            "required_when_applicable": ["fixture"],
+            "common_valid_actions": ["load_fixture", "fetch_snapshot"],
+            "required_when_applicable": ["fixture for load_fixture; url for fetch_snapshot"],
             "minimal_examples": [
                 {
                     "tool_name": "web_change",
@@ -83,7 +83,16 @@ class ContextEvidenceAgent:
                         "fixture": "examples/signal_harness/sample_events.json",
                     },
                     "reason": "Read a local fixture-backed web-change source.",
-                }
+                },
+                {
+                    "tool_name": "web_change",
+                    "arguments": {
+                        "action": "fetch_snapshot",
+                        "url": "https://example.com/changelog",
+                        "source_name": "Official changelog",
+                    },
+                    "reason": "Read a configured public page snapshot for corroboration.",
+                },
             ],
         },
         "signal_memory": {
@@ -130,9 +139,7 @@ class ContextEvidenceAgent:
         payload = {
             "events": [event.model_dump(mode="json") for event in events],
             "routes": routes.model_dump(mode="json"),
-            "related_clusters": [
-                cluster.model_dump(mode="json") for cluster in clusters
-            ],
+            "related_clusters": [cluster.model_dump(mode="json") for cluster in clusters],
             "source_diversity": sorted({event.source_type for event in events}),
             "source_tool_hints": _source_tool_hints(events),
             "available_tools": list(self.available_tools),
@@ -170,14 +177,10 @@ class ContextEvidenceAgent:
         payload = {
             "events": [event.model_dump(mode="json") for event in events],
             "routes": routes.model_dump(mode="json"),
-            "related_clusters": [
-                cluster.model_dump(mode="json") for cluster in clusters
-            ],
+            "related_clusters": [cluster.model_dump(mode="json") for cluster in clusters],
             "source_diversity": sorted({event.source_type for event in events}),
             "tool_plan": plan.model_dump(mode="json"),
-            "tool_observations": [
-                item.model_dump(mode="json") for item in observations
-            ],
+            "tool_observations": [item.model_dump(mode="json") for item in observations],
             "phase": "final_evidence",
         }
         return build_agent_call(
@@ -195,13 +198,9 @@ class ContextEvidenceAgent:
         )
 
     def fallback_plan(self, events: list[SignalEvent]) -> EvidenceToolPlan:
-        requests = [
-            ToolRequest.model_validate(item) for item in _source_tool_hints(events)
-        ]
+        requests = [ToolRequest.model_validate(item) for item in _source_tool_hints(events)]
         return EvidenceToolPlan(
-            source_types_observed=list(
-                dict.fromkeys(event.source_type for event in events)
-            ),
+            source_types_observed=list(dict.fromkeys(event.source_type for event in events)),
             tool_requests=list({request_key(item): item for item in requests}.values()),
             planning_summary=(
                 "Deterministic source-aware fallback requested safe primary-source tools."
@@ -219,9 +218,7 @@ class ContextEvidenceAgent:
         active_plan = plan or self.fallback_plan(events)
         active_observations = observations or []
         requested = [item.tool_name for item in active_plan.tool_requests]
-        executed = [
-            item.tool_name for item in active_observations if item.status == "success"
-        ]
+        executed = [item.tool_name for item in active_observations if item.status == "success"]
         errors = [
             f"{item.tool_name}: {item.error or item.output_summary}"
             for item in active_observations
@@ -246,9 +243,7 @@ class ContextEvidenceAgent:
                     tools_requested=requested,
                     tools_executed=executed,
                     tool_errors=(
-                        ["Evidence confidence reduced due to tool errors."]
-                        if errors
-                        else []
+                        ["Evidence confidence reduced due to tool errors."] if errors else []
                     ),
                 )
                 for event in events
@@ -258,9 +253,7 @@ class ContextEvidenceAgent:
 
 
 def _source_tool_hints(events: list[SignalEvent]) -> list[dict[str, Any]]:
-    requests = [
-        hint for event in events for hint in [_source_tool_hint(event)] if hint is not None
-    ]
+    requests = [hint for event in events for hint in [_source_tool_hint(event)] if hint is not None]
     return [
         request.model_dump(mode="json")
         for request in {request_key(item): item for item in requests}.values()
@@ -299,9 +292,7 @@ def _source_tool_hint(event: SignalEvent) -> ToolRequest | None:
         )
     if event.source_type == "rss":
         feed_url = str(
-            event.raw_payload.get("feed_url")
-            or event.raw_payload.get("source_feed_url")
-            or ""
+            event.raw_payload.get("feed_url") or event.raw_payload.get("source_feed_url") or ""
         ).strip()
         if feed_url.startswith(("http://", "https://")):
             return ToolRequest(

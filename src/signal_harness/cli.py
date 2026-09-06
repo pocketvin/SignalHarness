@@ -39,6 +39,11 @@ from signal_harness.providers.factory import provider_from_env
 from signal_harness.providers.mock_provider import MockProvider
 from signal_harness.projects.catalog import default_project_id, project_option
 from signal_harness.projects.state import prepare_project_state
+from signal_harness.projects.onboarding import (
+    apply_project_draft,
+    inspect_project_directory,
+    write_project_draft,
+)
 from signal_harness.resources import resolve_config_dir, resolve_example_path
 from signal_harness.runtime.permissions import SignalPermissionGuard
 from signal_harness.runtime.tracing import TraceRecorder
@@ -267,6 +272,57 @@ def parse_since(value: str | None) -> datetime | None:
             "Invalid --since value. Use YYYY-MM-DD or an ISO-8601 datetime, "
             "for example 2026-06-24T00:00:00Z."
         ) from exc
+
+
+@app.command("project-draft")
+def project_draft(
+    project_path: Path = typer.Argument(..., help="Local project directory to inspect"),
+    output_dir: Path = typer.Option(Path("outputs/project-drafts"), "--output-dir"),
+    config_dir: Path = typer.Option(Path("configs"), "--config-dir"),
+    apply: bool = typer.Option(
+        False, "--apply", help="Register the reviewed draft in Project Catalog"
+    ),
+    force: bool = typer.Option(
+        False, "--force", help="Allow --apply to replace an existing project id"
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit the draft as JSON"),
+    cwd: Path = typer.Option(Path.cwd(), "--cwd", hidden=True),
+) -> None:
+    """Inspect safe project manifests and generate a review-required Project Profile draft."""
+
+    root = cwd.expanduser().resolve()
+    try:
+        draft = inspect_project_directory(project_path)
+    except (ValueError, OSError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    draft_paths = write_project_draft(draft, _resolve(root, output_dir))
+    applied_paths: dict[str, Path] = {}
+    if apply:
+        config = resolve_config_dir(root, config_dir)
+        if not (config / "signal_policy.yaml").is_file():
+            raise typer.BadParameter(
+                "--apply requires a writable SignalHarness config directory; pass --config-dir explicitly"
+            )
+        policy = load_signal_policy(config / "signal_policy.yaml")
+        guard = SignalPermissionGuard(policy)
+        guard.require("modify_project_profile", confirmed=True)
+        guard.require("add_watchlist_source", confirmed=True)
+        try:
+            applied_paths = apply_project_draft(draft, config, overwrite=force)
+        except FileExistsError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+    if json_output:
+        payload = draft.model_dump(mode="json")
+        payload["draft_files"] = {key: str(value) for key, value in draft_paths.items()}
+        payload["applied_files"] = {key: str(value) for key, value in applied_paths.items()}
+        typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+    typer.echo(f"Project draft: {draft.name} ({draft.id})")
+    typer.echo(f"Detected dependencies: {len(draft.project_profile.get('dependencies', []))}")
+    typer.echo(f"Draft directory: {next(iter(draft_paths.values())).parent}")
+    typer.echo("Review required: yes")
+    if applied_paths:
+        typer.echo(f"Project Catalog registered: {applied_paths['project']}")
 
 
 @app.command()

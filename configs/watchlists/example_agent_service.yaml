@@ -16,3 +16,10 @@ rss:
     - name: GitHub Changelog
       official: true
       url: https://github.blog/changelog/feed/
+
+web_changes:
+  sources:
+    - name: FastAPI Release Notes
+      adapter: http
+      url: https://fastapi.tiangolo.com/release-notes/
+      official: true

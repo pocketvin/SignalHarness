@@ -4,7 +4,7 @@
 
 > 一个面向真实工程场景的 Multi-Agent Harness：用外部技术变化作为业务载体，重点展示五 Agent 编排、受控工具调用、Python Guardrails、Agent Eval、Trace/Observability、MCP、SSE、FastAPI 与 Docker。
 
-SignalHarness 会实时监听 GitHub / RSS 等外部工程信号，并保留可扩展的 Web Change 适配入口；它判断这些变化是否真正影响当前选择的项目，并把结果转成**可解释、可审计、可回归验证**的决策，而不是再做一个信息聚合器或聊天机器人。
+SignalHarness 会实时监听 GitHub / RSS / 配置化网页快照等外部工程信号；它判断这些变化是否真正影响当前选择的项目，并把结果转成**可解释、可审计、可回归验证**的决策，而不是再做一个信息聚合器或聊天机器人。
 
 ## 30 秒看懂这个项目
 
@@ -82,7 +82,7 @@ uv run signal-harness serve \
 http://127.0.0.1:8001/demo
 ```
 
-页面默认是**中文**，右上角可切换 `EN`。运行前先选择**关联项目**，再选择数据来源、分析方式和真实模型。项目不是写死在 UI 中：`configs/projects/*.yaml` 是 Project Catalog，每个项目分别绑定自己的 Project Profile 与 Watchlist。公开仓库默认提供 `SignalHarness` 与 `Example · Agent API Service` 两个 profile，用来证明同一套 Workflow 可以按项目切换判断上下文。
+页面默认是**中文**，右上角可切换 `EN`。运行前先选择**关联项目**，再选择数据来源、分析方式和真实模型。项目不是写死在 UI 中：`configs/projects/*.yaml` 是 Project Catalog，每个项目分别绑定自己的 Project Profile 与 Watchlist。公开仓库默认提供 `SignalHarness` 与 `Example · Agent API Service` 两个 profile，用来证明同一套 Workflow 可以按项目切换判断上下文。页面还可以选择本地项目目录生成 review-only onboarding draft：浏览器只读取白名单 manifest 与相对路径，不上传源码或 `.env`，也不会自动修改 Catalog。
 
 默认组合是：
 
@@ -163,6 +163,12 @@ SSE
 
 同一项目的后续扫描会读取之前的 seen signals 与 feedback；不同项目彼此隔离。同项目并发 Run 在共享状态写入处串行化，避免覆盖同一个 JSON state。
 
+### Project Onboarding V1：从真实项目生成待审核配置
+
+`signal-harness project-draft <repo>` 会确定性读取 `pyproject.toml`、`package.json`、`requirements*.txt`、`Cargo.toml`、`go.mod` 和有限目录结构，生成 Project Profile + Watchlist 草案。默认只写 draft；只有显式 `--apply` 才注册到 Project Catalog，已存在目标时拒绝覆盖，除非明确 `--force`。
+
+Golden Demo 的“导入本地项目草案”使用浏览器目录选择器，但只上传白名单 manifest 内容与相对路径列表；不会上传源代码、`.env` 或任意本机文件。`POST /project-drafts` 只返回 review-required 草案，不执行 apply，并限制单 manifest 256 KB、聚合 manifest 512 KB。
+
 ### Candidate Funnel V2：先判断相关性，再做 Top-K
 
 实时 Watchlist 可能一次产生上千条原始事件。SignalHarness 不再先按时间把它们直接砍成 12 条，而是先完成 Normalize / Deduplicate，再用低成本的 Project Relevance、Focus Keyword、Source Authority、Recency 与 Novelty 做候选排序，并保留来源多样性后才进入五 Agent。
@@ -176,6 +182,12 @@ SSE
 ### Change Delta V1：直接回答“这次变了什么”
 
 标准化后的 Signal 会保留 source-native change metadata。GitHub Issue 使用 `created_at / updated_at` 区分新增与更新；GitHub Release 记录 `previous_version → current_version`；RSS 保留 published / updated 时间。统一时间窗口在 Normalize 之后执行，因此不同来源都按实际观察时间过滤，而不是让旧 RSS 混进“最近 14 天”。Golden Demo 会把这些 Delta 直接放在变化卡片顶部。
+
+### Real Web Change V1：真实网页 baseline / snapshot diff
+
+`web_changes.sources` 现在支持 `adapter: http` / `snapshot`。每个配置化公网 HTTP(S) 页面只做只读 GET，不执行页面 JavaScript；可见文本归一化后保存 project-scoped hash/snapshot。第一次观察只建立 baseline，页面未变化时输出 0 Signal，只有内容 hash 改变时才生成带 `Before / After` 摘要的 `web_change`。因此“首次看到页面”不会被伪装成“页面发生变化”，只有网页来源的项目也可以正常完成 0-change scan。
+
+网络边界采用配置驱动的 allowlist：只允许 80/443 的公网 HTTP(S)，拒绝 credentials、localhost、`.local/.internal`、私网/loopback/link-local/metadata 等目标，每次 redirect 都重新校验，最多 3 次，响应正文有体积与文本 content-type 限制。更重要的是，Evidence Agent 的 `fetch_snapshot` **只能重读当前项目 Watchlist 已批准的 URL**，不能自行发明一个新网页把 `web_change` 变成通用 web fetch。Watchlist 标记 `official: true` 的网页由 Python provenance 判为 official，其他网页为 secondary。
 
 ### 不可信外部内容边界
 
@@ -515,13 +527,14 @@ src/signal_harness/agent_team/          五 Agent roles
 src/signal_harness/agent_integration/   prompts / runner / schemas / tool loop / trace
 src/signal_harness/runtime/             workflow / permissions / registry / executor
 src/signal_harness/signal/              scoring / candidate funnel / source authority / semantics
-src/signal_harness/projects/            Project Catalog + persistent project state
+src/signal_harness/projects/            Project Catalog + onboarding + persistent project state
 src/signal_harness/providers/           mock + OpenAI-compatible provider
 src/signal_harness/mcp_server.py        只读 MCP interface
 src/signal_harness/service.py           FastAPI REST/SSE + MCP HTTP
 src/signal_harness/service_streaming.py stream-run / SSE replay manager
 src/signal_harness/resources.py         repo-first / packaged-resource fallback
 src/signal_harness/ui/demo.py           Golden Demo HTML loader
+src/signal_harness/tools/web_snapshot.py safe public snapshot / visible-text diff
 src/signal_harness/ui/static/           Golden Demo HTML / CSS / JS
 src/signal_harness/evals.py             Regression + Provider Contract Eval
 configs/projects/                       Project Catalog entries

@@ -159,3 +159,13 @@ async def test_github_release_fetch_preserves_previous_tag_before_since_filter(
     assert len(payload) == 1
     assert payload[0]["tag_name"] == "v2.0.0"
     assert payload[0]["_previous_tag_name"] == "v1.9.0"
+
+
+def test_web_change_module_imports_without_runtime_package_cycle() -> None:
+    import importlib
+
+    module = importlib.import_module("signal_harness.tools.web_change")
+    runtime = importlib.import_module("signal_harness.runtime")
+    assert module.WebChangeTool.name == "web_change"
+    assert runtime.SignalToolExecutor is not None
+    assert "web_change" in runtime.SIGNAL_TOOL_ALLOWLIST

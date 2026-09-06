@@ -47,7 +47,7 @@ def event_source_quality(event: SignalEvent) -> SourceQuality:
     if event.source_type == "rss":
         return SourceQuality.OFFICIAL if raw.get("official") is True else SourceQuality.SECONDARY
     if event.source_type == "web_change":
-        return SourceQuality.COMMUNITY
+        return SourceQuality.OFFICIAL if raw.get("official") is True else SourceQuality.SECONDARY
     if event.source_type == "team_update":
         return SourceQuality.OFFICIAL
     return SourceQuality.UNVERIFIED

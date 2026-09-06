@@ -98,9 +98,7 @@ class ControlledToolLoop:
             if index >= allowed_count:
                 trace["blocked"].append(request.tool_name)
                 trace["budget_blocked"].append(request.tool_name)
-                trace["permission_checks"].append(
-                    f"{request.tool_name}:blocked:budget_exceeded"
-                )
+                trace["permission_checks"].append(f"{request.tool_name}:blocked:budget_exceeded")
                 observations.append(
                     ToolObservation(
                         tool_name=request.tool_name,
@@ -199,7 +197,11 @@ def permission_action(name: str, arguments: dict[str, Any]) -> str:
     if name == "rss_signal":
         return "read_rss"
     if name == "web_change":
-        return "read_mock_web_change"
+        return (
+            "read_web_change"
+            if arguments.get("action") == "fetch_snapshot"
+            else "read_mock_web_change"
+        )
     return "read_config"
 
 
@@ -228,9 +230,7 @@ def cap_evidence_after_tool_failures(
     evidence: ContextEvidenceOutput,
     observations: list[ToolObservation],
 ) -> ContextEvidenceOutput:
-    failures = [
-        item for item in observations if item.status in {"error", "blocked"}
-    ]
+    failures = [item for item in observations if item.status in {"error", "blocked"}]
     if not failures:
         return evidence
     message = "Evidence confidence reduced due to tool errors."

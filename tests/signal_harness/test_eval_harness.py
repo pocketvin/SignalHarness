@@ -139,7 +139,10 @@ def test_default_mock_agent_requests_multisource_tools(
     assert contract["github_signal"]["required"] == ["action"]
     assert "fetch_repo_releases" in contract["github_signal"]["common_valid_actions"]
     assert contract["rss_signal"]["required_when_applicable"] == ["url"]
-    assert contract["web_change"]["required_when_applicable"] == ["fixture"]
+    assert "fetch_snapshot" in contract["web_change"]["common_valid_actions"]
+    assert contract["web_change"]["required_when_applicable"] == [
+        "fixture for load_fixture; url for fetch_snapshot"
+    ]
     assert contract["signal_memory"]["valid_action_rule"] == "action must start with load_"
     assert "Do not omit required arguments." in plan_call.input_payload["tool_planning_rules"]
 

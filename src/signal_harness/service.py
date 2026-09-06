@@ -14,7 +14,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.sse import EventSourceResponse, ServerSentEvent
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from signal_harness.agent_integration.mode import RunMode
 from signal_harness.mcp_server import MCP_TOOL_NAMES, build_mcp_server, validate_run_id
@@ -31,6 +31,7 @@ from signal_harness.projects.catalog import (
     project_option,
 )
 from signal_harness.projects.state import prepare_project_state
+from signal_harness.projects.onboarding import ProjectManifest, draft_project
 from signal_harness.resources import (
     is_allowed_fixture_path,
     resolve_config_dir,
@@ -83,6 +84,20 @@ class FeedbackRequest(BaseModel):
     signal_id: str = Field(min_length=1)
     label: FeedbackLabel
     note: str = ""
+
+
+class ProjectDraftRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name_hint: str | None = Field(default=None, max_length=120)
+    manifests: list[ProjectManifest] = Field(min_length=1, max_length=20)
+    paths: list[str] = Field(default_factory=list, max_length=500)
+
+    @model_validator(mode="after")
+    def _bounded_manifest_payload(self) -> "ProjectDraftRequest":
+        if sum(len(item.content.encode("utf-8")) for item in self.manifests) > 512_000:
+            raise ValueError("project draft manifests exceed aggregate size limit")
+        return self
 
 
 @dataclass(frozen=True)
@@ -205,6 +220,17 @@ def create_app(
             "projects": [option.public_payload() for option in projects],
             "default_project_id": default_project_id(paths.config_dir),
         }
+
+    @app.post("/project-drafts")
+    async def create_project_draft(request: ProjectDraftRequest) -> dict[str, Any]:
+        """Build a review-only project draft from browser-supplied safe manifests."""
+
+        draft = draft_project(
+            manifests=request.manifests,
+            paths=request.paths,
+            name_hint=request.name_hint,
+        )
+        return draft.model_dump(mode="json")
 
     @app.post("/stream-runs", status_code=status.HTTP_202_ACCEPTED)
     async def create_stream_run(request: StreamRunRequest) -> dict[str, Any]:

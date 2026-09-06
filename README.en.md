@@ -4,7 +4,7 @@
 
 **A production-oriented multi-agent harness for project-level signal intelligence, with controlled tool use, regression evals, observability, MCP, and a thin service layer.**
 
-SignalHarness watches external engineering changes, decides whether they matter to a project, and turns them into auditable assessments instead of another noisy feed. The signal-intelligence use case is the business carrier; the engineering focus is the Agent Harness itself: orchestration, structured contracts, tool guardrails, deterministic fallback, evaluation, traceability, and human-gated learning.
+SignalHarness watches GitHub, RSS, and configured public-page snapshots, decides whether those changes matter to a project, and turns them into auditable assessments instead of another noisy feed. The signal-intelligence use case is the business carrier; the engineering focus is the Agent Harness itself: orchestration, structured contracts, tool guardrails, deterministic fallback, evaluation, traceability, and human-gated learning.
 
 ## At a glance
 
@@ -19,7 +19,7 @@ SignalHarness watches external engineering changes, decides whether they matter 
 | Observability | Local trace for Agent calls, schema/retry/fallback, tools, latency, provider-reported tokens, and estimated cost |
 | MCP | Five read-only structured tools for project context, signal history, assessments, trace, and feedback |
 | Service | FastAPI REST API + replayable SSE streaming runs + MCP Streamable HTTP |
-| Golden Demo | Chinese by default with an in-page English switch; provider readiness is shown without exposing secrets |
+| Golden Demo | Chinese by default with an in-page English switch; provider readiness and review-only project onboarding are shown without exposing secrets |
 | Deployment | Docker image with health check; package/CLI remains usable without a server |
 | Learning | Review-only proposals → risk classification → replay gate → explicit human apply |
 
@@ -102,6 +102,12 @@ Memory is infrastructure, not a sixth Agent.
 
 Per-run output/trace remains isolated under `service-runs/<run_id>`, while persistent signal, feedback, alert and learning state is stored under `.signal-harness/projects/<project_id>/`. Subsequent runs for the same project reuse that state; different projects are isolated. Shared project-state writes are serialized to prevent concurrent runs from overwriting the same JSON files.
 
+### Project Onboarding V1
+
+`signal-harness project-draft <repo>` deterministically inspects `pyproject.toml`, `package.json`, `requirements*.txt`, `Cargo.toml`, `go.mod`, plus a bounded directory outline, then produces a review-required Project Profile + Watchlist draft. The default path never registers the project; `--apply` is explicit, existing project config refuses overwrite, and `--force` is required to replace reviewed configuration.
+
+The Golden Demo can create the same draft from a browser-selected directory without giving the server arbitrary filesystem access. The browser uploads only allowlisted manifest text and relative path names, never source files or `.env`. `POST /project-drafts` is preview-only and bounds each manifest to 256 KB and the aggregate manifest payload to 512 KB.
+
 ### Candidate Funnel V2
 
 Live collection can return more than a thousand raw events. SignalHarness now normalizes and deduplicates first, then ranks cheaply by project relevance, focus keywords, source authority, recency and novelty, while reserving source diversity before selecting the bounded Agent candidate set. A 2026-09-06 local live acceptance narrowed 1274 raw events to 12 project-aware candidates; that is runtime evidence, not a fixed benchmark.
@@ -113,6 +119,12 @@ Repository authority and claim-author authority are distinct. GitHub releases ca
 ### Change Delta V1
 
 Normalized signals preserve source-native change metadata. GitHub issues distinguish creation from update time, GitHub releases expose `previous_version → current_version`, and RSS preserves publish/update timestamps. The time-window filter now runs after normalization so all source types obey the same observed-change boundary. Golden Demo renders these deltas directly on each change card.
+
+### Real Web Change V1
+
+`web_changes.sources` supports `adapter: http` / `snapshot` for configured public pages. SignalHarness performs a read-only HTTP(S) GET, never executes page JavaScript, normalizes visible text, and stores a project-scoped hash/snapshot. The first observation creates a baseline, unchanged pages emit zero signals, and only a later hash change produces a bounded `Before / After` `web_change` event. A web-only project therefore treats a successful zero-change baseline as a successful scan rather than a collection failure.
+
+The network surface is configuration-driven and closed by default: only public HTTP(S) on ports 80/443 is accepted; credentials, localhost, `.local/.internal`, private/loopback/link-local/metadata-style targets are rejected; every redirect is revalidated; redirects, content type and body size are bounded. Evidence Agent `fetch_snapshot` requests are additionally restricted to URLs already approved in the current project Watchlist, so the tool cannot become a general-purpose web fetcher. Watchlist `official: true` pages receive Python-owned official provenance; other configured pages are secondary.
 
 ### Untrusted external-content boundary
 
@@ -346,6 +358,7 @@ src/signal_harness/runtime/             workflow, permissions, registry, executo
 src/signal_harness/signal/              schemas, scoring, taxonomy, text semantics
 src/signal_harness/providers/           mock + OpenAI-compatible providers/model profiles
 src/signal_harness/resources.py          workspace-first packaged-resource fallback
+src/signal_harness/tools/web_snapshot.py safe public snapshot / visible-text diff
 src/signal_harness/ui/static/            Golden Demo HTML / CSS / JS
 src/signal_harness/mcp_server.py        read-only MCP interface
 src/signal_harness/service.py           FastAPI REST/SSE + MCP HTTP service

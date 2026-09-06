@@ -23,12 +23,16 @@ def _string_values(value: object) -> set[str]:
 def signal_fingerprint(event: SignalEvent) -> str:
     """Return a stable content fingerprint for a normalized signal."""
 
+    version_marker = ""
+    if event.source_type == "web_change":
+        version_marker = str(event.raw_payload.get("current_hash") or "").lower()
     canonical = "|".join(
         (
             event.source_type.lower(),
             event.source_name.lower(),
             " ".join(event.title.lower().split()),
             event.url.lower().rstrip("/"),
+            version_marker,
         )
     )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -85,9 +89,7 @@ def save_seen_signals(
     payload = {
         "seen_signals": sorted(seen_signals),
         "duplicate_hashes": sorted(duplicate_hashes),
-        "previous_assessments": [
-            item.model_dump(mode="json") for item in assessments
-        ]
+        "previous_assessments": [item.model_dump(mode="json") for item in assessments]
         or existing.get("previous_assessments", []),
     }
     atomic_write_text(target, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")

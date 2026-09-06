@@ -96,7 +96,7 @@ sequenceDiagram
   项目上下文：技术栈、真实 dependencies、monitored ecosystem、critical modules、focus keywords。
 
 - `configs/watchlist.yaml` / `configs/watchlists/*.yaml`
-  project-scoped source watchlist：实时 GitHub/RSS，以及可扩展的 Web Change adapter。官方 RSS 可显式声明 provenance authority。
+  project-scoped source watchlist：实时 GitHub/RSS + 配置化 public HTTP(S) snapshot/diff。官方 RSS / Web page 可显式声明 provenance authority。
 
 - `configs/signal_policy.yaml`
   deterministic scoring weights、category weights、thresholds、tool allowlist、permission policy。
@@ -144,8 +144,10 @@ sequenceDiagram
 
 - **Run state**：trace、run metadata 与本次输出按 run 隔离。
 - **Project state**：seen signal fingerprints、feedback、alert state 与 learning artifacts 按 `project_id` 持久化；同项目并发写入受 project lock 保护。
+- **Project onboarding**：本地 CLI 通过 manifest + bounded path inspection 生成 review-only profile/watchlist draft；浏览器 onboarding 只上传 allowlisted manifest text 与相对路径，`POST /project-drafts` 不执行 Catalog 写入。
+- **Web snapshot boundary**：`web_change.fetch_snapshot` 只接受当前 Project Watchlist 已批准的 public HTTP(S) URL；公网/端口/redirect/content-type/body-size 都受 Python 校验。首次 observation 只建立 project-scoped baseline，unchanged 页面不产生 Signal。
 - **Candidate funnel**：live events 在 normalize/deduplicate 后才做 project-aware Top-K，避免“先按时间截断再判断相关性”造成系统性漏报。
-- **Source authority**：GitHub repo 本身是否官方与 Issue 作者 authority 分开；community / maintainer / official 进入不同 evidence confidence 上限。官方 RSS 由 Watchlist 显式声明。
+- **Source authority**：GitHub repo 本身是否官方与 Issue 作者 authority 分开；community / maintainer / official 进入不同 evidence confidence 上限。官方 RSS 与 official Web snapshot 由 Watchlist 显式声明，非官方网页保持 secondary。
 - **Release semantics**：GitHub Release 的 Documentation/Chores 章节不会单凭风险关键词把整个 release 升级成 security/breaking signal；运行时 Features/Bug Fixes 等章节仍参与确定性语义。
 - **Change delta**：Normalize 后统一使用 observed change time 做窗口过滤；Issue 保留 created/updated，Release 关联相邻 tag 得到 `previous_version → current_version`，RSS 保留 publish/update。
 - **Prompt-injection boundary**：外部 instruction-like 句子不进入确定性 keyword semantics，Prompt Context 同时声明外部正文不可覆盖角色、权限、工具或评分规则。

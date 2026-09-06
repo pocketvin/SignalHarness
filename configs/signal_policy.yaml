@@ -121,6 +121,7 @@ permission_policy:
     - read_github_issue
     - read_rss
     - read_mock_web_change
+    - read_web_change
     - read_config
     - read_project_context
     - read_signal_history
