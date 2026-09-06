@@ -36,9 +36,9 @@ false-negative rate    0.0000
 
 The initial baseline was materially worse: decision accuracy 0.7500 and priority recall 0.2857. The regression corpus exposed three general defects: category weighting was applied twice in the Agent scoring path; mock-Agent routing was missing stable project context; and negated risk phrases such as `no breaking change` still triggered positive risk terms.
 
-The fixes were architectural rather than case-ID special cases: category weight is now applied once at the guarded blend boundary, text semantics are shared and negation-aware, project context is wired into mock routing, and official vulnerability/supply-chain signals have a Python-owned minimum alert floor.
+The fixes were architectural rather than case-ID special cases: category weight is now applied once at the guarded blend boundary, text semantics are shared and negation-aware, project context is wired into mock routing, and official vulnerability/supply-chain signals have a Python-owned minimum alert floor. Separate regression tests also cover external prompt-injection text, unified source time-window filtering, release version lineage, source-authority clamping, and provider capability isolation.
 
-`--enforce` returns a non-zero exit code when the configured gate fails, so the suite is a real CI regression gate rather than a report-only script.
+`--enforce` returns a non-zero exit code when the configured gate fails, so the suite is a real CI regression gate rather than a report-only script. By default `regression-eval` now uses isolated temporary state; repeated local runs therefore cannot be down-weighted by seen-signal memory from an earlier evaluation. Supplying `--state-dir` remains available for explicit debugging/reproduction.
 
 ## Regression metrics
 

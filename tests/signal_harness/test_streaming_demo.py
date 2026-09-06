@@ -43,9 +43,7 @@ def _event_id(event: dict[str, object]) -> int:
 
 def test_trace_recorder_notifies_append_and_update() -> None:
     changes: list[tuple[str, int, str]] = []
-    recorder = TraceRecorder(
-        lambda kind, index, step: changes.append((kind, index, step.step))
-    )
+    recorder = TraceRecorder(lambda kind, index, step: changes.append((kind, index, step.step)))
     with recorder.step("collect_signals") as state:
         state["output_count"] = 2
 
@@ -88,6 +86,11 @@ def test_demo_page_and_metadata(
         assert "interview demos" not in page.text
         assert "中文" in page.text
         assert "new EventSource" in page.text
+        assert 'onclick="' not in page.text
+        assert "safeExternalUrl" in page.text
+        assert "['http:','https:']" in page.text
+        assert 'data-action="audit"' in page.text
+        assert "data-stage=" in page.text
 
         meta = client.get("/demo/meta")
         assert meta.status_code == 200
@@ -151,7 +154,9 @@ def test_agent_stream_run_requires_provider_configuration(
         state_dir=tmp_path / "state",
     )
     with TestClient(app) as client:
-        response = client.post("/stream-runs", json={"mode": "agent", "provider_id": "qwen", "data_source": "fixture"})
+        response = client.post(
+            "/stream-runs", json={"mode": "agent", "provider_id": "qwen", "data_source": "fixture"}
+        )
         assert response.status_code == 409
         detail = response.json()["detail"]
         assert detail["code"] == "agent_provider_not_ready"
@@ -219,7 +224,9 @@ def test_sse_last_event_id_replays_only_newer_events(
         state_dir=tmp_path / "state",
     )
     with TestClient(app) as client:
-        created = client.post("/stream-runs", json={"mode": "mock-agent", "data_source": "fixture"}).json()
+        created = client.post(
+            "/stream-runs", json={"mode": "mock-agent", "data_source": "fixture"}
+        ).json()
         with client.stream("GET", created["events_url"]) as first_response:
             first = _sse_events(first_response)
         assert first[-1]["event"] == "run.completed"
@@ -329,3 +336,30 @@ def test_stream_run_accepts_selected_configured_provider_without_calling_it(
         payload = response.json()
         assert payload["provider_id"] == "deepseek"
         assert payload["source_mode"] == "fixture"
+
+
+def test_demo_metadata_resolves_deprecated_kimi_without_exposing_secret(
+    project_root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KIMI_API_KEY", "test-only-kimi-secret")
+    monkeypatch.setenv("KIMI_BASE_URL", "https://kimi.example/v1")
+    monkeypatch.setenv("KIMI_MODEL", "kimi-latest")
+    monkeypatch.setenv("KIMI_MODEL_PROFILE", "kimi")
+    app = create_app(
+        cwd=project_root,
+        output_dir=tmp_path / "outputs",
+        state_dir=tmp_path / "state",
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/demo/meta")
+        assert response.status_code == 200
+        assert "test-only-kimi-secret" not in response.text
+        providers = {item["id"]: item for item in response.json()["providers"]}
+        kimi = providers["kimi"]
+        assert kimi["ready"] is True
+        assert kimi["model"] == "kimi-k2.6"
+        assert kimi["warning"] == "deprecated_model_auto_upgraded"
+        assert kimi["checked_at"] == "2026-09-06"

@@ -51,8 +51,10 @@ def test_kimi_profile_uses_max_completion_tokens(project_root: Path) -> None:
         config_dir=project_root / "configs",
     )
 
+    assert profile.model == "kimi-k2.6"
     assert profile.output_token_parameter == "max_completion_tokens"
-    assert profile.supports_json_mode is False
+    assert profile.supports_json_mode is True
+    assert profile.supports_json_schema is True
     assert profile.supports_native_tool_calling is False
     assert profile.schema_strategy == "prompt_json_retry"
     assert profile.tool_strategy == "controlled_tool_request"
@@ -169,8 +171,9 @@ def test_kimi_payload_uses_only_max_completion_tokens(project_root: Path) -> Non
 
     assert response == '{"routes":[],"batch_summary":"ok"}'
     assert requests
-    assert requests[0]["max_completion_tokens"] == 2048
+    assert requests[0]["max_completion_tokens"] == 8192
     assert "max_tokens" not in requests[0]
+    assert requests[0]["response_format"] == {"type": "json_object"}
 
 
 def test_http_status_error_includes_safe_body_without_sensitive_headers(
@@ -312,9 +315,7 @@ def test_provider_catalog_exposes_multiple_non_secret_options(
     assert "base_url" not in serialized
 
 
-def test_provider_from_selection_uses_selected_namespace(
-    project_root: Path, monkeypatch
-) -> None:
+def test_provider_from_selection_uses_selected_namespace(project_root: Path, monkeypatch) -> None:
     monkeypatch.setenv("KIMI_API_KEY", "test-key")
     monkeypatch.setenv("KIMI_BASE_URL", "https://kimi.example/v1")
     monkeypatch.setenv("KIMI_MODEL", "kimi-latest")
@@ -323,8 +324,87 @@ def test_provider_from_selection_uses_selected_namespace(
     provider = provider_from_selection("kimi", config_dir=project_root / "configs")
     try:
         assert provider.provider == "kimi"
-        assert provider.model == "kimi-latest"
+        assert provider.model == "kimi-k2.6"
         assert provider.model_profile == "kimi"
+        assert provider.profile.supports_json_mode is True
+        assert provider.profile.supports_json_schema is True
         assert provider.base_url == "https://kimi.example/v1"
     finally:
         asyncio.run(provider.close())
+
+
+def test_provider_catalog_marks_deprecated_model_and_resolves_current_profile(
+    project_root: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("KIMI_API_KEY", "test-key")
+    monkeypatch.setenv("KIMI_BASE_URL", "https://kimi.example/v1")
+    monkeypatch.setenv("KIMI_MODEL", "kimi-latest")
+
+    option = next(
+        item for item in provider_catalog(project_root / "configs") if item.provider_id == "kimi"
+    )
+
+    assert option.ready is True
+    assert option.model == "kimi-k2.6"
+    assert option.warning == "deprecated_model_auto_upgraded"
+    assert option.checked_at == "2026-09-06"
+
+
+def test_unknown_model_override_uses_conservative_capabilities(
+    project_root: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("KIMI_API_KEY", "test-key")
+    monkeypatch.setenv("KIMI_BASE_URL", "https://kimi.example/v1")
+    monkeypatch.setenv("KIMI_MODEL", "custom-kimi-experimental")
+
+    option = next(
+        item for item in provider_catalog(project_root / "configs") if item.provider_id == "kimi"
+    )
+    provider = provider_from_selection("kimi", config_dir=project_root / "configs")
+    try:
+        assert option.model == "custom-kimi-experimental"
+        assert option.warning == "unverified_model_capabilities"
+        assert provider.model == "custom-kimi-experimental"
+        assert provider.profile.supports_json_mode is False
+        assert provider.profile.supports_json_schema is False
+        assert provider.profile.max_input_tokens == 8192
+        assert provider.profile.input_cost_per_million_usd is None
+    finally:
+        asyncio.run(provider.close())
+
+
+def test_deepseek_profile_tracks_current_chat_model(project_root: Path) -> None:
+    profile = load_model_profile("deepseek", config_dir=project_root / "configs")
+
+    assert profile.model == "deepseek-v4-flash"
+    assert profile.supports_json_mode is True
+    assert profile.output_token_parameter == "max_completion_tokens"
+    assert "deepseek-chat" in profile.deprecated_models
+
+
+def test_qwen_profile_exposes_verified_structured_output_capabilities(project_root: Path) -> None:
+    profile = load_model_profile("qwen", config_dir=project_root / "configs")
+
+    assert profile.model == "qwen-plus"
+    assert profile.supports_json_mode is True
+    assert profile.supports_json_schema is True
+    assert profile.checked_at == "2026-09-06"
+
+
+def test_provider_catalog_does_not_leak_global_model_into_provider_profiles(
+    project_root: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("LLM_MODEL", "qwen-plus")
+    monkeypatch.setenv("KIMI_API_KEY", "test-key")
+    monkeypatch.setenv("KIMI_BASE_URL", "https://kimi.example/v1")
+    monkeypatch.setenv("KIMI_MODEL", "kimi-latest")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    monkeypatch.setenv("DEEPSEEK_BASE_URL", "https://deepseek.example/v1")
+    monkeypatch.setenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+
+    options = {item.provider_id: item for item in provider_catalog(project_root / "configs")}
+
+    assert options["kimi"].model == "kimi-k2.6"
+    assert options["kimi"].warning == "deprecated_model_auto_upgraded"
+    assert options["deepseek"].model == "deepseek-v4-flash"
+    assert options["deepseek"].warning is None

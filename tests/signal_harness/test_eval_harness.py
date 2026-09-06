@@ -630,3 +630,31 @@ def test_official_rss_watchlist_metadata_reaches_normalized_event(
     event = workflow._normalize_collected(collection.events[0])  # noqa: SLF001
     assert event.raw_payload["official"] is True
     assert event_source_quality(event) is SourceQuality.OFFICIAL
+
+
+def test_real_provider_scan_defers_learning_from_interactive_critical_path(
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    provider = MockProvider(strategy="scripted")
+    workflow = SignalHarnessWorkflow(
+        cwd=project_root,
+        output_dir=tmp_path / "outputs",
+        state_dir=tmp_path / "state",
+        mode=RunMode.AGENT,
+        provider=provider,
+    )
+
+    result = asyncio.run(
+        workflow.scan(fixture=project_root / "examples/signal_harness/sample_events.json")
+    )
+
+    called_agents = [call.agent_name for call in provider.calls]
+    assert "SignalSupervisorAgent" in called_agents
+    assert "ImpactAnalystAgent" in called_agents
+    assert "LearningPolicyAgent" not in called_agents
+    deferred = [step for step in result.trace.steps if step.step == "learning_deferred"]
+    assert len(deferred) == 1
+    assert deferred[0].status == "skipped"
+    assert deferred[0].agent == "LearningPolicyAgent"
+    assert not (tmp_path / "state/latest_learning_observation.json").exists()

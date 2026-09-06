@@ -90,6 +90,9 @@ class AgentScoreBreakdown(BaseModel):
     final_score: float = Field(ge=0, le=100)
 
 
+ChangeKind = Literal["new", "updated", "released", "published", "unknown"]
+
+
 class SignalEvent(BaseModel):
     """Source-independent event produced by the normalization stage."""
 
@@ -102,6 +105,11 @@ class SignalEvent(BaseModel):
     content: str = ""
     url: str = ""
     published_at: datetime | None = None
+    change_kind: ChangeKind = "unknown"
+    source_created_at: datetime | None = None
+    source_updated_at: datetime | None = None
+    current_version: str | None = None
+    previous_version: str | None = None
     raw_payload: dict[str, Any] = Field(default_factory=dict)
     collected_at: datetime
 

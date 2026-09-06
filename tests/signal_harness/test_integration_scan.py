@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
+from datetime import datetime
 from pathlib import Path
 
 import yaml
@@ -154,3 +155,54 @@ def test_fixture_scan_feedback_and_calibration(project_root: Path, tmp_path: Pat
     assert apply_result.exit_code == 0, apply_result.output
     applied = yaml.safe_load((config_copy / "signal_policy.yaml").read_text(encoding="utf-8"))
     assert "checkpoint" in applied["suggested_focus_keywords"]
+
+
+def test_scan_applies_since_after_normalization_for_all_sources(
+    project_root: Path,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    fixture_events = [
+        {
+            "event_id": "old-rss",
+            "source_type": "rss",
+            "source_name": "Official Feed",
+            "title": "Old article",
+            "content": "Old provider article",
+            "url": "https://example.com/old",
+            "published_at": "2026-06-01T00:00:00Z",
+            "collected_at": "2026-06-25T00:00:00Z",
+        },
+        {
+            "event_id": "new-rss",
+            "source_type": "rss",
+            "source_name": "Official Feed",
+            "title": "New article",
+            "content": "New provider article",
+            "url": "https://example.com/new",
+            "published_at": "2026-06-24T00:00:00Z",
+            "collected_at": "2026-06-25T00:00:00Z",
+        },
+    ]
+    workflow = SignalHarnessWorkflow(
+        cwd=project_root,
+        output_dir=tmp_path / "outputs",
+        state_dir=tmp_path / "state",
+        mode=RunMode.DEMO,
+    )
+
+    async def fake_fixture(_fixture):
+        return fixture_events
+
+    monkeypatch.setattr(workflow, "_load_fixture", fake_fixture)
+    result = asyncio.run(
+        workflow.scan(
+            fixture="fixture.json",
+            since=datetime.fromisoformat("2026-06-20T00:00:00+00:00"),
+        )
+    )
+
+    assert [event.event_id for event in result.signals] == ["new-rss"]
+    step = next(item for item in result.trace.steps if item.step == "time_window_filter")
+    assert step.input_count == 2
+    assert step.output_count == 1

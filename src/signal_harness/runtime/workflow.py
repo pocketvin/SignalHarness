@@ -27,6 +27,7 @@ from signal_harness.runtime.tool_executor import SignalToolExecutor
 from signal_harness.runtime.tool_registry import create_signal_tool_registry
 from signal_harness.runtime.tracing import TraceListener, TraceRecorder
 from signal_harness.signal.candidates import select_candidates
+from signal_harness.signal.deltas import annotate_release_lineage
 from signal_harness.signal.deduplicator import (
     deduplicate_events,
     load_seen_hashes,
@@ -201,8 +202,21 @@ class SignalHarnessWorkflow:
             events = [self._normalize_collected(item) for item in raw_events]
             state["output_count"] = len(events)
 
+        if since is not None:
+            with self.trace.step("time_window_filter", input_count=len(events)) as state:
+                before_window = len(events)
+                events = [event for event in events if self._is_within_window(event, since)]
+                state["output_count"] = len(events)
+                dropped_window = before_window - len(events)
+                if dropped_window:
+                    state["detail"] = (
+                        f"Removed {dropped_window} event(s) older than "
+                        f"{since.isoformat()} after normalization."
+                    )
+
         with self.trace.step("deduplicate", input_count=len(events)) as state:
             events, duplicate_ids = deduplicate_events(events)
+            events = annotate_release_lineage(events)
             state["output_count"] = len(events)
             if duplicate_ids:
                 state["detail"] = f"Removed duplicates: {', '.join(duplicate_ids)}"
@@ -329,13 +343,15 @@ class SignalHarnessWorkflow:
                             run_id=run_id,
                             seen_hashes=seen_hashes,
                             feedback_history=feedback_history,
+                            defer_learning=self.mode is RunMode.AGENT,
                         ),
                         timeout=runner.loop_limits.max_run_seconds,
                     )
                     state["output_count"] = len(assessments)
                     state["detail"] = (
-                        "Five LLM Agent calls completed; Python validated schemas, "
-                        "scoring, permissions, and fallback."
+                        "Agent decision path completed; Python validated schemas, scoring, "
+                        "permissions, and fallback. Interactive real-provider runs defer "
+                        "LearningPolicyAgent reflection from the critical path."
                     )
             except (TimeoutError, asyncio.TimeoutError):
                 detail = (
@@ -808,6 +824,18 @@ class SignalHarnessWorkflow:
                 cache_hit=False,
             )
             return [], task, job
+
+    @staticmethod
+    def _is_within_window(event: SignalEvent, since: datetime) -> bool:
+        observed = event.published_at
+        if observed is None:
+            return True
+        boundary = since
+        if observed.tzinfo is not None and boundary.tzinfo is None:
+            boundary = boundary.replace(tzinfo=observed.tzinfo)
+        elif observed.tzinfo is None and boundary.tzinfo is not None:
+            observed = observed.replace(tzinfo=boundary.tzinfo)
+        return observed >= boundary
 
     @staticmethod
     def _normalize_collected(item: dict[str, Any]) -> SignalEvent:

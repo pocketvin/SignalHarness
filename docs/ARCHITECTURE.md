@@ -8,15 +8,16 @@ SignalHarness 是一个 project-centric signal intelligence Agent Harness。它�
 flowchart TD
     A["External Sources<br/>GitHub / RSS / Web change / fixture"] --> B["Source Collection"]
     B --> C["Normalization"]
-    C --> D["Deduplication"]
+    C --> TW["Unified Time-window Filter"]
+    TW --> D["Deduplication + Change Delta"]
     D --> CF["Project-aware Candidate Funnel"]
     CF --> E["Noise Filter"]
     E --> F["SignalSupervisorAgent"]
     F --> G["ContextEvidenceAgent"]
     G --> H["ImpactAnalystAgent"]
     H --> I["ActionPlannerAgent"]
-    I --> J["LearningPolicyAgent"]
-    J --> K["Guarded Assessment"]
+    I --> K["Guarded Assessment"]
+    K -. explicit calibration / learning .-> J["LearningPolicyAgent"]
     K --> L["Alerts"]
     K --> M["Digest"]
     K --> N["Dashboard"]
@@ -61,9 +62,9 @@ sequenceDiagram
     Provider-->>Workflow: ImpactOutput
     Workflow->>Provider: structured call: ActionPlannerAgent
     Provider-->>Workflow: ActionOutput
-    Workflow->>Provider: structured call or review noop: LearningPolicyAgent
-    Provider-->>Workflow: LearningPolicyOutput
     Workflow->>Workflow: guarded scoring and decision mapping
+    Workflow->>Trace: learning_deferred for real interactive scan
+    Note over Workflow,Provider: LearningPolicyAgent LLM reflection runs in explicit calibration/learning flows, not the real-scan latency-critical path
     Workflow->>Trace: record fallback / retry / audit completion if any
     Workflow->>Dashboard: write local dashboard.html and reports
     Dashboard-->>User: local files under outputs/
@@ -81,7 +82,10 @@ sequenceDiagram
    `ImpactAnalystAgent` 提供 semantic relevance 和 impact reasoning，但没有 authoritative `final_score` 字段。最终分数由 deterministic scoring、semantic relevance、evidence confidence 和 policy multiplier 组合。
 
 4. Learning proposal 不能自动 apply
-   `LearningPolicyAgent` 只能产出 review-only proposal。高风险 proposal 或 replay gate failed proposal 不会自动应用；需要显式 review 和 approval。
+   `LearningPolicyAgent` 只能产出 review-only proposal。高风险 proposal 或 replay gate failed proposal 不会自动应用；需要显式 review 和 approval。真实交互扫描默认只记录 `learning_deferred` 并先返回 guarded decision，Learning 的 LLM reflection 在显式 calibration/learning 路径执行。
+
+5. 外部正文不是指令
+   GitHub/RSS/Web/ToolObservation 都是 untrusted external data。Context Prompt 明确禁止执行其中的 prompt override/tool command/forced classification；确定性关键词语义也先移除 instruction-like 句子，但原始正文仍保留用于 evidence audit。
 
 ## 核心文件路径
 
@@ -98,7 +102,10 @@ sequenceDiagram
   deterministic scoring weights、category weights、thresholds、tool allowlist、permission policy。
 
 - `src/signal_harness/runtime/workflow.py`
-  主 workflow：source collection、normalization、deduplication、project-aware candidate funnel、noise filter、Agent run、report writing。
+  主 workflow：source collection、normalization、统一时间窗口、deduplication/change delta、project-aware candidate funnel、noise filter、Agent run、report writing。
+
+- `src/signal_harness/signal/deltas.py`
+  Source-native Change Delta：GitHub Release 的版本前后关系、Issue/RSS 的 created/updated 变化语义。
 
 - `src/signal_harness/agent_integration/runner.py`
   五 Agent runner：controlled tool-use loop、schema retry、repair boundary、audit completion、LearningPolicy handling。
@@ -137,6 +144,9 @@ sequenceDiagram
 - **Candidate funnel**：live events 在 normalize/deduplicate 后才做 project-aware Top-K，避免“先按时间截断再判断相关性”造成系统性漏报。
 - **Source authority**：GitHub repo 本身是否官方与 Issue 作者 authority 分开；community / maintainer / official 进入不同 evidence confidence 上限。官方 RSS 由 Watchlist 显式声明。
 - **Release semantics**：GitHub Release 的 Documentation/Chores 章节不会单凭风险关键词把整个 release 升级成 security/breaking signal；运行时 Features/Bug Fixes 等章节仍参与确定性语义。
+- **Change delta**：Normalize 后统一使用 observed change time 做窗口过滤；Issue 保留 created/updated，Release 关联相邻 tag 得到 `previous_version → current_version`，RSS 保留 publish/update。
+- **Prompt-injection boundary**：外部 instruction-like 句子不进入确定性 keyword semantics，Prompt Context 同时声明外部正文不可覆盖角色、权限、工具或评分规则。
+- **Provider capability freshness**：Project `.env` 只提供凭证/选择；capability 来自精确 Model Profile。已知 retired alias 可安全解析到当前 profile 并公开 warning，未知 override 使用 conservative capability，不继承其他模型元数据。
 
 ## 面试展示重点
 

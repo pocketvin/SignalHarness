@@ -1,11 +1,16 @@
 provider: openai_compatible
-model: deepseek-chat
+model: deepseek-v4-flash
 supports_json_schema: false
-supports_json_mode: false
+supports_json_mode: true
 supports_native_tool_calling: false
 supports_system_prompt: true
-max_input_tokens: 32768
-max_output_tokens: 4096
+max_input_tokens: 1048576
+max_output_tokens: 8192
 recommended_temperature: 0.0
 schema_strategy: prompt_json_retry
 tool_strategy: controlled_tool_request
+output_token_parameter: max_completion_tokens
+checked_at: 2026-09-06
+deprecated_models:
+  - deepseek-chat
+  - deepseek-reasoner

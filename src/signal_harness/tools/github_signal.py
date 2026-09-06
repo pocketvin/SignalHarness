@@ -86,12 +86,21 @@ class GitHubSignalTool(BaseTool):
         payload = response.json()
         if not isinstance(payload, list):
             return ToolResult(output="GitHub returned a non-list payload", is_error=True)
-        if arguments.action == "fetch_repo_releases" and arguments.since is not None:
-            payload = [
-                item
-                for item in payload
-                if _is_at_or_after(item.get("published_at") or item.get("created_at"), arguments.since)
-            ]
+        if arguments.action == "fetch_repo_releases":
+            for index, item in enumerate(payload):
+                if not isinstance(item, dict):
+                    continue
+                previous = payload[index + 1] if index + 1 < len(payload) else None
+                if isinstance(previous, dict) and previous.get("tag_name"):
+                    item.setdefault("_previous_tag_name", previous.get("tag_name"))
+            if arguments.since is not None:
+                payload = [
+                    item
+                    for item in payload
+                    if _is_at_or_after(
+                        item.get("published_at") or item.get("created_at"), arguments.since
+                    )
+                ]
         if arguments.action == "fetch_repo_issues":
             payload = [item for item in payload if "pull_request" not in item]
         return ToolResult(output=json.dumps(payload, ensure_ascii=False))

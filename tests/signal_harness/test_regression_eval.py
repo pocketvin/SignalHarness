@@ -71,3 +71,29 @@ def test_resume_regression_suite_passes_full_mock_agent_gate(
         "passed",
     ):
         assert baseline[key] == summary[key]
+
+
+def test_regression_eval_default_state_is_repeatable(
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    for index in range(2):
+        output = tmp_path / f"outputs-{index}"
+        result = runner.invoke(
+            app,
+            [
+                "regression-eval",
+                "--mode",
+                "mock-agent",
+                "--enforce",
+                "--cwd",
+                str(project_root),
+                "--output-dir",
+                str(output),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        summary = json.loads((output / "regression_eval_summary.json").read_text(encoding="utf-8"))
+        assert summary["decision_accuracy"] == 1.0
+        assert summary["priority_recall"] == 1.0
+        assert summary["passed"] is True

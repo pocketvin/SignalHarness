@@ -106,3 +106,56 @@ async def test_signal_memory_loads_versioned_config(project_root: Path) -> None:
 
     assert result.is_error is False
     assert json.loads(result.output)["project_name"] == "SignalHarness"
+
+
+@pytest.mark.asyncio
+async def test_github_release_fetch_preserves_previous_tag_before_since_filter(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self):
+            return [
+                {
+                    "id": 2,
+                    "tag_name": "v2.0.0",
+                    "published_at": "2026-06-24T10:00:00Z",
+                },
+                {
+                    "id": 1,
+                    "tag_name": "v1.9.0",
+                    "published_at": "2026-06-01T10:00:00Z",
+                },
+            ]
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        async def get(self, *args, **kwargs):
+            return FakeResponse()
+
+    monkeypatch.setattr(
+        "signal_harness.tools.github_signal.httpx.AsyncClient",
+        lambda *args, **kwargs: FakeClient(),
+    )
+    tool = GitHubSignalTool()
+    result = await tool.execute(
+        tool.input_model(
+            action="fetch_repo_releases",
+            repo="example/repo",
+            since="2026-06-20T00:00:00Z",
+        ),
+        ToolExecutionContext(cwd=tmp_path),
+    )
+
+    payload = json.loads(result.output)
+    assert len(payload) == 1
+    assert payload[0]["tag_name"] == "v2.0.0"
+    assert payload[0]["_previous_tag_name"] == "v1.9.0"

@@ -173,6 +173,14 @@ SSE
 
 来源位置与“谁在说话”分开建模：GitHub Release 可视为 official；官方仓库里的普通用户 Issue 仍是 community；OWNER / MEMBER / COLLABORATOR Issue 作为 maintainer；Watchlist 中明确标记的 OpenAI/GitHub 官方 RSS 才是 official，独立专家 Feed 保持 secondary。Python 会 clamp LLM 报告的 source quality / confidence，模型不能把 community Issue 自行升级成 official。
 
+### Change Delta V1：直接回答“这次变了什么”
+
+标准化后的 Signal 会保留 source-native change metadata。GitHub Issue 使用 `created_at / updated_at` 区分新增与更新；GitHub Release 记录 `previous_version → current_version`；RSS 保留 published / updated 时间。统一时间窗口在 Normalize 之后执行，因此不同来源都按实际观察时间过滤，而不是让旧 RSS 混进“最近 14 天”。Golden Demo 会把这些 Delta 直接放在变化卡片顶部。
+
+### 不可信外部内容边界
+
+GitHub/RSS/Web/ToolObservation 内容一律按 **untrusted external data** 处理。Prompt 明确禁止把来源正文中的“忽略之前指令、强制分类、调用工具”等文本当成 Agent 指令；确定性语义层也会剔除这类 instruction-like 句子后再做关键词分类和评分，同时保留原始正文用于证据审计。浏览器外链只允许 `http/https`，动态交互不把外部 event id 拼进 inline event handler。
+
 ## 三种运行模式
 
 ### 1. `mock-agent`：离线五 Agent 演示
@@ -203,9 +211,9 @@ LLM_API_KEY=... uv run signal-harness scan \
   --mode agent
 ```
 
-`signal-harness serve` 启动时会自动读取项目根目录的 `.env`，但不会覆盖已经显式 export 的环境变量。Golden Demo 当前可识别并按 run 切换 OpenAI、Qwen、Kimi、DeepSeek 四套 OpenAI-compatible 配置；未配置的 provider 会保持不可选。
+`signal-harness serve` 启动时会自动读取项目根目录的 `.env`，但不会覆盖已经显式 export 的环境变量。Golden Demo 当前可识别并按 run 切换 OpenAI、Qwen、Kimi、DeepSeek 四套 OpenAI-compatible 配置；未配置的 provider 会保持不可选。Model Profile 带有 freshness metadata，过期的已知模型名会解析到当前 profile 并在 UI 明示 warning；未知自定义模型仍可配置，但 capability 会降为 conservative，不继承其他模型未经验证的 JSON/context/pricing 能力。
 
-页面不会暴露 API Key、Base URL 或本地配置路径；“已配置”也只表示本地配置完整，真实网络连接仍在 Run 时验证。`.env` 已被 Git 和 Docker build context 排除。
+页面不会暴露 API Key、Base URL 或本地配置路径；“已配置”也只表示本地配置完整，真实网络连接仍在 Run 时验证。`.env` 已被 Git 和 Docker build context 排除。真实 `agent` 的交互关键路径在 ActionPlanner + guarded decision 后即可返回，LearningPolicyAgent 的 LLM reflection 后置到显式 calibration/learning 路径；`mock-agent` 仍保留完整五 Agent orchestration 作为稳定离线演示与回归路径。
 
 ## 五个 Agent 分别做什么
 
@@ -222,7 +230,7 @@ LLM_API_KEY=... uv run signal-harness scan \
    生成 bounded、可逆、可审核的行动建议；高风险动作仍会被 Python 再次检查。
 
 5. **LearningPolicyAgent**
-   基于 Memory 提出 policy / watchlist / skill 的 review-only proposal，不自动修改配置。
+   基于 Memory 提出 policy / watchlist / skill 的 review-only proposal，不自动修改配置。真实交互扫描默认将这一步后置，避免每次 Radar 扫描为 learning reflection 阻塞用户；显式 calibration/learning 流程仍调用同一个 Agent。
 
 ## 为什么最终分数不交给 LLM
 

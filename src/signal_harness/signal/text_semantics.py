@@ -32,6 +32,41 @@ def any_affirmed_term(text: str, terms: Iterable[str]) -> bool:
     return any(contains_affirmed_term(text, term) for term in terms)
 
 
+_PROMPT_INJECTION_PATTERNS = (
+    re.compile(
+        r"\b(?:ignore|disregard|override)\b.{0,48}\b(?:previous|system|developer|all)\b.{0,32}\binstructions?\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:reveal|print|return|replace|override)\b.{0,48}\b(?:system prompt|developer message)\b",
+        re.I,
+    ),
+    re.compile(r"^\s*(?:please\s+)?(?:call|use|execute|request)\s+(?:all\s+)?tools?\b", re.I),
+    re.compile(
+        r"^\s*(?:please\s+)?(?:mark|classify|label|return)\b.{0,64}\b(?:critical|alert|security|cve)\b",
+        re.I,
+    ),
+)
+
+
+def untrusted_instruction_patterns(text: str) -> list[str]:
+    """Return stable labels for instruction-like content embedded in external data."""
+
+    labels: list[str] = []
+    for index, pattern in enumerate(_PROMPT_INJECTION_PATTERNS, start=1):
+        if pattern.search(text):
+            labels.append(f"external_instruction_pattern_{index}")
+    return labels
+
+
+def strip_untrusted_directives(text: str) -> str:
+    """Exclude instruction-like sentences from deterministic semantic matching only."""
+
+    parts = re.split(r"(?<=[.!?])\s+|[\r\n]+", text)
+    kept = [part for part in parts if part.strip() and not untrusted_instruction_patterns(part)]
+    return " ".join(kept)
+
+
 _RELEASE_EXCLUDED_HEADINGS = {"documentation", "docs", "chore", "chores"}
 
 
@@ -47,10 +82,12 @@ def source_semantic_text(
 
     prefix = f"{source_name} " if include_source and source_name else ""
     if source_type == "github_issue":
-        return f"{prefix}{title}".lower()
-    if source_type == "github_release":
-        return f"{prefix}{title} {_runtime_release_content(content)}".lower()
-    return f"{prefix}{title} {content}".lower()
+        semantic = title
+    elif source_type == "github_release":
+        semantic = f"{title} {_runtime_release_content(content)}"
+    else:
+        semantic = f"{title} {content}"
+    return f"{prefix}{strip_untrusted_directives(semantic)}".lower()
 
 
 def _runtime_release_content(content: str) -> str:

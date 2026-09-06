@@ -6,6 +6,10 @@ from collections.abc import Iterable
 from typing import Any
 
 from signal_harness.signal.deduplicator import signal_fingerprint
+from signal_harness.signal.text_semantics import (
+    strip_untrusted_directives,
+    untrusted_instruction_patterns,
+)
 from signal_harness.signal.schemas import (
     FeedbackLabel,
     FeedbackRecord,
@@ -56,10 +60,14 @@ class NoiseFilter:
         seen = seen_hashes or set()
         assessments: list[NoiseAssessment] = []
         for event in events:
-            text = f"{event.title} {event.content}".lower()
+            text = strip_untrusted_directives(f"{event.title} {event.content}").lower()
             rules: list[str] = []
             multiplier = 1.0
             strong_noise = False
+            injection_patterns = untrusted_instruction_patterns(event.content)
+            if injection_patterns:
+                rules.extend(injection_patterns)
+                multiplier *= 0.9
             if signal_fingerprint(event) in seen:
                 rules.append("duplicate_hash")
                 # Novelty is already penalized by the deterministic scorer.

@@ -7,6 +7,7 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any, cast
 
 import typer
@@ -581,23 +582,38 @@ def regression_eval(
     cwd: Path = typer.Option(Path.cwd(), "--cwd", hidden=True),
     config_dir: Path = typer.Option(Path("configs"), "--config-dir"),
     output_dir: Path = typer.Option(Path("outputs/regression-eval"), "--output-dir"),
-    state_dir: Path = typer.Option(Path(".signal-harness/regression-eval"), "--state-dir"),
+    state_dir: Path | None = typer.Option(
+        None,
+        "--state-dir",
+        help="Optional persistent eval state; default uses an isolated temporary state",
+    ),
 ) -> None:
     """Run labelled product-level Agent regression cases through the Harness."""
 
     root = cwd.expanduser().resolve()
     _require_agent_key(mode)
     resolved_output = _resolve(root, output_dir)
-    resolved_state = _resolve(root, state_dir)
     suite = load_regression_suite(_resolve(root, expectations))
-    workflow = SignalHarnessWorkflow(
-        cwd=root,
-        config_dir=config_dir,
-        output_dir=resolved_output,
-        state_dir=resolved_state,
-        mode=mode,
+    temporary_state = (
+        TemporaryDirectory(prefix="signalharness-regression-") if state_dir is None else None
     )
-    result = asyncio.run(workflow.scan(fixture=_resolve(root, fixture)))
+    try:
+        resolved_state = (
+            Path(temporary_state.name)
+            if temporary_state is not None
+            else _resolve(root, cast(Path, state_dir))
+        )
+        workflow = SignalHarnessWorkflow(
+            cwd=root,
+            config_dir=config_dir,
+            output_dir=resolved_output,
+            state_dir=resolved_state,
+            mode=mode,
+        )
+        result = asyncio.run(workflow.scan(fixture=_resolve(root, fixture)))
+    finally:
+        if temporary_state is not None:
+            temporary_state.cleanup()
     summary = evaluate_regression_suite(assessments=result.assessments, suite=suite)
     paths = write_regression_eval_summary(resolved_output, summary)
     typer.echo(

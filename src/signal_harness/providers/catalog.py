@@ -29,6 +29,8 @@ class ProviderOption:
     model: str | None
     ready: bool
     reason: str | None = None
+    warning: str | None = None
+    checked_at: str | None = None
 
     def public_payload(self) -> dict[str, Any]:
         return {
@@ -38,6 +40,8 @@ class ProviderOption:
             "model": self.model,
             "ready": self.ready,
             "reason": self.reason,
+            "warning": self.warning,
+            "checked_at": self.checked_at,
         }
 
 
@@ -47,15 +51,32 @@ def provider_catalog(config_dir: str | Path) -> list[ProviderOption]:
     root = Path(config_dir).expanduser().resolve()
     options: list[ProviderOption] = []
     for provider_id, label, prefix, default_profile in _PROVIDER_SPECS:
-        profile_name = os.environ.get(f"{prefix}_MODEL_PROFILE", default_profile).strip() or default_profile
+        profile_name = (
+            os.environ.get(f"{prefix}_MODEL_PROFILE", default_profile).strip() or default_profile
+        )
         key_present = bool(os.environ.get(f"{prefix}_API_KEY", "").strip())
         base_present = bool(os.environ.get(f"{prefix}_BASE_URL", "").strip())
         try:
-            profile = load_model_profile(profile_name, config_dir=root)
-            model = os.environ.get(f"{prefix}_MODEL", "").strip() or profile.model
+            profile = load_model_profile(
+                profile_name, config_dir=root, apply_env_model_override=False
+            )
+            configured_model = os.environ.get(f"{prefix}_MODEL", "").strip()
+            warning = profile.model_override_status(configured_model)
+            resolved = profile.with_model_override(configured_model)
+            model = resolved.model
         except (OSError, ValueError):
             options.append(
-                ProviderOption(provider_id, label, prefix, profile_name, None, False, "invalid_model_profile")
+                ProviderOption(
+                    provider_id,
+                    label,
+                    prefix,
+                    profile_name,
+                    None,
+                    False,
+                    "invalid_model_profile",
+                    None,
+                    None,
+                )
             )
             continue
         reason = None
@@ -64,7 +85,17 @@ def provider_catalog(config_dir: str | Path) -> list[ProviderOption]:
         elif not base_present:
             reason = "missing_base_url"
         options.append(
-            ProviderOption(provider_id, label, prefix, profile_name, model, reason is None, reason)
+            ProviderOption(
+                provider_id,
+                label,
+                prefix,
+                profile_name,
+                model,
+                reason is None,
+                reason,
+                warning,
+                profile.checked_at,
+            )
         )
     return options
 
@@ -90,7 +121,9 @@ def provider_from_selection(
     prefix = option.env_prefix
     api_key = os.environ[f"{prefix}_API_KEY"].strip()
     base_url = os.environ[f"{prefix}_BASE_URL"].strip()
-    profile = load_model_profile(option.profile_name, config_dir=config_dir).with_model_override(option.model)
+    profile = load_model_profile(option.profile_name, config_dir=config_dir).with_model_override(
+        option.model
+    )
     return OpenAICompatibleProvider(
         api_key=api_key,
         base_url=base_url,

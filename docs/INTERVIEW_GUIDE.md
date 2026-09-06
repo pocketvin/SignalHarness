@@ -96,7 +96,7 @@ Repair is intentionally bounded and enabled only inside the fixed pipeline.
 `ActionPlannerAgent` may suggest Impact repair. Python enforces repair round
 limits, event caps, and the shared tool budget; budgets do not reset and repair
 does not recurse. This is not provider-native function calling and not a full
-handoff-as-tool system. LearningPolicyAgent remains downstream review-only and
+handoff-as-tool system. LearningPolicyAgent remains review-only; real interactive scans defer its LLM reflection to explicit calibration/learning, while mock-agent can still exercise the full five-Agent path. It
 cannot repair upstream Agents or auto-apply policy, watchlist, or skill
 changes.
 
@@ -122,6 +122,8 @@ with a passing replay gate can be applied. High-risk or replay-failed proposals
 remain staged and cannot be applied non-interactively.
 
 ## Engineering choices
+
+GitHub/RSS/Web bodies and ToolObservation content are treated as untrusted external data. Embedded prompt overrides, forced classifications, and tool commands cannot override the Agent role, Python guardrails, or final scoring. Deterministic semantics strips instruction-like sentences before keyword matching while preserving original evidence for audit.
 
 Prompt prefixes keep static instructions and stable project context first;
 events, tool observations, failures, and timestamps are later. Hashes make this

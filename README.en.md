@@ -94,7 +94,7 @@ flowchart LR
 2. **ContextEvidenceAgent** — plans bounded read-only tool requests, receives observations, and produces evidence/confidence.
 3. **ImpactAnalystAgent** — estimates semantic relevance, affected modules, conflicts, and risk. It cannot emit the authoritative final score.
 4. **ActionPlannerAgent** — proposes reversible actions and approval notes; Python re-checks requested high-risk actions.
-5. **LearningPolicyAgent** — reads memory and proposes policy/skill/watchlist changes for review only.
+5. **LearningPolicyAgent** — reads memory and proposes policy/skill/watchlist changes for review only. In real interactive scans its LLM reflection is deferred out of the latency-critical path; explicit calibration/learning flows still invoke the same Agent.
 
 Memory is infrastructure, not a sixth Agent.
 
@@ -109,6 +109,14 @@ Live collection can return more than a thousand raw events. SignalHarness now no
 ### Source Authority V2
 
 Repository authority and claim-author authority are distinct. GitHub releases can be official; a normal user issue in an official repo remains community; OWNER/MEMBER/COLLABORATOR issues are maintainer-level. Explicit OpenAI/GitHub official feeds are marked official, while independent expert feeds remain secondary. Python clamps LLM-reported source quality/confidence so a community issue cannot be promoted to official evidence by model output.
+
+### Change Delta V1
+
+Normalized signals preserve source-native change metadata. GitHub issues distinguish creation from update time, GitHub releases expose `previous_version → current_version`, and RSS preserves publish/update timestamps. The time-window filter now runs after normalization so all source types obey the same observed-change boundary. Golden Demo renders these deltas directly on each change card.
+
+### Untrusted external-content boundary
+
+GitHub/RSS/Web bodies and ToolObservation content are treated as **untrusted external data**, never Agent instructions. Prompt context explicitly rejects embedded prompt overrides/tool commands/forced classifications, while deterministic semantics strips instruction-like sentences before keyword classification and scoring without deleting the original evidence. Browser source links are restricted to `http/https`, and external event IDs are not interpolated into inline event handlers.
 
 ## Python-owned guardrails
 
@@ -162,7 +170,7 @@ Outputs:
 - `outputs/regression-eval/regression_eval_summary.json`
 - `outputs/regression-eval/regression_eval_summary.md`
 
-Metrics include exact decision/category accuracy, priority precision/recall, FPR/FNR, TP/FP/TN/FN, decision confusion, missing assessments, and mismatch details. `--enforce` exits non-zero when configured thresholds fail.
+Metrics include exact decision/category accuracy, priority precision/recall, FPR/FNR, TP/FP/TN/FN, decision confusion, missing assessments, and mismatch details. `--enforce` exits non-zero when configured thresholds fail. Unless `--state-dir` is explicitly supplied, each regression invocation uses isolated temporary state so repeated local runs cannot be contaminated by prior duplicate-memory history.
 
 ## Cross-project context eval
 
@@ -217,7 +225,7 @@ The Golden Demo is dependency-free HTML/CSS/JS served by FastAPI. It opens in **
 
 Clicking **Run Golden Demo** creates a queued stream run; the workflow starts only after the browser establishes the SSE subscription, so the page consumes live runtime events rather than replaying a finished animation. `TraceRecorder` append/update events feed an in-process replay buffer, and browser reconnects can resume with `Last-Event-ID`. Disconnecting the browser does not cancel the workflow.
 
-The UI shows the selected project, its Watchlist, the five Agent stages, Python tool guard, schema/fallback/retry state, tool requests/execution/permission checks, final decisions, runtime health, the committed 40-case regression evidence, and the five read-only MCP tools. `signal-harness serve` automatically loads an optional project-root `.env` without overriding variables already exported by the caller. Real `agent` mode can select separately configured OpenAI, Qwen, Kimi, or DeepSeek OpenAI-compatible providers per run. `/demo/meta` exposes only non-secret project/provider metadata; it never returns API keys, base URLs, or local config paths, and readiness does not claim network connectivity before a run. `.env` is excluded from Git and the Docker build context. The stream is intentionally in-process: it is not a durable queue or distributed worker system.
+The UI shows the selected project, its Watchlist, source-native change deltas, Agent stages, Python tool guard, schema/fallback/retry state, tool requests/execution/permission checks, final decisions, runtime health, the committed 40-case regression evidence, and the five read-only MCP tools. `signal-harness serve` automatically loads an optional project-root `.env` without overriding variables already exported by the caller. Real `agent` mode can select separately configured OpenAI, Qwen, Kimi, or DeepSeek OpenAI-compatible providers per run. Model profiles carry freshness metadata: known retired model aliases resolve to the current profile with a visible warning, while unknown overrides receive conservative capabilities instead of inheriting another model's JSON/context/pricing claims. `/demo/meta` exposes only non-secret project/provider metadata; it never returns API keys, base URLs, or local config paths, and readiness does not claim network connectivity before a run. `.env` is excluded from Git and the Docker build context. The stream is intentionally in-process: it is not a durable queue or distributed worker system.
 
 ## REST API + MCP HTTP
 

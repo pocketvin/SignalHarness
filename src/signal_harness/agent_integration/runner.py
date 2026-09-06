@@ -244,7 +244,8 @@ class LLMAgentTeamRunner:
         run_id: str = "",
         seen_hashes: set[str] | None = None,
         feedback_history: Iterable[FeedbackRecord] = (),
-    ) -> tuple[list[SignalAssessment], LearningPolicyOutput]:
+        defer_learning: bool = False,
+    ) -> tuple[list[SignalAssessment], LearningPolicyOutput | None]:
         event_ids = [event.event_id for event in events]
         expected_ids = set(event_ids)
         active_clusters = clusters or []
@@ -587,7 +588,24 @@ class LLMAgentTeamRunner:
             assessments,
             feedback_history=feedback_history,
         )
-        if needs_learning and conservative_learning:
+        if needs_learning and defer_learning:
+            learning = None
+            self.trace.steps.append(
+                TraceStep(
+                    step="learning_deferred",
+                    status="skipped",
+                    agent="LearningPolicyAgent",
+                    input_count=len(events),
+                    output_count=0,
+                    duration_ms=0,
+                    detail=(
+                        "Interactive real-provider scan deferred the LearningPolicyAgent "
+                        "LLM call so guarded decisions are not blocked by reflection. "
+                        "Use calibrate/learning-stage for explicit review-only learning."
+                    ),
+                )
+            )
+        elif needs_learning and conservative_learning:
             learning = self.learning.fallback(learning_memories)
             self.trace.steps.append(
                 TraceStep(

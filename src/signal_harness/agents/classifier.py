@@ -6,7 +6,11 @@ import re
 from typing import Any
 
 from signal_harness.agents.models import ClassificationResult
-from signal_harness.signal.text_semantics import any_affirmed_term, source_semantic_text
+from signal_harness.signal.text_semantics import (
+    any_affirmed_term,
+    source_semantic_text,
+    strip_untrusted_directives,
+)
 from signal_harness.signal.schemas import SignalCategory, SignalEvent
 
 DEPENDENCY_IMPACT_TERMS = (
@@ -53,7 +57,7 @@ class ClassifierAgent:
             content=event.content,
             include_source=True,
         )
-        content_text = f"{event.title} {event.content}".lower()
+        content_text = strip_untrusted_directives(f"{event.title} {event.content}").lower()
         runtime_content_text = source_semantic_text(
             source_type=event.source_type,
             title=event.title,

@@ -18,7 +18,7 @@ SignalHarness 解决的是一个真实工程问题：小团队每天会面对大
 2. `ContextEvidenceAgent`：请求只读工具，读取 Python runtime 返回的 tool observations，合成证据。
 3. `ImpactAnalystAgent`：结合项目 profile 判断 affected modules、semantic relevance、impact reasoning。
 4. `ActionPlannerAgent`：只提出 review / investigation / documentation 这类安全行动建议。
-5. `LearningPolicyAgent`：读取 memory infrastructure，产出 policy / skill / watchlist 的 review-only proposal。
+5. `LearningPolicyAgent`：读取 memory infrastructure，产出 policy / skill / watchlist 的 review-only proposal。`mock-agent` 演示完整五 Agent；真实交互扫描会把 Learning 的 LLM reflection 后置到显式 calibration/learning，先把用户需要的 guarded decision 返回。
 
 Python runtime 是安全边界：它负责 schema validation、permission guard、tool allowlist、scoring、fallback、trace、local dashboard 和 report。LLM 负责 classification、evidence synthesis、impact reasoning、action planning 和 learning proposal，但不拥有外部副作用。
 
@@ -52,7 +52,7 @@ SignalHarness 可以从三个角度讲。
 uv run signal-harness serve --host 127.0.0.1 --port 8001
 ```
 
-打开 `http://127.0.0.1:8001/demo`。页面默认中文，右上角可切换 EN。面试默认选择“离线五 Agent 演示（推荐）”，它不需要 API Key，但仍走真实五 Agent orchestration、Tool Guard、Trace 与 SSE。真实 `agent` 模式只有在本地 Provider 配置完整时才可选；页面只展示 readiness，不暴露 API Key/Base URL。
+打开 `http://127.0.0.1:8001/demo`。页面默认中文，右上角可切换 EN。面试默认选择“离线五 Agent 演示（推荐）”，它不需要 API Key，但仍走真实五 Agent orchestration、Tool Guard、Trace 与 SSE。真实 `agent` 模式只有在本地 Provider 配置完整时才可选；页面只展示 readiness，不暴露 API Key/Base URL。Model Profile 还会标记 capability freshness；已知下线 alias 会解析到当前 profile 并明确 warning，未知模型不会继承未经验证的 capability。
 
 ## 现场 Demo 推荐顺序
 
