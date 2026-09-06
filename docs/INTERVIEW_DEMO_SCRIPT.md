@@ -46,6 +46,14 @@ SignalHarness 可以从三个角度讲。
 工程证据可以分三层讲：第一层是 40-case regression gate，验证产品决策；第二层是 model-eval，验证 provider schema/retry/fallback/tool/latency/token/cost contract；第三层是 service/MCP/Docker，证明 Harness 能作为真实接口被外部 Agent 或服务调用。历史 live provider 结果仍可以作为 dated snapshot 展示，但不会把一次 live run 当成长期质量证明。
 
 
+## Golden Demo 网页入口
+
+```bash
+uv run signal-harness serve --host 127.0.0.1 --port 8001
+```
+
+打开 `http://127.0.0.1:8001/demo`。页面默认中文，右上角可切换 EN。面试默认选择“离线五 Agent 演示（推荐）”，它不需要 API Key，但仍走真实五 Agent orchestration、Tool Guard、Trace 与 SSE。真实 `agent` 模式只有在本地 Provider 配置完整时才可选；页面只展示 readiness，不暴露 API Key/Base URL。
+
 ## 现场 Demo 推荐顺序
 
 先启动：

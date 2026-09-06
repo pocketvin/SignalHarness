@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -18,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from signal_harness.agent_integration.mode import RunMode
 from signal_harness.mcp_server import MCP_TOOL_NAMES, build_mcp_server, validate_run_id
 from signal_harness.memory import FeedbackMemory
+from signal_harness.providers.model_profile import load_model_profile
 from signal_harness.service_streaming import StreamRunManager
 from signal_harness.runtime.permissions import SignalPermissionGuard
 from signal_harness.runtime.workflow import SignalHarnessWorkflow
@@ -150,10 +152,25 @@ def create_app(
             },
             "mcp": {"tool_count": len(MCP_TOOL_NAMES), "tools": list(MCP_TOOL_NAMES)},
             "streaming": {"transport": "sse", "durability": "in-process"},
+            "provider": _agent_provider_status(paths.config_dir),
         }
 
     @app.post("/stream-runs", status_code=status.HTTP_202_ACCEPTED)
     async def create_stream_run(request: RunRequest) -> dict[str, Any]:
+        if request.mode is RunMode.AGENT:
+            provider_status = _agent_provider_status(paths.config_dir)
+            if not provider_status["ready"]:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": "agent_provider_not_ready",
+                        "reason": provider_status["reason"],
+                        "message": (
+                            "Real provider configuration is incomplete. "
+                            "Set LLM_API_KEY and a valid model profile, or use mock-agent."
+                        ),
+                    },
+                )
         fixture = _safe_fixture(paths.cwd, request.fixture)
         session = streams.start(
             fixture=fixture,
@@ -393,6 +410,54 @@ def _read_json(path: Path, default: Any) -> Any:
     except json.JSONDecodeError:
         return default
 
+
+def _agent_provider_status(config_dir: Path) -> dict[str, Any]:
+    """Return non-secret readiness metadata for the optional real provider."""
+
+    provider_name = os.environ.get("LLM_PROVIDER", "openai_compatible").strip().lower()
+    profile_name = (
+        os.environ.get("LLM_MODEL_PROFILE", "openai_gpt4o_mini").strip()
+        or "openai_gpt4o_mini"
+    )
+    profile_label = Path(profile_name).stem or "openai_gpt4o_mini"
+    supported = provider_name in {"openai_compatible", "openai-compatible", "openai"}
+    if not supported:
+        return {
+            "ready": False,
+            "verified": False,
+            "provider": provider_name or "unknown",
+            "model_profile": profile_label,
+            "model": None,
+            "reason": "unsupported_provider",
+        }
+    if not os.environ.get("LLM_API_KEY", "").strip():
+        return {
+            "ready": False,
+            "verified": False,
+            "provider": "openai_compatible",
+            "model_profile": profile_label,
+            "model": None,
+            "reason": "missing_api_key",
+        }
+    try:
+        profile = load_model_profile(config_dir=config_dir)
+    except (OSError, ValueError):
+        return {
+            "ready": False,
+            "verified": False,
+            "provider": "openai_compatible",
+            "model_profile": profile_label,
+            "model": None,
+            "reason": "invalid_model_profile",
+        }
+    return {
+        "ready": True,
+        "verified": False,
+        "provider": profile.provider,
+        "model_profile": profile_label,
+        "model": profile.model,
+        "reason": None,
+    }
 
 def _event_cursor(
     last_event_id: Annotated[str | None, Header()] = None,

@@ -1,68 +1,47 @@
 # SignalHarness
 
-**A production-oriented multi-agent harness for project-level signal intelligence, with controlled tool use, regression evals, observability, MCP, and a thin service layer.**
+**中文** | [English](README.en.md)
 
-SignalHarness watches external engineering changes, decides whether they matter to a project, and turns them into auditable assessments instead of another noisy feed. The signal-intelligence use case is the business carrier; the engineering focus is the Agent Harness itself: orchestration, structured contracts, tool guardrails, deterministic fallback, evaluation, traceability, and human-gated learning.
+> 一个面向真实工程场景的 Multi-Agent Harness：用外部技术变化作为业务载体，重点展示五 Agent 编排、受控工具调用、Python Guardrails、Agent Eval、Trace/Observability、MCP、SSE、FastAPI 与 Docker。
 
-## At a glance
+SignalHarness 会监听 GitHub、RSS、Web change 等外部工程信号，判断它们是否真正影响当前项目，并把结果转成**可解释、可审计、可回归验证**的决策，而不是再做一个信息聚合器或聊天机器人。
 
-| Area | What is implemented |
+## 30 秒看懂这个项目
+
+普通爬虫擅长“收集”，普通 Dashboard 擅长“展示”，普通 LLM 擅长“推理”，但真实 Agent 系统还需要回答：
+
+- 模型什么时候可以调用什么工具？
+- 工具调用被拒绝或失败怎么办？
+- 模型输出 JSON 不合法怎么办？
+- 模型能不能直接决定最终业务分数？
+- 一次判断为什么发生，之后能不能复盘？
+- 修改 Prompt / Router / Scoring 后，如何防止旧能力被改坏？
+
+SignalHarness 的核心答案是：**LLM 负责推理，Python runtime 负责约束、执行、评分、Fallback 和审计。**
+
+## 当前已实现能力
+
+| 能力 | 当前实现 |
 | --- | --- |
-| Agent orchestration | Fixed five-Agent route: Supervisor → Evidence → Impact → Action → Learning |
-| Tool use | Two-turn evidence tool plan; Python owns allowlist, permission checks, budgets, execution, and observations |
-| Reliability | Pydantic structured outputs, schema retry, deterministic fallback, bounded repair, run timeout limits |
-| Guarded decisions | LLM contributes semantics; Python owns final scoring and a primary-source high-risk alert floor |
-| Memory | Project, Signal, Feedback, and Policy memory; no chat-memory abstraction |
-| Eval | 40-case labelled Agent regression suite + multi-provider contract eval |
-| Observability | Local trace for Agent calls, schema/retry/fallback, tools, latency, provider-reported tokens, and estimated cost |
-| MCP | Five read-only structured tools for project context, signal history, assessments, trace, and feedback |
-| Service | FastAPI REST API + replayable SSE streaming runs + MCP Streamable HTTP |
-| Deployment | Docker image with health check; package/CLI remains usable without a server |
-| Learning | Review-only proposals → risk classification → replay gate → explicit human apply |
+| Agent 编排 | 固定五 Agent：Supervisor → Evidence → Impact → Action → Learning |
+| Tool Calling | Evidence 两阶段工具计划；Python 负责 allowlist、permission、budget、execution、observation |
+| 结构化输出 | Pydantic Schema、一次 schema retry、确定性 fallback |
+| Guarded Scoring | LLM 提供语义判断；Python 持有 authoritative final score |
+| Memory | Project / Signal / Feedback / Policy Memory，属于基础设施，不算第六个 Agent |
+| Agent Eval | 40 条项目级 Regression Suite + Provider Contract Eval |
+| Observability | Agent、Schema、Retry、Fallback、Tools、Latency、Tokens、Estimated Cost Trace |
+| MCP | 5 个只读 structured tools |
+| Service | FastAPI REST + SSE Streaming Run + MCP Streamable HTTP |
+| Golden Demo | 默认中文，可切换 English，实时消费同一份 Trace |
+| Deployment | Docker + `/health` healthcheck |
+| Learning | Review-only proposal → replay/risk gate → 显式人工 apply |
 
-## Resume Edition evidence
-
-The committed `resume-v1` regression suite contains **40 product-level cases** covering:
-
-- high-risk direct-dependency changes;
-- routine dependency releases and negated risk language;
-- policy, permission, tool-calling, provider, and structured-output issues;
-- expert RSS signals and source-collection noise;
-- competitor/web changes;
-- explicit irrelevant/giveaway/crypto/gaming noise.
-
-The offline `mock-agent` gate currently passes all labelled expectations:
-
-```text
-cases                  40 / 40 assessed
-decision accuracy      1.0000
-category accuracy      1.0000
-priority precision     1.0000
-priority recall        1.0000
-false-positive rate    0.0000
-false-negative rate    0.0000
-```
-
-This is intentionally a **project-specific regression/contract suite**, not a claim of general model intelligence. Public CI runs it offline with the real five-Agent architecture and scripted provider. The same fixture can be run manually in real `agent` mode.
-
-## Problem
-
-Small engineering teams are exposed to GitHub releases/issues, RSS feeds, provider/API changes, security advisories, and ecosystem updates. Collection is easy; the hard part is deciding:
-
-1. Is this source trustworthy enough to use?
-2. Does the change affect this project rather than the ecosystem in general?
-3. Is it an observation, something worth saving, an alert, or an action item?
-4. Can the decision be explained after the run?
-5. What happens when the model times out, returns invalid JSON, or requests the wrong tool?
-
-SignalHarness treats those questions as an Agent-runtime problem rather than a chatbot problem.
-
-## Architecture
+## 总体架构
 
 ```mermaid
 flowchart LR
     Sources[GitHub / RSS / Web change / fixture]
-    Collect[Collect + Normalize + Deduplicate + Noise Filter]
+    Collect[Collect / Normalize / Deduplicate / Noise Filter]
     Supervisor[SignalSupervisorAgent]
     Evidence[ContextEvidenceAgent]
     Tools[Controlled read-only tool loop]
@@ -75,7 +54,7 @@ flowchart LR
 
     Sources --> Collect --> Supervisor --> Evidence --> Impact --> Action --> Learning --> Output
     Evidence --> Tools --> Evidence
-    Guard -. schema / permission / budgets / fallback / score .-> Supervisor
+    Guard -. schema / permission / budget / fallback / scoring .-> Supervisor
     Guard -.-> Evidence
     Guard -.-> Impact
     Guard -.-> Action
@@ -83,51 +62,189 @@ flowchart LR
     Output --> Interfaces
 ```
 
-### Five-Agent responsibilities
+核心边界：**Agent 负责语义推理；Python constraint plane 负责可验证规则和外部副作用。**
 
-1. **SignalSupervisorAgent** — classifies each event and decides which downstream stages are required.
-2. **ContextEvidenceAgent** — plans bounded read-only tool requests, receives observations, and produces evidence/confidence.
-3. **ImpactAnalystAgent** — estimates semantic relevance, affected modules, conflicts, and risk. It cannot emit the authoritative final score.
-4. **ActionPlannerAgent** — proposes reversible actions and approval notes; Python re-checks requested high-risk actions.
-5. **LearningPolicyAgent** — reads memory and proposes policy/skill/watchlist changes for review only.
+## Golden Demo：最推荐的面试入口
 
-Memory is infrastructure, not a sixth Agent.
-
-## Python-owned guardrails
-
-The model is deliberately not the authority for external effects or the final business decision.
-
-- Agent JSON is validated against strict Pydantic schemas.
-- One schema retry is allowed by default; repeated invalid output falls back deterministically.
-- Tool requests are checked against an allowlist, permission policy, run/event budgets, and read-only boundaries.
-- Repair is bounded; it cannot become an unbounded recursive Agent handoff loop.
-- Final scoring blends deterministic relevance, model semantics, and evidence confidence in Python.
-- Category weighting is applied once at the guarded blend boundary.
-- Explicit official CVE/vulnerability/supply-chain signals can receive a policy-configured alert floor so model under-scoring cannot silently suppress them.
-- Learning proposals never auto-apply; replay and explicit approval remain mandatory.
-
-## Run modes
+启动服务：
 
 ```bash
-# Fully deterministic offline baseline
-uv run signal-harness scan \
-  --fixture examples/signal_harness/sample_events.json \
-  --mode demo
+uv run signal-harness serve \
+  --host 127.0.0.1 \
+  --port 8001
+```
 
-# Offline scripted provider through the real five-Agent architecture
+打开：
+
+```text
+http://127.0.0.1:8001/demo
+```
+
+页面默认是**中文**，右上角可切换 `EN`。推荐面试时使用：
+
+```text
+离线五 Agent 演示（推荐） / mock-agent
+```
+
+它不需要 API Key，但仍然走真实五 Agent orchestration、Schema、Tool Guard、Trace、SSE 和 Python scoring，因此适合稳定展示真实 Harness 行为。
+
+页面会实时展示：
+
+```text
+采集 + 标准化
+      ↓
+SignalSupervisorAgent
+      ↓
+ContextEvidenceAgent
+      ↓
+Python 工具守卫
+      ↓
+ImpactAnalystAgent
+      ↓
+ActionPlannerAgent
+      ↓
+LearningPolicyAgent
+      ↓
+受控决策
+```
+
+点击任一阶段可以查看：
+
+- Schema 是否有效
+- Retry / Fallback
+- Tools requested / executed / blocked
+- Permission checks
+- Duration
+- 最终 decision / score
+- Live Trace
+- Runtime health
+
+### SSE 不是前端假动画
+
+Golden Demo 的实时链路是：
+
+```text
+POST /stream-runs
+        ↓
+queued
+        ↓
+浏览器建立 EventSource
+        ↓
+启动 SignalHarnessWorkflow
+        ↓
+TraceRecorder append / update
+        ↓
+SSE
+        ↓
+浏览器实时更新
+```
+
+首个 SSE subscriber 建立后才真正启动 queued run；浏览器断开不会取消任务；重连可通过 `Last-Event-ID` 补发内存中的历史事件。
+
+这里明确是 **in-process streaming**，不是 Redis/Celery/Kafka，也不声称拥有持久化分布式任务系统。
+
+## 三种运行模式
+
+### 1. `mock-agent`：离线五 Agent 演示（推荐）
+
+```bash
 uv run signal-harness scan \
   --fixture examples/signal_harness/sample_events.json \
   --mode mock-agent
+```
 
-# Real OpenAI-compatible provider
+使用 scripted offline provider，但走真实五 Agent 架构。公开 CI 和 Golden Demo 默认使用它。
+
+### 2. `demo`：确定性基线
+
+```bash
+uv run signal-harness scan \
+  --fixture examples/signal_harness/sample_events.json \
+  --mode demo
+```
+
+这是 deterministic fallback，不应描述成真实多 Agent 执行。
+
+### 3. `agent`：真实模型
+
+```bash
 LLM_API_KEY=... uv run signal-harness scan \
   --fixture examples/signal_harness/sample_events.json \
   --mode agent
 ```
 
-`demo` is deterministic fallback logic. `mock-agent` is the CI-safe orchestration path. `agent` uses the same schemas, runner, tool boundary, scoring, and trace with a real provider.
+Golden Demo 会先检查**非敏感配置状态**。如果没有配置 `LLM_API_KEY` 或 Model Profile，无需先启动一次失败 Run，页面会直接提示“真实模型未配置”，并推荐使用离线五 Agent 模式。
 
-## Agent regression eval
+页面不会暴露 API Key 或 Base URL；“已配置”也只表示本地配置完整，真实网络连接仍在 Run 时验证。
+
+## 五个 Agent 分别做什么
+
+1. **SignalSupervisorAgent**
+   对 Signal 分类并决定哪些下游阶段需要执行。
+
+2. **ContextEvidenceAgent**
+   先提出 bounded read-only tool requests；Python 校验并执行后，再根据 ToolObservation 合成证据和 confidence。
+
+3. **ImpactAnalystAgent**
+   结合 Project Profile 判断 semantic relevance、affected modules、conflicts 和 risk，但不能输出 authoritative final score。
+
+4. **ActionPlannerAgent**
+   生成 bounded、可逆、可审核的行动建议；高风险动作仍会被 Python 再次检查。
+
+5. **LearningPolicyAgent**
+   基于 Memory 提出 policy / watchlist / skill 的 review-only proposal，不自动修改配置。
+
+## 为什么最终分数不交给 LLM
+
+SignalHarness 故意把最终业务判断留在 Python：
+
+```text
+Deterministic relevance
+        +
+LLM semantic relevance
+        +
+Evidence confidence
+        +
+Policy/category weights
+        ↓
+Python guarded score
+        ↓
+ignore / save / alert / action_required
+```
+
+这样做的目的不是“不相信模型”，而是把**可验证规则和不可完全验证的语义推理拆开**。
+
+另外，官方来源中的 CVE / vulnerability / supply-chain 等高风险 Signal 可以触发 Python-owned priority floor，避免模型低估后静默漏报。
+
+## Controlled Tool Calling
+
+SignalHarness 不是让 Provider 原生自由调用工具，而是：
+
+```text
+LLM
+ ↓
+EvidenceToolPlan
+ ↓
+Python allowlist / permission / budget
+ ↓
+Tool execution
+ ↓
+ToolObservation
+ ↓
+LLM evidence synthesis
+```
+
+这意味着：
+
+- 模型只能“提出工具请求”
+- Python 决定是否执行
+- Tool error / blocked / budget exceeded 都进入 Trace
+- 工具失败不会被隐藏
+- broad live search 默认没有开放
+
+## 40 条 Agent Regression Eval
+
+运行：
 
 ```bash
 uv run signal-harness regression-eval \
@@ -135,21 +252,48 @@ uv run signal-harness regression-eval \
   --enforce
 ```
 
-Inputs:
+当前 committed `resume-v1` corpus：
 
-- `examples/signal_harness/regression_events.json`
-- `examples/signal_harness/regression_expectations.json`
+```text
+cases                  40 / 40 assessed
+decision accuracy      1.0000
+category accuracy      1.0000
+priority precision     1.0000
+priority recall        1.0000
+false-positive rate    0.0000
+false-negative rate    0.0000
+```
 
-Outputs:
+覆盖包括：
 
-- `outputs/regression-eval/regression_eval_summary.json`
-- `outputs/regression-eval/regression_eval_summary.md`
+- 高风险直接依赖变化
+- 普通 release
+- policy / permission / tool calling
+- provider / structured-output 问题
+- RSS expert signal 与采集噪声
+- competitor / web change
+- giveaway / crypto / gaming 等显式噪声
+- `no breaking change` 一类否定语义
 
-Metrics include exact decision/category accuracy, priority precision/recall, FPR/FNR, TP/FP/TN/FN, decision confusion, missing assessments, and mismatch details. `--enforce` exits non-zero when configured thresholds fail.
+第一版 Regression baseline 曾出现：
 
-## Provider contract eval
+```text
+decision accuracy  75%
+priority recall     28.57%
+```
 
-`model-eval` answers a different question: **can this provider participate safely in the SignalHarness structured Agent contract?**
+它真实暴露并推动修复了：
+
+- category multiplier 重复计算
+- mock provider 没拿到 stable project context
+- 否定语义误判
+- routing contract 回归
+
+> **重要：这里的 100% 只代表 SignalHarness 项目级 Regression Contract，不代表通用 LLM 准确率 100%。**
+
+## Provider Contract Eval
+
+Regression Eval 关注“产品行为有没有回归”；`model-eval` 关注“某个真实 Provider 能否稳定遵守 Harness contract”。
 
 ```bash
 uv run signal-harness model-eval \
@@ -158,50 +302,54 @@ uv run signal-harness model-eval \
   --runs 2
 ```
 
-It records schema-valid rate, retry/fallback/timeout counts, tool validation/block/budget/runtime errors, repair behavior, decisions, latency, provider-reported token totals, and estimated cost when the selected model profile contains pricing metadata.
+记录：
 
-Real-provider results are local snapshots, not a universal leaderboard. See `docs/EVALS.md` and `docs/MODEL_EVAL_REPORT.md`.
+- schema-valid rate
+- retry / fallback / timeout
+- tool validation / blocked / runtime error
+- bounded repair
+- latency
+- provider-reported tokens
+- estimated cost（配置 pricing metadata 时）
+
+历史真实 Provider 结果只作为 dated snapshot，不作为长期通用排行榜。详见 `docs/EVALS.md` 和 `docs/MODEL_EVAL_REPORT.md`。
 
 ## MCP
 
-SignalHarness exposes a narrow **read-only** MCP surface; MCP does not bypass the existing runtime guardrails.
+SignalHarness 暴露 5 个只读 Structured MCP Tools：
 
-```bash
-uv run signal-harness mcp
+```text
+signalharness_get_project_context
+signalharness_search_signal_history
+signalharness_get_latest_assessments
+signalharness_get_run_trace
+signalharness_get_feedback_memory
 ```
 
-Available tools:
+特点：
 
-- `signalharness_get_project_context`
-- `signalharness_search_signal_history`
-- `signalharness_get_latest_assessments`
-- `signalharness_get_run_trace`
-- `signalharness_get_feedback_memory`
+- read-only
+- idempotent
+- closed-world
+- service run ID 校验
+- 仍经过 SignalHarness permission policy
 
-Each tool returns structured content, is annotated read-only/idempotent/closed-world, validates service run IDs, and passes through SignalHarness permission policy.
+MCP 是第二个读取入口，不是绕过 Harness Guardrail 的后门。
 
-## Golden Demo UI + SSE
+## REST + SSE + MCP HTTP
 
-Start the same service and open `http://127.0.0.1:8000/demo`:
-
-```bash
-uv run signal-harness serve --host 127.0.0.1 --port 8000
-```
-
-The Golden Demo is dependency-free HTML/CSS/JS served by FastAPI. Clicking **Run Golden Demo** creates a queued stream run; the workflow starts only after the browser establishes the SSE subscription, so the page consumes live runtime events rather than replaying a finished animation. `TraceRecorder` append/update events feed an in-process replay buffer, and browser reconnects can resume with `Last-Event-ID`. Disconnecting the browser does not cancel the workflow.
-
-The UI shows the five Agent stages, Python tool guard, schema/fallback/retry state, tool requests/execution/permission checks, final decisions, runtime health, the committed 40-case regression evidence, and the five read-only MCP tools. The stream is intentionally in-process: it is not a durable queue or distributed worker system.
-
-## REST API + MCP HTTP
+启动：
 
 ```bash
-uv run signal-harness serve --host 127.0.0.1 --port 8000
+uv run signal-harness serve --host 127.0.0.1 --port 8001
 ```
 
-REST endpoints:
+主要 endpoints：
 
 ```text
 GET  /health
+GET  /demo
+GET  /demo/meta
 POST /runs
 GET  /runs/{run_id}
 GET  /runs/{run_id}/trace
@@ -211,50 +359,44 @@ POST /feedback
 POST /stream-runs
 GET  /stream-runs/{run_id}
 GET  /stream-runs/{run_id}/events
-GET  /demo
-GET  /demo/meta
 ```
 
-MCP Streamable HTTP is mounted at:
+MCP Streamable HTTP：
 
 ```text
 /mcp
 ```
 
-Each API run gets isolated output/state directories under `service-runs/<run_id>`. The original `POST /runs` remains synchronous. Streaming demo runs are in-process asyncio tasks started by the first SSE subscriber; they continue if the browser disconnects, but live subscription history is not durable across a service restart. No Redis/Celery/worker tier is claimed.
-
-## Docker
-
-```bash
-docker build -t signalharness:local .
-docker run --rm -p 8000:8000 signalharness:local
-```
-
-The container runs the same `signal-harness serve` entry point and exposes a `/health` Docker health check.
+原 `POST /runs` 仍是同步 Run；Golden Demo 使用新增的 in-process stream-run，两者复用同一个 `SignalHarnessWorkflow`。
 
 ## Observability
 
-Every LLM trace record can include:
+Trace 可以记录：
 
-- Agent, model, mode, prompt version, input IDs, output schema;
-- schema validity, retry count, fallback reason, timeout state;
-- tools requested/executed/blocked, permission checks, budget blocks, tool errors;
-- repair status and bounded-repair metadata;
-- prompt/static/dynamic context hashes;
-- duration;
-- provider-reported prompt/completion/total tokens;
-- estimated USD cost when profile pricing metadata is configured.
+- Agent / model / mode / prompt version
+- Schema validity
+- Retry / Fallback / Timeout
+- Tools requested / executed / blocked
+- Permission checks
+- Budget blocks / Tool errors
+- Repair metadata
+- Context hashes
+- Duration
+- Provider reported tokens
+- Estimated USD cost
 
-Mock runs deliberately do **not** fabricate token counts.
+`mock-agent` 不伪造 token 数量。
+
+CLI 查看：
 
 ```bash
 uv run signal-harness trace
 uv run signal-harness dashboard
 ```
 
-The static dashboard surfaces runtime health without requiring a hosted observability product. The Golden Demo consumes the same observable trace through SSE, so UI state is derived from runtime evidence instead of a separate simulated Agent state machine.
+Golden Demo 通过 SSE 消费**同一个 observable TraceRecorder**，不是维护另一套“看起来像 Agent 在跑”的前端状态机。
 
-## Feedback and guarded learning
+## Feedback 与 Guarded Learning
 
 ```bash
 uv run signal-harness feedback \
@@ -268,11 +410,26 @@ uv run signal-harness learning-review
 uv run signal-harness learning-apply --proposal-id <id> --yes
 ```
 
-Policy/skill/watchlist proposals remain staged unless replay and risk gates allow an explicit apply. High-risk proposals remain human-reviewed.
+Learning proposal 不自动应用。高风险 proposal 或 replay gate failed proposal 保持 staged，需要显式 review / approval。
 
-## CI
+## Docker
 
-Public GitHub Actions are offline with respect to LLM providers. CI runs:
+```bash
+docker build -t signalharness:local .
+docker run --rm -p 8001:8000 signalharness:local
+```
+
+浏览器打开：
+
+```text
+http://127.0.0.1:8001/demo
+```
+
+容器运行的是同一个 FastAPI + MCP + SSE service entry point，并提供 `/health` healthcheck。
+
+## CI 与工程验证
+
+公开 GitHub Actions 不依赖真实 LLM API：
 
 ```text
 pytest tests/signal_harness
@@ -282,41 +439,47 @@ mypy --strict
 uv build
 ```
 
-No API key is required and public CI does not call a live model provider.
+真实 Provider smoke 由本地显式环境变量触发，不把 API Key 放进 Public CI。
 
-## Key files
+## 核心文件
 
 ```text
-src/signal_harness/agent_team/          five Agent roles
-src/signal_harness/agent_integration/   prompts, runner, tool loop, trace, scoring bridge
-src/signal_harness/runtime/             workflow, permissions, registry, executor
-src/signal_harness/signal/              schemas, scoring, taxonomy, text semantics
-src/signal_harness/providers/           mock + OpenAI-compatible providers/model profiles
-src/signal_harness/mcp_server.py        read-only MCP interface
-src/signal_harness/service.py           FastAPI REST/SSE + MCP HTTP service
-src/signal_harness/service_streaming.py in-process stream-run/SSE replay manager
-src/signal_harness/evals.py             model and regression evaluation
-src/signal_harness/ui/                  Golden Demo + dashboard/digest/trace views
-configs/                                project, policy, watchlist, model profiles
-examples/signal_harness/                demo and regression fixtures
-tests/signal_harness/                   unit/integration/regression coverage
+src/signal_harness/agent_team/          五 Agent roles
+src/signal_harness/agent_integration/   prompts / runner / schemas / tool loop / trace
+src/signal_harness/runtime/             workflow / permissions / registry / executor
+src/signal_harness/signal/              scoring / taxonomy / semantics / schemas
+src/signal_harness/providers/           mock + OpenAI-compatible provider
+src/signal_harness/mcp_server.py        只读 MCP interface
+src/signal_harness/service.py           FastAPI REST/SSE + MCP HTTP
+src/signal_harness/service_streaming.py stream-run / SSE replay manager
+src/signal_harness/ui/demo.py           中英双语 Golden Demo
+src/signal_harness/evals.py             Regression + Provider Contract Eval
+configs/                                Project / Policy / Watchlist / Model profiles
+examples/signal_harness/                Demo / Regression fixtures
+tests/signal_harness/                   Unit / Integration / Regression tests
 ```
 
-## Provenance and independence
+## 项目边界
 
-SignalHarness is maintained as its own project and the current package does not vendor or import OpenHarness runtime code. The repository does retain an `upstream` remote/common Git ancestry with HKUDS/OpenHarness from the project’s earlier exploration stage. The accurate description is therefore: **inspired by modern Agent Harness patterns and substantially reworked around the SignalHarness signal-intelligence use case**, rather than claiming a from-scratch origin with no upstream history.
+SignalHarness 当前**明确没有**：
 
-## Deliberate non-goals
+- LangGraph / CrewAI / AutoGen orchestration dependency
+- Redis / Celery / Kafka durable queue
+- PostgreSQL / multi-tenant state
+- VectorDB / Embedding / 通用 RAG
+- Provider-native unrestricted tool calling
+- 自动应用高风险 Learning proposal
+- Production auth / horizontal scaling
 
-- no LangGraph/CrewAI/AutoGen dependency for orchestration;
-- no database, queue, Redis, vector store, or embedding layer without a demonstrated need;
-- no provider-native tool execution that can bypass Python controls;
-- no autonomous high-risk policy mutation;
-- no claim that the 40-case regression fixture is a general LLM benchmark;
-- no claim that static dashboard/API/SSE service equals a horizontally scaled production platform;
-- no claim that the in-process SSE replay buffer is a durable job queue.
+这些不是通过 README 隐藏掉的“未来能力”，而是当前有意保持的 MVP 边界。
 
-## Interview material
+## 项目来源说明
+
+SignalHarness 当前 package 不 vendor、也不 import OpenHarness runtime code；但仓库保留了早期探索阶段与 `HKUDS/OpenHarness` 的 upstream remote / common Git ancestry。
+
+准确表述是：**借鉴现代 Agent Harness 模式，并围绕 Signal Intelligence 场景进行了实质性重构和独立实现。** 不声称项目从历史上完全没有 upstream 来源。
+
+## 面试与技术文档
 
 - `docs/ARCHITECTURE.md`
 - `docs/EVALS.md`
@@ -327,3 +490,5 @@ SignalHarness is maintained as its own project and the current package does not 
 - `docs/INTERVIEW_DEMO_SCRIPT.md`
 - `docs/PROJECT_STAR.md`
 - `docs/RESUME_GUIDE.md`
+
+如果是面试现场，推荐顺序：**Golden Demo → 40-case Eval → Trace/Tool Guard → MCP → 架构边界**。

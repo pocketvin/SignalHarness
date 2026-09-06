@@ -67,6 +67,9 @@ def test_demo_page_and_metadata(project_root: Path, tmp_path: Path) -> None:
         page = client.get("/demo")
         assert page.status_code == 200
         assert "SignalHarness Flight Deck" in page.text
+        assert "看 SignalHarness 如何一步一步做出决策" in page.text
+        assert "离线五 Agent 演示（推荐）" in page.text
+        assert "中文" in page.text
         assert "new EventSource" in page.text
         assert "live runtime evidence, not a simulated animation" in page.text
 
@@ -81,6 +84,54 @@ def test_demo_page_and_metadata(project_root: Path, tmp_path: Path) -> None:
             "transport": "sse",
             "durability": "in-process",
         }
+        assert payload["provider"]["ready"] is False
+        assert payload["provider"]["verified"] is False
+        assert payload["provider"]["reason"] == "missing_api_key"
+
+
+def test_demo_metadata_reports_configured_provider_without_network_call(
+    project_root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_API_KEY", "test-only-placeholder")
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("LLM_MODEL_PROFILE", raising=False)
+    app = create_app(
+        cwd=project_root,
+        output_dir=tmp_path / "outputs",
+        state_dir=tmp_path / "state",
+    )
+    with TestClient(app) as client:
+        meta_response = client.get("/demo/meta")
+        assert "test-only-placeholder" not in meta_response.text
+        assert "base_url" not in meta_response.text.lower()
+        provider = meta_response.json()["provider"]
+        assert provider["ready"] is True
+        assert provider["verified"] is False
+        assert provider["provider"] == "openai_compatible"
+        assert provider["model"]
+        assert provider["reason"] is None
+
+
+def test_agent_stream_run_requires_provider_configuration(
+    project_root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    app = create_app(
+        cwd=project_root,
+        output_dir=tmp_path / "outputs",
+        state_dir=tmp_path / "state",
+    )
+    with TestClient(app) as client:
+        response = client.post("/stream-runs", json={"mode": "agent"})
+        assert response.status_code == 409
+        detail = response.json()["detail"]
+        assert detail["code"] == "agent_provider_not_ready"
+        assert detail["reason"] == "missing_api_key"
+        assert "LLM_API_KEY" in detail["message"]
 
 
 def test_stream_run_replays_trace_and_final_result(
