@@ -7,8 +7,10 @@ github:
 rss:
   feeds:
     - name: GitHub Engineering
+      official: true
       url: https://github.blog/engineering/feed/
     - name: Simon Willison
+      official: false
       url: https://simonwillison.net/atom/everything/
 web_changes:
   sources:

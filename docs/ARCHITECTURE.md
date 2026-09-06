@@ -9,7 +9,8 @@ flowchart TD
     A["External Sources<br/>GitHub / RSS / Web change / fixture"] --> B["Source Collection"]
     B --> C["Normalization"]
     C --> D["Deduplication"]
-    D --> E["Noise Filter"]
+    D --> CF["Project-aware Candidate Funnel"]
+    CF --> E["Noise Filter"]
     E --> F["SignalSupervisorAgent"]
     F --> G["ContextEvidenceAgent"]
     G --> H["ImpactAnalystAgent"]
@@ -91,13 +92,13 @@ sequenceDiagram
   项目上下文：技术栈、真实 dependencies、monitored ecosystem、critical modules、focus keywords。
 
 - `configs/watchlist.yaml` / `configs/watchlists/*.yaml`
-  project-scoped live source watchlist：GitHub repos、RSS feeds、Web change sources。
+  project-scoped source watchlist：实时 GitHub/RSS，以及可扩展的 Web Change adapter。官方 RSS 可显式声明 provenance authority。
 
 - `configs/signal_policy.yaml`
   deterministic scoring weights、category weights、thresholds、tool allowlist、permission policy。
 
 - `src/signal_harness/runtime/workflow.py`
-  主 workflow：source collection、normalization、deduplication、noise filter、event limit、Agent run、report writing。
+  主 workflow：source collection、normalization、deduplication、project-aware candidate funnel、noise filter、Agent run、report writing。
 
 - `src/signal_harness/agent_integration/runner.py`
   五 Agent runner：controlled tool-use loop、schema retry、repair boundary、audit completion、LearningPolicy handling。
@@ -106,13 +107,13 @@ sequenceDiagram
   将 Agent outputs 转成 guarded `SignalAssessment`，并由 Python runtime 计算 final decision。
 
 - `src/signal_harness/evals.py`
-  两类 eval：40-case 产品 regression gate 与 provider contract/model eval。
+  三类 eval：40-case 产品 regression gate、cross-project context gate 与 provider contract/model eval。
 
 - `src/signal_harness/mcp_server.py`
   五个结构化只读 MCP tools；读取 project context、signal history、assessment、trace 和 feedback，且不能绕过 permission policy。
 
 - `src/signal_harness/service.py`
-  FastAPI REST + SSE + MCP Streamable HTTP 服务层；每次 run 隔离 output/state，并携带 `project_id`、source mode 与 provider selection，复用同一 Workflow。
+  FastAPI REST + SSE + MCP Streamable HTTP 服务层；每次 run 隔离 output/trace，同时按 `project_id` 连接共享的持久 Project State，并携带 source mode 与 provider selection。
 
 - `src/signal_harness/service_streaming.py`
   in-process stream-run manager：首个 SSE subscriber 启动 queued workflow，保留 event-id 历史用于重连回放；断开浏览器不取消 run。
@@ -129,13 +130,21 @@ sequenceDiagram
 - `outputs/task_trace.json`
   本地 trace 产物。记录 Agent calls、schema/fallback/retry、tool requests/executions、permission checks、source task health。
 
+## Project state / candidate / provenance boundaries
+
+- **Run state**：trace、run metadata 与本次输出按 run 隔离。
+- **Project state**：seen signal fingerprints、feedback、alert state 与 learning artifacts 按 `project_id` 持久化；同项目并发写入受 project lock 保护。
+- **Candidate funnel**：live events 在 normalize/deduplicate 后才做 project-aware Top-K，避免“先按时间截断再判断相关性”造成系统性漏报。
+- **Source authority**：GitHub repo 本身是否官方与 Issue 作者 authority 分开；community / maintainer / official 进入不同 evidence confidence 上限。官方 RSS 由 Watchlist 显式声明。
+- **Release semantics**：GitHub Release 的 Documentation/Chores 章节不会单凭风险关键词把整个 release 升级成 security/breaking signal；运行时 Features/Bug Fixes 等章节仍参与确定性语义。
+
 ## 面试展示重点
 
 SignalHarness 的价值不是“又做了一个 dashboard”，而是展示 Agent Harness 的工程边界：LLM 做推理，Python 做约束；模型输出可审计，工具使用可追踪，fallback 不隐藏，learning 不自动改配置。
 
 ## Evaluation and observability
 
-SignalHarness 把“模型是否稳定”和“产品行为是否正确”拆成两层。`regression-eval --enforce` 使用 40 个标签 case 验证 decision/category、priority precision/recall、FPR/FNR；`model-eval` 则验证 provider schema、retry/fallback、tool errors、repair、latency、provider-reported token usage 和 estimated cost。二者都不是通用 LLM leaderboard。
+SignalHarness 把验证拆成三层：`regression-eval --enforce` 验证 40 个项目 contract case；`project-eval --enforce` 用同一事件跨项目比较，证明 Project Context 会改变判断；`model-eval` 验证 provider schema、retry/fallback、tool errors、repair、latency、provider-reported token usage 和 estimated cost。三者都不是通用 LLM leaderboard。
 
 当前 `resume-v1` offline regression suite 的 committed acceptance 是 40/40 exact decision、40/40 exact category、priority precision/recall 100%、FPR/FNR 0%。这些数字来自项目特定 contract corpus。
 

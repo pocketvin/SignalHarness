@@ -31,9 +31,13 @@ from signal_harness.learning import (
     load_learning_staging,
     stage_learning_proposal,
 )
+from signal_harness.project_evals import evaluate_project_context_suite
 from signal_harness.providers.adapter import AgentProvider
+from signal_harness.providers.catalog import default_provider_id, provider_from_selection
 from signal_harness.providers.factory import provider_from_env
 from signal_harness.providers.mock_provider import MockProvider
+from signal_harness.projects.catalog import default_project_id, project_option
+from signal_harness.projects.state import prepare_project_state
 from signal_harness.runtime.permissions import SignalPermissionGuard
 from signal_harness.runtime.tracing import TraceRecorder
 from signal_harness.runtime.workflow import SignalHarnessWorkflow
@@ -221,9 +225,7 @@ def _load_latest_learning(
                 json.loads(proposal_path.read_text(encoding="utf-8"))
             ),
             skill_update_proposal=skill_path.read_text(encoding="utf-8"),
-            watchlist_update_proposal=json.loads(
-                watchlist_path.read_text(encoding="utf-8")
-            ),
+            watchlist_update_proposal=json.loads(watchlist_path.read_text(encoding="utf-8")),
             learning_summary="Loaded staged learning artifacts from state.",
             memory_sections_read=[],
         )
@@ -242,9 +244,7 @@ def _load_latest_replay(
         output / "latest_replay_evaluation.json",
     ):
         if path.exists():
-            return ReplayEvaluation.model_validate(
-                json.loads(path.read_text(encoding="utf-8"))
-            )
+            return ReplayEvaluation.model_validate(json.loads(path.read_text(encoding="utf-8")))
     return None
 
 
@@ -275,13 +275,17 @@ def scan(
         None,
         "--max-events",
         min=1,
-        help="Deterministically keep at most N collected events before Agent execution",
+        help="Keep at most N project-ranked candidates before Agent execution",
     ),
     max_events_per_source: int | None = typer.Option(
         None,
         "--max-events-per-source",
         min=1,
-        help="Deterministically keep at most N events from each source before Agent execution",
+        help="Keep at most N project-ranked candidates from each source",
+    ),
+    project_id: str | None = typer.Option(None, "--project", help="Project catalog id"),
+    provider_id: str | None = typer.Option(
+        None, "--provider", help="Configured real-model provider id"
     ),
     cwd: Path = typer.Option(Path.cwd(), "--cwd", hidden=True),
     config_dir: Path = typer.Option(Path("configs"), "--config-dir"),
@@ -296,22 +300,54 @@ def scan(
     """Collect, normalize, assess, trace, and report project signals."""
 
     root = cwd.expanduser().resolve()
-    _require_agent_key(mode)
+    config = _resolve(root, config_dir)
+    selected_project_id = project_id or default_project_id(config)
+    try:
+        project = project_option(selected_project_id, config)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    state = prepare_project_state(
+        _resolve(root, state_dir),
+        project.id,
+        migrate_legacy_default=True,
+    )
+    provider = None
+    if mode is RunMode.AGENT and provider_id is not None:
+        try:
+            provider = provider_from_selection(provider_id, config_dir=config)
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+    elif mode is RunMode.AGENT and not os.environ.get("LLM_API_KEY", "").strip():
+        selected_provider = default_provider_id(config)
+        if selected_provider is None:
+            _require_agent_key(mode)
+            raise RuntimeError("agent provider resolution unexpectedly continued")
+        provider = provider_from_selection(selected_provider, config_dir=config)
+
     workflow = SignalHarnessWorkflow(
         cwd=root,
-        config_dir=config_dir,
+        config_dir=config,
+        project_profile_path=project.project_profile_path,
+        watchlist_path=project.watchlist_path,
         output_dir=output_dir,
-        state_dir=state_dir,
+        state_dir=state,
         mode=mode,
+        provider=provider,
     )
-    result = asyncio.run(
-        workflow.scan(
-            fixture=fixture,
-            since=parse_since(since),
-            max_events=max_events,
-            max_events_per_source=max_events_per_source,
-        )
-    )
+
+    async def run_scan() -> Any:
+        try:
+            return await workflow.scan(
+                fixture=fixture,
+                since=parse_since(since),
+                max_events=max_events,
+                max_events_per_source=max_events_per_source,
+            )
+        finally:
+            if provider is not None:
+                await provider.close()
+
+    result = asyncio.run(run_scan())
     render_assessment_table(result.signals, result.assessments)
     typer.echo(f"Generated SignalHarness outputs in {result.output_dir}")
 
@@ -423,9 +459,7 @@ def model_eval(
         isolated_state = runs > 1
         for index in range(runs):
             run_state = (
-                resolved_state / f"run-{index + 1:03d}"
-                if isolated_state
-                else resolved_state
+                resolved_state / f"run-{index + 1:03d}" if isolated_state else resolved_state
             )
             workflow = SignalHarnessWorkflow(
                 cwd=root,
@@ -547,9 +581,7 @@ def regression_eval(
     cwd: Path = typer.Option(Path.cwd(), "--cwd", hidden=True),
     config_dir: Path = typer.Option(Path("configs"), "--config-dir"),
     output_dir: Path = typer.Option(Path("outputs/regression-eval"), "--output-dir"),
-    state_dir: Path = typer.Option(
-        Path(".signal-harness/regression-eval"), "--state-dir"
-    ),
+    state_dir: Path = typer.Option(Path(".signal-harness/regression-eval"), "--state-dir"),
 ) -> None:
     """Run labelled product-level Agent regression cases through the Harness."""
 
@@ -580,11 +612,44 @@ def regression_eval(
         raise typer.Exit(code=1)
 
 
+@app.command("project-eval")
+def project_eval(
+    suite: Path = typer.Option(
+        Path("examples/signal_harness/project_context_eval.json"),
+        "--suite",
+        help="Cross-project context evaluation suite",
+    ),
+    cwd: Path = typer.Option(Path.cwd(), "--cwd", hidden=True),
+    config_dir: Path = typer.Option(Path("configs"), "--config-dir"),
+    enforce: bool = typer.Option(False, "--enforce", help="Exit non-zero when any case fails"),
+) -> None:
+    """Verify that the same external change is ranked differently by project context."""
+
+    root = cwd.expanduser().resolve()
+    summary = evaluate_project_context_suite(
+        _resolve(root, suite),
+        config_dir=_resolve(root, config_dir),
+    )
+    typer.echo(
+        f"Project context eval: {'PASS' if summary.passed else 'FAIL'}; "
+        f"{summary.passed_cases}/{summary.cases} cases"
+    )
+    for item in summary.results:
+        typer.echo(
+            f"- {item['id']}: gap={item['score_gap']:.2f}; "
+            f"{item['higher_project']}={item['scores'][item['higher_project']]:.2f}; "
+            f"{item['lower_project']}={item['scores'][item['lower_project']]:.2f}"
+        )
+    if enforce and not summary.passed:
+        raise typer.Exit(code=1)
+
+
 @app.command()
 def feedback(
     signal_id: str = typer.Option(..., "--signal-id"),
     label: FeedbackLabel = typer.Option(..., "--label"),
     note: str = typer.Option("", "--note"),
+    project_id: str | None = typer.Option(None, "--project", help="Project catalog id"),
     cwd: Path = typer.Option(Path.cwd(), "--cwd", hidden=True),
     config_dir: Path = typer.Option(Path("configs"), "--config-dir"),
     output_dir: Path = typer.Option(Path("outputs"), "--output-dir"),
@@ -601,7 +666,17 @@ def feedback(
     guard = SignalPermissionGuard(policy)
     guard.require("save_feedback")
     guard.require("save_policy_proposal")
-    state = _resolve(root, state_dir)
+    config = _resolve(root, config_dir)
+    selected_project_id = project_id or default_project_id(config)
+    try:
+        project = project_option(selected_project_id, config)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    state = prepare_project_state(
+        _resolve(root, state_dir),
+        project.id,
+        migrate_legacy_default=True,
+    )
     record = create_feedback_record(signal_id, label, note)
     FeedbackMemory(state / "feedback_memory.json").append(record)
     proposal = generate_policy_proposal(
@@ -623,6 +698,7 @@ def calibrate(
         help="Stage through the learning gate; --yes applies only if low-risk and replay-passed",
     ),
     yes: bool = typer.Option(False, "--yes", help="Confirm policy replacement non-interactively"),
+    project_id: str | None = typer.Option(None, "--project", help="Project catalog id"),
     cwd: Path = typer.Option(Path.cwd(), "--cwd", hidden=True),
     config_dir: Path = typer.Option(Path("configs"), "--config-dir"),
     output_dir: Path = typer.Option(Path("outputs"), "--output-dir"),
@@ -637,10 +713,24 @@ def calibrate(
 
     root = cwd.expanduser().resolve()
     config = _resolve(root, config_dir)
-    state = _resolve(root, state_dir)
+    selected_project_id = project_id or default_project_id(config)
+    try:
+        project = project_option(selected_project_id, config)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    state = prepare_project_state(
+        _resolve(root, state_dir),
+        project.id,
+        migrate_legacy_default=True,
+    )
     policy_path = config / "signal_policy.yaml"
     policy = load_signal_policy(policy_path)
-    bundle = MemoryBundle.from_paths(config_dir=config, state_dir=state)
+    bundle = MemoryBundle.from_paths(
+        config_dir=config,
+        state_dir=state,
+        project_profile_path=project.project_profile_path,
+        watchlist_path=project.watchlist_path,
+    )
     snapshot = bundle.snapshot()
     if mode is RunMode.DEMO:
         learning = LearningPolicyAgent().fallback(snapshot)
@@ -689,6 +779,11 @@ def calibrate(
             "learning-apply --yes to request policy replacement."
         )
         return
+    if project.id != default_project_id(config):
+        raise typer.BadParameter(
+            "Applying learned ranking policy is currently restricted to the default project; "
+            "non-default project proposals remain review-only."
+        )
     staged = stage_learning_proposal(
         state_dir=state,
         output_dir=resolved_outputs,

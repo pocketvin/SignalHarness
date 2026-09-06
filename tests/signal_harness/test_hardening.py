@@ -129,10 +129,11 @@ def test_scan_max_events_limits_collected_events(
     assert result.exit_code == 0, result.output
     signals = json.loads((output_dir / "signals.json").read_text(encoding="utf-8"))
     trace = json.loads((output_dir / "task_trace.json").read_text(encoding="utf-8"))
-    collect = next(item for item in trace if item["step"] == "collect_signals")
-    limits = collect["metadata"]["event_limits"]
+    funnel = next(item for item in trace if item["step"] == "candidate_funnel")
+    limits = funnel["metadata"]["candidate_funnel"]
 
     assert len(signals) == 2
+    assert limits["strategy"] == "project_relevance_v2"
     assert limits["before_count"] >= 4
     assert limits["after_count"] == 2
     assert limits["dropped_count"] == limits["before_count"] - 2
@@ -212,11 +213,7 @@ def test_json_outputs_are_written_once(project_root: Path, tmp_path: Path) -> No
         return await original_call(name, arguments)
 
     workflow.executor.call = count_writes  # type: ignore[method-assign]
-    asyncio.run(
-        workflow.scan(
-            fixture=project_root / "examples/signal_harness/sample_events.json"
-        )
-    )
+    asyncio.run(workflow.scan(fixture=project_root / "examples/signal_harness/sample_events.json"))
 
     assert json_write_calls == 1
 

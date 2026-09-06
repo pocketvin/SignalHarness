@@ -17,7 +17,8 @@ from signal_harness.signal.feedback import create_feedback_record
 from signal_harness.signal.noise import NoiseFilter
 from signal_harness.signal.normalizer import normalize_event
 from signal_harness.signal.policy import load_signal_policy
-from signal_harness.signal.schemas import SignalCategory
+from signal_harness.signal.schemas import SignalCategory, SourceQuality
+from signal_harness.signal.source_authority import event_source_quality
 from signal_harness.ui.trace_view import write_trace_summary
 
 
@@ -89,9 +90,7 @@ def test_scripted_eval_routes_noise_and_multisource(
     }
     assert by_id["multi-001"].cross_source_confidence >= 0.8
     assert by_id["multi-005"].conflicting_evidence
-    action_trace = next(
-        step for step in result.trace.steps if step.output_schema == "ActionOutput"
-    )
+    action_trace = next(step for step in result.trace.steps if step.output_schema == "ActionOutput")
     assert action_trace.input_count == 2
     assert action_trace.output_count == 2
 
@@ -109,19 +108,13 @@ def test_default_mock_agent_requests_multisource_tools(
         provider=provider,
     )
     result = asyncio.run(
-        workflow.scan(
-            fixture=project_root / "examples/signal_harness/sample_events.json"
-        )
+        workflow.scan(fixture=project_root / "examples/signal_harness/sample_events.json")
     )
     plan_trace = next(
-        step
-        for step in result.trace.steps
-        if step.output_schema == "EvidenceToolPlan"
+        step for step in result.trace.steps if step.output_schema == "EvidenceToolPlan"
     )
     final_trace = next(
-        step
-        for step in result.trace.steps
-        if step.output_schema == "ContextEvidenceOutput"
+        step for step in result.trace.steps if step.output_schema == "ContextEvidenceOutput"
     )
 
     assert {
@@ -141,9 +134,7 @@ def test_default_mock_agent_requests_multisource_tools(
     assert len(plan_trace.permission_checks) == 5
     assert final_trace.tool_observation_count == 5
     assert final_trace.exit_condition == "evidence_complete"
-    plan_call = next(
-        call for call in provider.calls if call.output_schema == "EvidenceToolPlan"
-    )
+    plan_call = next(call for call in provider.calls if call.output_schema == "EvidenceToolPlan")
     contract = plan_call.input_payload["tool_request_contract"]
     assert contract["github_signal"]["required"] == ["action"]
     assert "fetch_repo_releases" in contract["github_signal"]["common_valid_actions"]
@@ -179,14 +170,10 @@ def test_evidence_tool_loop_executes_blocks_and_reprompts(
     )
     result = _scan(project_root, tmp_path, provider)
     plan_trace = next(
-        step
-        for step in result.trace.steps
-        if step.output_schema == "EvidenceToolPlan"
+        step for step in result.trace.steps if step.output_schema == "EvidenceToolPlan"
     )
     final_call = next(
-        call
-        for call in provider.calls
-        if call.output_schema == "ContextEvidenceOutput"
+        call for call in provider.calls if call.output_schema == "ContextEvidenceOutput"
     )
 
     assert "signal_memory" in plan_trace.tools_executed
@@ -221,14 +208,10 @@ def test_tool_budget_blocks_excess_requests_without_crashing(
         ),
     )
     plan_trace = next(
-        step
-        for step in result.trace.steps
-        if step.output_schema == "EvidenceToolPlan"
+        step for step in result.trace.steps if step.output_schema == "EvidenceToolPlan"
     )
     final_trace = next(
-        step
-        for step in result.trace.steps
-        if step.output_schema == "ContextEvidenceOutput"
+        step for step in result.trace.steps if step.output_schema == "ContextEvidenceOutput"
     )
 
     assert plan_trace.budget_blocked_count == 2
@@ -295,9 +278,7 @@ def test_scripted_multi_tool_eval_uses_mock_outputs_without_network(
     ) -> ToolResult:
         if arguments.get("mock_tool_eval") is True:
             mocked_calls.append(name)
-            return ToolResult(
-                output=f'{{"tool": "{name}", "mocked": true}}'
-            )
+            return ToolResult(output=f'{{"tool": "{name}", "mocked": true}}')
         if arguments.get("mock_tool_error") is True:
             return ToolResult(output="mock signal_score failure", is_error=True)
         return await original_call(name, arguments)
@@ -305,19 +286,13 @@ def test_scripted_multi_tool_eval_uses_mock_outputs_without_network(
     workflow.executor.call = mock_tool_call  # type: ignore[method-assign]
     result = asyncio.run(workflow.scan(fixture=_fixture(project_root)))
     plan_trace = next(
-        step
-        for step in result.trace.steps
-        if step.output_schema == "EvidenceToolPlan"
+        step for step in result.trace.steps if step.output_schema == "EvidenceToolPlan"
     )
     final_trace = next(
-        step
-        for step in result.trace.steps
-        if step.output_schema == "ContextEvidenceOutput"
+        step for step in result.trace.steps if step.output_schema == "ContextEvidenceOutput"
     )
     final_call = next(
-        call
-        for call in provider.calls
-        if call.output_schema == "ContextEvidenceOutput"
+        call for call in provider.calls if call.output_schema == "ContextEvidenceOutput"
     )
 
     assert mocked_calls == ["github_signal", "rss_signal", "web_change"]
@@ -379,16 +354,10 @@ def test_schema_retry_recovers_without_fallback(
         project_root,
         tmp_path,
         SequencedMockProvider(
-            sequences={
-                "EvidenceToolPlan": ["{invalid-json", valid_plan.model_dump_json()]
-            }
+            sequences={"EvidenceToolPlan": ["{invalid-json", valid_plan.model_dump_json()]}
         ),
     )
-    trace = next(
-        step
-        for step in result.trace.steps
-        if step.output_schema == "EvidenceToolPlan"
-    )
+    trace = next(step for step in result.trace.steps if step.output_schema == "EvidenceToolPlan")
 
     assert trace.retry_count == 1
     assert trace.schema_error
@@ -404,15 +373,9 @@ def test_schema_retry_falls_back_after_second_failure(
     result = _scan(
         project_root,
         tmp_path,
-        SequencedMockProvider(
-            sequences={"EvidenceToolPlan": ["", "{invalid-json"]}
-        ),
+        SequencedMockProvider(sequences={"EvidenceToolPlan": ["", "{invalid-json"]}),
     )
-    trace = next(
-        step
-        for step in result.trace.steps
-        if step.output_schema == "EvidenceToolPlan"
-    )
+    trace = next(step for step in result.trace.steps if step.output_schema == "EvidenceToolPlan")
 
     assert trace.retry_count == 1
     assert trace.schema_error
@@ -468,17 +431,13 @@ def test_tool_error_does_not_crash_and_caps_confidence(
         ),
     )
     evidence_trace = next(
-        step
-        for step in result.trace.steps
-        if step.output_schema == "ContextEvidenceOutput"
+        step for step in result.trace.steps if step.output_schema == "ContextEvidenceOutput"
     )
 
     assert evidence_trace.tool_errors
-    assert max(
-        item.confidence
-        for item in result.assessments
-        if item.event_id != "multi-004"
-    ) <= 0.55
+    assert (
+        max(item.confidence for item in result.assessments if item.event_id != "multi-004") <= 0.55
+    )
 
 
 def test_prompt_prefix_hash_stability_and_dynamic_change() -> None:
@@ -579,9 +538,7 @@ def test_identical_tool_requests_use_per_run_cache(
             responses={"EvidenceToolPlan": plan.model_dump_json()},
         ),
     )
-    trace = next(
-        step for step in result.trace.steps if step.output_schema == "EvidenceToolPlan"
-    )
+    trace = next(step for step in result.trace.steps if step.output_schema == "EvidenceToolPlan")
 
     assert "tool_observation:signal_memory:miss" in trace.cache_events
     assert "tool_observation:signal_memory:hit" in trace.cache_events
@@ -603,21 +560,11 @@ def test_source_fetch_cache_is_reported_on_second_collection(
         return ToolResult(output='[{"name": "v1"}]')
 
     workflow.executor.call = fake_call  # type: ignore[method-assign]
-    watchlist = {
-        "github": {
-            "repositories": [
-                {"repo": "example/repo", "events": ["releases"]}
-            ]
-        }
-    }
+    watchlist = {"github": {"repositories": [{"repo": "example/repo", "events": ["releases"]}]}}
     policy = load_signal_policy(project_root / "configs/signal_policy.yaml")
     guard = SignalPermissionGuard(policy)
-    first = asyncio.run(
-        workflow._collect_watchlist(watchlist, since=None, guard=guard)
-    )
-    second = asyncio.run(
-        workflow._collect_watchlist(watchlist, since=None, guard=guard)
-    )
+    first = asyncio.run(workflow._collect_watchlist(watchlist, since=None, guard=guard))
+    second = asyncio.run(workflow._collect_watchlist(watchlist, since=None, guard=guard))
 
     assert first.source_tasks[0].cache_hit is False
     assert second.source_tasks[0].cache_hit is True
@@ -645,3 +592,41 @@ def test_eval_summary_reports_workflow_metrics(
     assert summary.evidence_primary_source_coverage == 1
     assert summary.fallback_rate == 0
     assert summary.proposal_safety_passed is True
+
+
+def test_official_rss_watchlist_metadata_reaches_normalized_event(
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    workflow = SignalHarnessWorkflow(
+        cwd=project_root,
+        state_dir=tmp_path / "state",
+    )
+
+    async def fake_call(name: str, arguments: dict[str, object]) -> ToolResult:
+        assert name == "rss_signal"
+        return ToolResult(output='[{"title":"Official update","link":"https://example.test/post"}]')
+
+    workflow.executor.call = fake_call  # type: ignore[method-assign]
+    policy = load_signal_policy(project_root / "configs/signal_policy.yaml")
+    collection = asyncio.run(
+        workflow._collect_watchlist(  # noqa: SLF001
+            {
+                "rss": {
+                    "feeds": [
+                        {
+                            "name": "Official Feed",
+                            "url": "https://example.test/feed",
+                            "official": True,
+                        }
+                    ]
+                }
+            },
+            since=None,
+            guard=SignalPermissionGuard(policy),
+        )
+    )
+
+    event = workflow._normalize_collected(collection.events[0])  # noqa: SLF001
+    assert event.raw_payload["official"] is True
+    assert event_source_quality(event) is SourceQuality.OFFICIAL

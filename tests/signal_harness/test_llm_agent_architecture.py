@@ -137,24 +137,18 @@ def test_mock_agent_runs_complete_five_agent_team(
 ) -> None:
     provider = MockProvider()
     result = asyncio.run(
-        _workflow(project_root, tmp_path, provider).scan(
-            fixture=_fixture(project_root)
-        )
+        _workflow(project_root, tmp_path, provider).scan(fixture=_fixture(project_root))
     )
 
     assert {call.agent_name for call in provider.calls} == AGENT_NAMES
     assert [
-        call.output_schema
-        for call in provider.calls
-        if call.agent_name == "ContextEvidenceAgent"
+        call.output_schema for call in provider.calls if call.agent_name == "ContextEvidenceAgent"
     ] == ["EvidenceToolPlan", "ContextEvidenceOutput"]
     llm_steps = [step for step in result.trace.steps if step.step == "llm_agent_call"]
     assert {step.agent_name for step in llm_steps} == AGENT_NAMES
     assert all(step.mode == "mock-agent" for step in llm_steps)
     assert all(step.output_schema for step in llm_steps)
-    evidence_step = next(
-        step for step in llm_steps if step.output_schema == "EvidenceToolPlan"
-    )
+    evidence_step = next(step for step in llm_steps if step.output_schema == "EvidenceToolPlan")
     assert {
         "signal_memory",
         "github_signal",
@@ -219,15 +213,11 @@ def test_invalid_mock_json_uses_deterministic_fallback(
 ) -> None:
     provider = MockProvider(invalid_agents={"ContextEvidenceAgent"})
     result = asyncio.run(
-        _workflow(project_root, tmp_path, provider).scan(
-            fixture=_fixture(project_root)
-        )
+        _workflow(project_root, tmp_path, provider).scan(fixture=_fixture(project_root))
     )
 
     evidence_traces = [
-        step
-        for step in result.trace.steps
-        if step.agent_name == "ContextEvidenceAgent"
+        step for step in result.trace.steps if step.agent_name == "ContextEvidenceAgent"
     ]
     assert any(step.schema_valid is False for step in evidence_traces)
     assert any(step.fallback_used is True for step in evidence_traces)
@@ -298,13 +288,9 @@ def test_final_score_is_guarded_by_deterministic_scorer(
             if item["event_id"] != "demo-004"
         ]
     )
-    provider = MockProvider(
-        responses={"ImpactAnalystAgent": impact.model_dump_json()}
-    )
+    provider = MockProvider(responses={"ImpactAnalystAgent": impact.model_dump_json()})
     result = asyncio.run(
-        _workflow(project_root, tmp_path, provider).scan(
-            fixture=_fixture(project_root)
-        )
+        _workflow(project_root, tmp_path, provider).scan(fixture=_fixture(project_root))
     )
 
     assessment = result.assessments[0]
@@ -333,13 +319,9 @@ def test_permission_guard_blocks_llm_requested_high_risk_action(
             if item["event_id"] in {"demo-001", "demo-002", "demo-004"}
         ]
     )
-    provider = MockProvider(
-        responses={"ActionPlannerAgent": actions.model_dump_json()}
-    )
+    provider = MockProvider(responses={"ActionPlannerAgent": actions.model_dump_json()})
     result = asyncio.run(
-        _workflow(project_root, tmp_path, provider).scan(
-            fixture=_fixture(project_root)
-        )
+        _workflow(project_root, tmp_path, provider).scan(fixture=_fixture(project_root))
     )
 
     action_trace = next(
@@ -376,12 +358,8 @@ def test_calibrate_mock_agent_writes_review_only_artifacts(
         ],
     )
     assert scan_result.exit_code == 0, scan_result.output
-    original_policy = (project_root / "configs/signal_policy.yaml").read_text(
-        encoding="utf-8"
-    )
-    original_watchlist = (project_root / "configs/watchlist.yaml").read_text(
-        encoding="utf-8"
-    )
+    original_policy = (project_root / "configs/signal_policy.yaml").read_text(encoding="utf-8")
+    original_watchlist = (project_root / "configs/watchlist.yaml").read_text(encoding="utf-8")
     skill_path = project_root / "src/signal_harness/skills/signal_triage/SKILL.md"
     original_skill = skill_path.read_text(encoding="utf-8")
 
@@ -401,13 +379,14 @@ def test_calibrate_mock_agent_writes_review_only_artifacts(
     )
 
     assert result.exit_code == 0, result.output
+    project_state = state_dir / "projects" / "signalharness"
     for name in (
         "policy_update_proposal.json",
         "skill_update_proposal.md",
         "watchlist_update_proposal.json",
         "replay_evaluation.json",
     ):
-        assert (state_dir / name).exists()
+        assert (project_state / name).exists()
     for name in (
         "latest_policy_update_proposal.json",
         "latest_skill_update_proposal.md",
@@ -415,12 +394,12 @@ def test_calibrate_mock_agent_writes_review_only_artifacts(
         "latest_replay_evaluation.json",
     ):
         assert (output_dir / name).exists()
-    assert (
-        project_root / "configs/signal_policy.yaml"
-    ).read_text(encoding="utf-8") == original_policy
-    assert (
-        project_root / "configs/watchlist.yaml"
-    ).read_text(encoding="utf-8") == original_watchlist
+    assert (project_root / "configs/signal_policy.yaml").read_text(
+        encoding="utf-8"
+    ) == original_policy
+    assert (project_root / "configs/watchlist.yaml").read_text(
+        encoding="utf-8"
+    ) == original_watchlist
     assert skill_path.read_text(encoding="utf-8") == original_skill
 
 
@@ -455,12 +434,15 @@ def test_replay_evaluation_compares_old_and_proposed_policy(
 
 
 def test_memory_is_named_as_infrastructure() -> None:
-    assert {item.__name__ for item in (
-        ProjectMemory,
-        SignalMemory,
-        FeedbackMemory,
-        PolicyMemory,
-    )} == {
+    assert {
+        item.__name__
+        for item in (
+            ProjectMemory,
+            SignalMemory,
+            FeedbackMemory,
+            PolicyMemory,
+        )
+    } == {
         "ProjectMemory",
         "SignalMemory",
         "FeedbackMemory",

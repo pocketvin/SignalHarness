@@ -212,3 +212,26 @@ def test_classifier_github_issue_related_text_does_not_override_title_category()
     )
 
     assert result.category is SignalCategory.COMPETITOR_UPDATE
+
+
+def test_release_documentation_security_terms_do_not_become_security_signal() -> None:
+    result = ClassifierAgent().run(
+        _event(
+            source_type="github_release",
+            source_name="openai/openai-python",
+            title="v3.4.0",
+            content=(
+                "### Bug Fixes\n"
+                "* decode SSE incrementally without limiting event size\n\n"
+                "### Documentation\n"
+                "* standardize Python SDK vulnerability disclosure policy\n"
+            ),
+        ),
+        {
+            "dependencies": [],
+            "competitors": [],
+            "ignore_keywords": [],
+        },
+    )
+
+    assert result.category is not SignalCategory.SECURITY_SUPPLY_CHAIN

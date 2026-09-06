@@ -38,6 +38,9 @@ jobs:
           --output-dir /tmp/signalharness-regression-ci
           --state-dir /tmp/signalharness-regression-ci-state
 
+      - name: Cross-project context gate
+        run: uv run signal-harness project-eval --enforce
+
       - name: Ruff
         run: uv run --extra dev ruff check src/signal_harness tests/signal_harness
 

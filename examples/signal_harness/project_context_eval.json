@@ -1,0 +1,57 @@
+{
+  "suite": "project-context-v1",
+  "cases": [
+    {
+      "id": "checkpoint-runtime",
+      "higher_project": "signalharness",
+      "lower_project": "example-agent-service",
+      "min_score_gap": 8,
+      "event": {
+        "source_type": "github_issue",
+        "source_name": "langchain-ai/langgraph",
+        "title": "Checkpoint persistence regression can lose accepted runs after restart",
+        "content": "A durability regression affects checkpoint recovery after process restart.",
+        "url": "https://github.com/langchain-ai/langgraph/issues/99901",
+        "published_at": "2026-09-06T08:00:00Z",
+        "raw_payload": {
+          "author_association": "MEMBER"
+        },
+        "collected_at": "2026-09-06T08:05:00Z"
+      }
+    },
+    {
+      "id": "mcp-permission",
+      "higher_project": "signalharness",
+      "lower_project": "example-agent-service",
+      "min_score_gap": 8,
+      "event": {
+        "source_type": "rss",
+        "source_name": "MCP Engineering",
+        "title": "MCP tool permission guard semantics changed for read-only tools",
+        "content": "The update changes permission annotations and tool registry behavior.",
+        "url": "https://example.test/mcp-permission",
+        "published_at": "2026-09-06T07:00:00Z",
+        "raw_payload": {},
+        "collected_at": "2026-09-06T08:05:00Z"
+      }
+    },
+    {
+      "id": "agent-eval",
+      "higher_project": "signalharness",
+      "lower_project": "example-agent-service",
+      "min_score_gap": 8,
+      "event": {
+        "source_type": "github_release",
+        "source_name": "langchain-ai/langgraph",
+        "title": "LangGraph checkpoint migration evaluation for durable multi-agent runs",
+        "content": "Release adds checkpoint migration evaluation and persistence regression coverage.",
+        "url": "https://github.com/langchain-ai/langgraph/releases/tag/v9.9.1",
+        "published_at": "2026-09-06T06:00:00Z",
+        "raw_payload": {
+          "official": true
+        },
+        "collected_at": "2026-09-06T08:05:00Z"
+      }
+    }
+  ]
+}

@@ -26,6 +26,7 @@ from signal_harness.runtime.permissions import SignalPermissionGuard
 from signal_harness.runtime.tool_executor import SignalToolExecutor
 from signal_harness.runtime.tool_registry import create_signal_tool_registry
 from signal_harness.runtime.tracing import TraceListener, TraceRecorder
+from signal_harness.signal.candidates import select_candidates
 from signal_harness.signal.deduplicator import (
     deduplicate_events,
     load_seen_hashes,
@@ -78,6 +79,7 @@ class SourceJob:
     source_name: str
     source_type: str
     ttl_seconds: int
+    official: bool | None = None
 
 
 class SignalHarnessWorkflow:
@@ -102,9 +104,7 @@ class SignalHarnessWorkflow:
         self.project_profile_path = self._resolve(
             project_profile_path or self.config_dir / "project_profile.yaml"
         )
-        self.watchlist_path = self._resolve(
-            watchlist_path or self.config_dir / "watchlist.yaml"
-        )
+        self.watchlist_path = self._resolve(watchlist_path or self.config_dir / "watchlist.yaml")
         self.output_dir = self._resolve(output_dir or "outputs")
         self.state_dir = self._resolve(state_dir or ".signal-harness")
         self.mode = RunMode(mode)
@@ -184,34 +184,18 @@ class SignalHarnessWorkflow:
                     since=since,
                     guard=guard,
                 )
-            limit_result = self._apply_event_limits(
-                collection.events,
-                max_events=max_events,
-                max_events_per_source=max_events_per_source,
-            )
-            raw_events = limit_result.events
+            raw_events = collection.events
             state["output_count"] = len(raw_events)
             state["failed_sources"] = collection.failed_sources
             state["source_tasks"] = collection.source_tasks
-            if limit_result.metadata:
-                state["metadata"] = {"event_limits": limit_result.metadata}
             state["cache_events"] = [
                 f"source:{task.source_type}:{'hit' if task.cache_hit else 'miss'}"
                 for task in collection.source_tasks
             ]
-            detail_parts: list[str] = []
             if collection.failed_sources:
-                detail_parts.append(
+                state["detail"] = (
                     f"Partial collection failure: {len(collection.failed_sources)} source(s)"
                 )
-            dropped = int(limit_result.metadata.get("dropped_count", 0))
-            if dropped:
-                before = int(limit_result.metadata.get("before_count", len(collection.events)))
-                detail_parts.append(
-                    "Deterministic event limit applied: "
-                    f"before={before}, after={len(raw_events)}, dropped={dropped}"
-                )
-            state["detail"] = "; ".join(detail_parts)
 
         with self.trace.step("normalize", input_count=len(raw_events)) as state:
             events = [self._normalize_collected(item) for item in raw_events]
@@ -227,6 +211,27 @@ class SignalHarnessWorkflow:
         feedback_path = self.state_dir / "feedback_memory.json"
         seen_hashes = load_seen_hashes(signal_memory_path)
         feedback_history = load_feedback_history(feedback_path)
+
+        with self.trace.step("candidate_funnel", input_count=len(events)) as state:
+            funnel = select_candidates(
+                events,
+                project_profile=profile,
+                policy=policy,
+                max_events=max_events,
+                max_events_per_source=max_events_per_source,
+                seen_hashes=seen_hashes,
+            )
+            events = funnel.events
+            state["output_count"] = len(events)
+            state["metadata"] = {"candidate_funnel": funnel.metadata}
+            dropped = int(funnel.metadata.get("dropped_count", 0))
+            if dropped:
+                state["detail"] = (
+                    "Project-aware candidate funnel applied before Agent execution: "
+                    f"before={funnel.metadata['before_count']}, "
+                    f"after={funnel.metadata['after_count']}, dropped={dropped}"
+                )
+
         with self.trace.step("noise_filter", input_count=len(events)) as state:
             noise_assessments = NoiseFilter().evaluate(
                 events,
@@ -244,8 +249,7 @@ class SignalHarnessWorkflow:
             clusters = SignalClusterer().cluster(events)
             state["output_count"] = len(clusters)
             state["detail"] = ", ".join(
-                f"{cluster.cluster_id}={len(cluster.related_event_ids)}"
-                for cluster in clusters
+                f"{cluster.cluster_id}={len(cluster.related_event_ids)}" for cluster in clusters
             )
         if self.mode is RunMode.DEMO:
             supervisor = SupervisorAgent(self.executor, trace=self.trace)
@@ -408,9 +412,7 @@ class SignalHarnessWorkflow:
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "learning_summary": learning.learning_summary,
             "memory_sections_read": learning.memory_sections_read,
-            "policy_update_proposal": learning.policy_update_proposal.model_dump(
-                mode="json"
-            ),
+            "policy_update_proposal": learning.policy_update_proposal.model_dump(mode="json"),
             "watchlist_update_proposal": learning.watchlist_update_proposal,
             "skill_update_proposal": learning.skill_update_proposal,
             "requires_approval": True,
@@ -462,9 +464,7 @@ class SignalHarnessWorkflow:
         if result.is_error:
             raise RuntimeError(result.output)
         payload = json.loads(result.output)
-        if not isinstance(payload, list) or not all(
-            isinstance(item, dict) for item in payload
-        ):
+        if not isinstance(payload, list) or not all(isinstance(item, dict) for item in payload):
             raise RuntimeError("Fixture tool returned an invalid event list")
         return cast(list[dict[str, Any]], payload)
 
@@ -521,6 +521,7 @@ class SignalHarnessWorkflow:
                     source_name=str(feed.get("name", "unknown-feed")),
                     source_type="rss",
                     ttl_seconds=900,
+                    official=(bool(feed.get("official")) if "official" in feed else None),
                 )
             )
         for source in watchlist.get("web_changes", {}).get("sources", []):
@@ -534,19 +535,13 @@ class SignalHarnessWorkflow:
                         "action": "load_fixture",
                         "fixture": str(source.get("fixture", "")),
                     },
-                    source_name=str(
-                        source.get("name")
-                        or source.get("fixture")
-                        or "web-change"
-                    ),
+                    source_name=str(source.get("name") or source.get("fixture") or "web-change"),
                     source_type="web_change",
                     ttl_seconds=0,
                 )
             )
 
-        results = await asyncio.gather(
-            *(self._run_source_job(job) for job in jobs)
-        )
+        results = await asyncio.gather(*(self._run_source_job(job) for job in jobs))
         collected: list[dict[str, Any]] = []
         failures: list[str] = []
         source_tasks: list[SourceTask] = []
@@ -568,6 +563,8 @@ class SignalHarnessWorkflow:
                             "source_feed_url",
                             str(job.arguments.get("url", "")),
                         )
+                        if job.official is not None:
+                            raw_item.setdefault("official", job.official)
                     collected.append(
                         {
                             "_collector_source_name": job.source_name,
@@ -577,9 +574,7 @@ class SignalHarnessWorkflow:
                     )
         if not collected:
             if failures:
-                raise RuntimeError(
-                    "All configured signal sources failed: " + "; ".join(failures)
-                )
+                raise RuntimeError("All configured signal sources failed: " + "; ".join(failures))
             raise RuntimeError("No events were collected from the configured watchlist")
         return CollectionBatch(
             events=collected,
@@ -777,9 +772,7 @@ class SignalHarnessWorkflow:
             if result.is_error:
                 raise RuntimeError(result.output)
             payload = json.loads(result.output)
-            if not isinstance(payload, list) or not all(
-                isinstance(item, dict) for item in payload
-            ):
+            if not isinstance(payload, list) or not all(isinstance(item, dict) for item in payload):
                 raise RuntimeError("source tool returned an invalid event list")
             if job.ttl_seconds > 0:
                 self.source_cache.put(
@@ -859,9 +852,7 @@ class SignalHarnessWorkflow:
                         "action": action,
                         **payload,
                         "failed_sources": failed_sources,
-                        "source_tasks": [
-                            task.model_dump(mode="json") for task in source_tasks
-                        ],
+                        "source_tasks": [task.model_dump(mode="json") for task in source_tasks],
                     },
                 )
                 if result.is_error:
@@ -884,9 +875,7 @@ class SignalHarnessWorkflow:
                 **payload,
                 "trace": [item.model_dump(mode="json") for item in self.trace.steps],
                 "failed_sources": failed_sources,
-                "source_tasks": [
-                    task.model_dump(mode="json") for task in source_tasks
-                ],
+                "source_tasks": [task.model_dump(mode="json") for task in source_tasks],
             },
         )
         if result.is_error:

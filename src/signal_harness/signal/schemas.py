@@ -55,6 +55,7 @@ class SourceQuality(str, Enum):
 
     OFFICIAL = "official"
     SECONDARY = "secondary"
+    MAINTAINER = "maintainer"
     COMMUNITY = "community"
     UNVERIFIED = "unverified"
 

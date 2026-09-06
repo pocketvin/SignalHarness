@@ -11,7 +11,12 @@ from signal_harness.signal.schemas import (
     SignalCategory,
     SignalEvent,
 )
-from signal_harness.signal.text_semantics import any_affirmed_term, contains_affirmed_term
+from signal_harness.signal.source_authority import event_source_quality
+from signal_harness.signal.text_semantics import (
+    any_affirmed_term,
+    contains_affirmed_term,
+    source_semantic_text,
+)
 
 DEPENDENCY_IMPACT_TERMS = (
     "breaking",
@@ -45,33 +50,41 @@ def _matched(text: str, keywords: Iterable[str]) -> list[str]:
     return [keyword for keyword in keywords if contains_affirmed_term(text, keyword)]
 
 
-
-
 def _semantic_text(event: SignalEvent, *, include_source: bool = False) -> str:
-    """Return deterministic matching text while avoiding noisy GitHub issue bodies."""
+    """Return source-aware deterministic matching text."""
 
-    prefix = f"{event.source_name} " if include_source else ""
-    text = f"{prefix}{event.title}"
-    if event.source_type != "github_issue":
-        text = f"{text} {event.content}"
-    return text.lower()
+    return source_semantic_text(
+        source_type=event.source_type,
+        source_name=event.source_name,
+        title=event.title,
+        content=event.content,
+        include_source=include_source,
+    )
+
 
 def _has_dependency_impact_terms(event: SignalEvent) -> bool:
-    text = f"{event.source_name} {event.title} {event.content}".lower()
-    return any_affirmed_term(text, DEPENDENCY_IMPACT_TERMS)
+    return any_affirmed_term(
+        _semantic_text(event, include_source=True),
+        DEPENDENCY_IMPACT_TERMS,
+    )
 
 
 def source_score(event: SignalEvent, policy: dict[str, Any]) -> float:
     """Score source authority from event type and explicit official metadata."""
 
     source_weights = policy.get("source_weights", {})
-    official = bool(event.raw_payload.get("official"))
+    quality = event_source_quality(event)
     if event.source_type == "github_release":
-        key = "official_release" if official else "community_discussion"
+        key = "official_release" if quality.value == "official" else "community_discussion"
     elif event.source_type == "github_issue":
-        key = "official_issue" if official else "community_discussion"
+        if quality.value == "official":
+            key = "official_issue"
+        elif quality.value == "maintainer":
+            key = "maintainer_issue"
+        else:
+            key = "community_discussion"
     elif event.source_type == "rss":
-        key = "official_blog" if official else "expert_blog"
+        key = "official_blog" if quality.value == "official" else "expert_blog"
     elif event.source_type == "web_change":
         key = "web_change"
     elif event.source_type == "team_update":
@@ -195,9 +208,7 @@ def urgency_score(event: SignalEvent, *, now: datetime | None = None) -> float:
         age_days = max(0, (current - published).days)
         base = max(10.0, 100.0 - age_days * 5)
     text = _semantic_text(event)
-    if any_affirmed_term(
-        text, ("security", "breaking", "deprecated", "urgent", "migration")
-    ):
+    if any_affirmed_term(text, ("security", "breaking", "deprecated", "urgent", "migration")):
         base += 15
     return _bounded(base)
 
@@ -240,18 +251,15 @@ def score_signal(
     }
     weights = policy["score_weights"]
     weighted_score = sum(components[name] * float(weights[name]) for name in components)
-    category_name = (
-        category.value if isinstance(category, SignalCategory) else str(category or "")
-    )
+    category_name = category.value if isinstance(category, SignalCategory) else str(category or "")
     configured_weight = float(policy.get("category_weights", {}).get(category_name, 1.0))
     category_weight = (
         0.10
         if category_name == SignalCategory.NOISE.value
         else max(0.55, min(1.0, configured_weight))
     )
-    if (
-        category_name == SignalCategory.DEPENDENCY_UPDATE.value
-        and not _has_dependency_impact_terms(event)
+    if category_name == SignalCategory.DEPENDENCY_UPDATE.value and not _has_dependency_impact_terms(
+        event
     ):
         category_weight = min(category_weight, 0.82)
     final = weighted_score * category_weight

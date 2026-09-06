@@ -13,6 +13,7 @@ from mcp.types import ToolAnnotations
 
 from signal_harness.memory import FeedbackMemory, ProjectMemory, SignalMemory
 from signal_harness.projects.catalog import default_project_id, project_option
+from signal_harness.projects.state import project_state_dir
 from signal_harness.runtime.permissions import SignalPermissionGuard
 from signal_harness.signal.policy import load_signal_policy
 
@@ -36,6 +37,7 @@ _READ_ONLY = ToolAnnotations(
 @dataclass(frozen=True)
 class MCPPaths:
     """Resolved locations exposed by the local MCP server."""
+
     cwd: Path
     config_dir: Path
     output_dir: Path
@@ -67,6 +69,32 @@ class MCPPaths:
 
     def state_for_run(self, run_id: str | None) -> Path:
         return _run_dir(self.state_dir, run_id)
+
+    def state_for_project(self, project_id: str) -> Path:
+        project_option(project_id, self.config_dir)
+        return project_state_dir(self.state_dir, project_id)
+
+    def project_id_for_run(self, run_id: str) -> str | None:
+        payload = _read_json(self.output_for_run(run_id) / "service_run.json", {})
+        if not isinstance(payload, dict):
+            return None
+        value = str(payload.get("project_id") or "").strip()
+        return value or None
+
+    def project_state_scope(
+        self,
+        *,
+        project_id: str | None = None,
+        run_id: str | None = None,
+    ) -> Path:
+        if project_id is not None:
+            return self.state_for_project(project_id)
+        if run_id is not None:
+            selected = self.project_id_for_run(run_id)
+            if selected is not None:
+                return self.state_for_project(selected)
+            return self.state_for_run(run_id)
+        return self.state_for_project(default_project_id(self.config_dir))
 
 
 def build_mcp_server(
@@ -126,17 +154,16 @@ def build_mcp_server(
     )
     def search_signal_history(
         query: str = "",
+        project_id: str | None = None,
         run_id: str | None = None,
         limit: int = 20,
     ) -> dict[str, Any]:
         paths.guard("read_signal_history")
         bounded_limit = _bounded_limit(limit)
-        memory = SignalMemory(paths.state_for_run(run_id) / "signal_memory.json").load()
-        items = [
-            item
-            for item in memory.get("previous_assessments", [])
-            if isinstance(item, dict)
-        ]
+        memory = SignalMemory(
+            paths.project_state_scope(project_id=project_id, run_id=run_id) / "signal_memory.json"
+        ).load()
+        items = [item for item in memory.get("previous_assessments", []) if isinstance(item, dict)]
         filtered = _filter_items(items, query)
         return _collection_payload(filtered, bounded_limit)
 
@@ -147,13 +174,29 @@ def build_mcp_server(
         structured_output=True,
     )
     def get_latest_assessments(
+        project_id: str | None = None,
         run_id: str | None = None,
         decision: str | None = None,
         limit: int = 50,
     ) -> dict[str, Any]:
         paths.guard("read_assessments")
-        payload = _read_json(paths.output_for_run(run_id) / "impact_scores.json", [])
-        items = [item for item in payload if isinstance(item, dict)] if isinstance(payload, list) else []
+        if run_id is not None:
+            payload = _read_json(paths.output_for_run(run_id) / "impact_scores.json", [])
+            items = (
+                [item for item in payload if isinstance(item, dict)]
+                if isinstance(payload, list)
+                else []
+            )
+        else:
+            memory = SignalMemory(
+                paths.project_state_scope(project_id=project_id) / "signal_memory.json"
+            ).load()
+            previous = memory.get("previous_assessments", [])
+            items = (
+                [item for item in previous if isinstance(item, dict)]
+                if isinstance(previous, list)
+                else []
+            )
         if decision:
             normalized = decision.strip().lower()
             items = [item for item in items if str(item.get("decision", "")).lower() == normalized]
@@ -172,7 +215,11 @@ def build_mcp_server(
     ) -> dict[str, Any]:
         paths.guard("read_run_trace")
         payload = _read_json(paths.output_for_run(run_id) / "task_trace.json", [])
-        items = [item for item in payload if isinstance(item, dict)] if isinstance(payload, list) else []
+        items = (
+            [item for item in payload if isinstance(item, dict)]
+            if isinstance(payload, list)
+            else []
+        )
         if agent:
             needle = agent.strip().lower()
             items = [
@@ -180,8 +227,7 @@ def build_mcp_server(
                 for item in items
                 if needle
                 in " ".join(
-                    str(item.get(key) or "").lower()
-                    for key in ("agent_name", "agent", "step")
+                    str(item.get(key) or "").lower() for key in ("agent_name", "agent", "step")
                 )
             ]
         return _collection_payload(items, _bounded_limit(limit))
@@ -193,12 +239,13 @@ def build_mcp_server(
         structured_output=True,
     )
     def get_feedback_memory(
+        project_id: str | None = None,
         run_id: str | None = None,
         limit: int = 50,
     ) -> dict[str, Any]:
         paths.guard("read_feedback_memory")
         records = FeedbackMemory(
-            paths.state_for_run(run_id) / "feedback_memory.json"
+            paths.project_state_scope(project_id=project_id, run_id=run_id) / "feedback_memory.json"
         ).load()
         items = [record.model_dump(mode="json") for record in records]
         return _collection_payload(items, _bounded_limit(limit))

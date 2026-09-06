@@ -15,12 +15,17 @@ github:
 rss:
   feeds:
     - name: OpenAI News
+      official: true
       url: https://openai.com/news/rss.xml
     - name: GitHub Changelog
+      official: true
       url: https://github.blog/changelog/feed/
     - name: GitHub Engineering
+      official: true
       url: https://github.blog/engineering/feed/
     - name: GitHub Security
+      official: true
       url: https://github.blog/security/feed/
     - name: Simon Willison
+      official: false
       url: https://simonwillison.net/atom/everything/

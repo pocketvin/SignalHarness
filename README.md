@@ -4,7 +4,7 @@
 
 > 一个面向真实工程场景的 Multi-Agent Harness：用外部技术变化作为业务载体，重点展示五 Agent 编排、受控工具调用、Python Guardrails、Agent Eval、Trace/Observability、MCP、SSE、FastAPI 与 Docker。
 
-SignalHarness 会监听 GitHub、RSS、Web change 等外部工程信号，判断它们是否真正影响当前项目，并把结果转成**可解释、可审计、可回归验证**的决策，而不是再做一个信息聚合器或聊天机器人。
+SignalHarness 会实时监听 GitHub / RSS 等外部工程信号，并保留可扩展的 Web Change 适配入口；它判断这些变化是否真正影响当前选择的项目，并把结果转成**可解释、可审计、可回归验证**的决策，而不是再做一个信息聚合器或聊天机器人。
 
 ## 30 秒看懂这个项目
 
@@ -27,8 +27,8 @@ SignalHarness 的核心答案是：**LLM 负责推理，Python runtime 负责约
 | Tool Calling | Evidence 两阶段工具计划；Python 负责 allowlist、permission、budget、execution、observation |
 | 结构化输出 | Pydantic Schema、一次 schema retry、确定性 fallback |
 | Guarded Scoring | LLM 提供语义判断；Python 持有 authoritative final score |
-| Memory | Project / Signal / Feedback / Policy Memory，属于基础设施，不算第六个 Agent |
-| Agent Eval | 40 条项目级 Regression Suite + Provider Contract Eval |
+| Memory | Project-scoped persistent Signal / Feedback / Learning Memory；Run 输出与项目长期状态分离 |
+| Agent Eval | 40 条项目级 Regression Suite + 3 条 Cross-project Context Gate + Provider Contract Eval |
 | Observability | Agent、Schema、Retry、Fallback、Tools、Latency、Tokens、Estimated Cost Trace |
 | MCP | 5 个只读 structured tools |
 | Service | FastAPI REST + SSE Streaming Run + MCP Streamable HTTP |
@@ -41,7 +41,9 @@ SignalHarness 的核心答案是：**LLM 负责推理，Python runtime 负责约
 ```mermaid
 flowchart LR
     Sources[GitHub / RSS / Web change / fixture]
-    Collect[Collect / Normalize / Deduplicate / Noise Filter]
+    Collect[Collect / Normalize / Deduplicate]
+    Funnel[Project-aware Candidate Funnel]
+    Noise[Noise Filter]
     Supervisor[SignalSupervisorAgent]
     Evidence[ContextEvidenceAgent]
     Tools[Controlled read-only tool loop]
@@ -52,7 +54,7 @@ flowchart LR
     Output[Assessment / Trace / Dashboard / Digest]
     Interfaces[CLI / REST / SSE Demo / MCP]
 
-    Sources --> Collect --> Supervisor --> Evidence --> Impact --> Action --> Learning --> Output
+    Sources --> Collect --> Funnel --> Noise --> Supervisor --> Evidence --> Impact --> Action --> Learning --> Output
     Evidence --> Tools --> Evidence
     Guard -. schema / permission / budget / fallback / scoring .-> Supervisor
     Guard -.-> Evidence
@@ -144,6 +146,32 @@ SSE
 首个 SSE subscriber 建立后才真正启动 queued run；浏览器断开不会取消任务；重连可通过 `Last-Event-ID` 补发内存中的历史事件。
 
 这里明确是 **in-process streaming**，不是 Redis/Celery/Kafka，也不声称拥有持久化分布式任务系统。
+
+### Project Memory V2：Run 状态与项目长期状态分离
+
+服务端每次 Run 仍保留独立 output / trace，但项目长期记忆按 `project_id` 持久化：
+
+```text
+.signal-harness/
+├── projects/<project_id>/
+│   ├── signal_memory.json
+│   ├── feedback_memory.json
+│   ├── alert_state.json
+│   └── learning artifacts
+└── service-runs/<run_id>/
+```
+
+同一项目的后续扫描会读取之前的 seen signals 与 feedback；不同项目彼此隔离。同项目并发 Run 在共享状态写入处串行化，避免覆盖同一个 JSON state。
+
+### Candidate Funnel V2：先判断相关性，再做 Top-K
+
+实时 Watchlist 可能一次产生上千条原始事件。SignalHarness 不再先按时间把它们直接砍成 12 条，而是先完成 Normalize / Deduplicate，再用低成本的 Project Relevance、Focus Keyword、Source Authority、Recency 与 Novelty 做候选排序，并保留来源多样性后才进入五 Agent。
+
+一次 2026-09-06 本地 live acceptance 中，Watchlist 从 1274 条 raw events 形成 12 条 project-aware candidates；这是运行证据，不是固定 benchmark。
+
+### Source Authority V2
+
+来源位置与“谁在说话”分开建模：GitHub Release 可视为 official；官方仓库里的普通用户 Issue 仍是 community；OWNER / MEMBER / COLLABORATOR Issue 作为 maintainer；Watchlist 中明确标记的 OpenAI/GitHub 官方 RSS 才是 official，独立专家 Feed 保持 secondary。Python 会 clamp LLM 报告的 source quality / confidence，模型不能把 community Issue 自行升级成 official。
 
 ## 三种运行模式
 
@@ -293,6 +321,16 @@ priority recall     28.57%
 
 > **重要：这里的 100% 只代表 SignalHarness 项目级 Regression Contract，不代表通用 LLM 准确率 100%。**
 
+## Cross-project Context Eval
+
+多项目之后还要证明“Project Context 真的会改变判断”，而不是只换 Watchlist。CI 额外运行：
+
+```bash
+uv run signal-harness project-eval --enforce
+```
+
+当前 `project-context-v1` 为 3/3 PASS。同一事件分别在 `SignalHarness` 与 `Example Agent API Service` 下评分，要求目标项目的相关性得分有明确 gap；例如 MCP permission change 在 SignalHarness 中为 `SAVE`，在 Example Agent API Service 中为 `IGNORE`。
+
 ## Provider Contract Eval
 
 Regression Eval 关注“产品行为有没有回归”；`model-eval` 关注“某个真实 Provider 能否稳定遵守 Harness contract”。
@@ -436,6 +474,7 @@ http://127.0.0.1:8001/demo
 ```text
 pytest tests/signal_harness
 40-case mock-agent regression gate --enforce
+3-case cross-project context gate --enforce
 Ruff
 mypy --strict
 uv build
@@ -449,7 +488,8 @@ uv build
 src/signal_harness/agent_team/          五 Agent roles
 src/signal_harness/agent_integration/   prompts / runner / schemas / tool loop / trace
 src/signal_harness/runtime/             workflow / permissions / registry / executor
-src/signal_harness/signal/              scoring / taxonomy / semantics / schemas
+src/signal_harness/signal/              scoring / candidate funnel / source authority / semantics
+src/signal_harness/projects/            Project Catalog + persistent project state
 src/signal_harness/providers/           mock + OpenAI-compatible provider
 src/signal_harness/mcp_server.py        只读 MCP interface
 src/signal_harness/service.py           FastAPI REST/SSE + MCP HTTP

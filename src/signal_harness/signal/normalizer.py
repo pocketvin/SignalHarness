@@ -61,10 +61,7 @@ def normalize_event(raw: dict[str, Any], *, collected_at: datetime | None = None
     )
     title = _text(raw.get("title") or raw.get("name"), "Untitled signal")
     content = _text(
-        raw.get("content")
-        or raw.get("body")
-        or raw.get("description")
-        or raw.get("summary"),
+        raw.get("content") or raw.get("body") or raw.get("description") or raw.get("summary"),
     )
     url = _text(raw.get("url") or raw.get("html_url") or raw.get("link"))
     published_at = _datetime_value(
@@ -101,6 +98,19 @@ def normalize_github_event(
 
     kind = event_kind or ("github_release" if "tag_name" in raw else "github_issue")
     source_name = repo or _text(raw.get("repository") or raw.get("repo"), "unknown-repo")
+    association = str(raw.get("author_association") or "").strip().upper()
+    if kind == "github_release":
+        authority = "official" if raw.get("official", True) else "community"
+        official = authority == "official"
+    elif raw.get("official") is True:
+        authority = "official"
+        official = True
+    elif association in {"OWNER", "MEMBER", "COLLABORATOR"}:
+        authority = "maintainer"
+        official = False
+    else:
+        authority = "community"
+        official = False
     mapped = {
         **raw,
         "source_type": kind,
@@ -109,7 +119,9 @@ def normalize_github_event(
         "content": raw.get("body") or raw.get("content") or "",
         "url": raw.get("html_url") or raw.get("url") or "",
         "published_at": raw.get("published_at") or raw.get("created_at"),
-        "official": raw.get("official", True),
+        "repository_official": True,
+        "source_authority": authority,
+        "official": official,
     }
     return normalize_event(mapped, collected_at=collected_at)
 

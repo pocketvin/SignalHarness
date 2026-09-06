@@ -69,7 +69,8 @@ def test_fixture_scan_feedback_and_calibration(project_root: Path, tmp_path: Pat
         "run_summary.txt",
     ):
         assert (output_dir / name).exists(), name
-    assert (state_dir / "alert_state.json").exists()
+    project_state = state_dir / "projects" / "signalharness"
+    assert (project_state / "alert_state.json").exists()
 
     assessments = json.loads((output_dir / "impact_scores.json").read_text(encoding="utf-8"))
     assert any(item["decision"] in {"save", "alert", "action_required"} for item in assessments)
@@ -96,11 +97,9 @@ def test_fixture_scan_feedback_and_calibration(project_root: Path, tmp_path: Pat
         ],
     )
     assert feedback_result.exit_code == 0, feedback_result.output
-    assert (state_dir / "feedback_memory.json").exists()
-    assert (state_dir / "signal_policy_update_proposal.json").exists()
-    signal_memory = json.loads(
-        (state_dir / "signal_memory.json").read_text(encoding="utf-8")
-    )
+    assert (project_state / "feedback_memory.json").exists()
+    assert (project_state / "signal_policy_update_proposal.json").exists()
+    signal_memory = json.loads((project_state / "signal_memory.json").read_text(encoding="utf-8"))
     assert signal_memory["previous_assessments"]
 
     calibrate_result = runner.invoke(
@@ -134,11 +133,9 @@ def test_fixture_scan_feedback_and_calibration(project_root: Path, tmp_path: Pat
     assert staged_result.exit_code == 0, staged_result.output
     assert "Staged proposal" in staged_result.output
     assert "Policy, watchlist, and skill changes were not applied." in staged_result.output
-    staged_policy = yaml.safe_load(
-        (config_copy / "signal_policy.yaml").read_text(encoding="utf-8")
-    )
+    staged_policy = yaml.safe_load((config_copy / "signal_policy.yaml").read_text(encoding="utf-8"))
     assert "checkpoint" not in staged_policy["suggested_focus_keywords"]
-    assert (state_dir / "learning_staging.json").exists()
+    assert (project_state / "learning_staging.json").exists()
 
     apply_result = runner.invoke(
         app,
@@ -155,7 +152,5 @@ def test_fixture_scan_feedback_and_calibration(project_root: Path, tmp_path: Pat
         ],
     )
     assert apply_result.exit_code == 0, apply_result.output
-    applied = yaml.safe_load(
-        (config_copy / "signal_policy.yaml").read_text(encoding="utf-8")
-    )
+    applied = yaml.safe_load((config_copy / "signal_policy.yaml").read_text(encoding="utf-8"))
     assert "checkpoint" in applied["suggested_focus_keywords"]

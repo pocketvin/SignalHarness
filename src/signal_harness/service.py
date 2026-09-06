@@ -21,6 +21,7 @@ from signal_harness.memory import FeedbackMemory
 from signal_harness.providers.catalog import (
     default_provider_id,
     provider_catalog,
+    provider_from_selection,
     provider_option,
 )
 from signal_harness.projects.catalog import (
@@ -28,6 +29,7 @@ from signal_harness.projects.catalog import (
     project_catalog,
     project_option,
 )
+from signal_harness.projects.state import prepare_project_state
 from signal_harness.service_streaming import StreamRunManager
 from signal_harness.runtime.permissions import SignalPermissionGuard
 from signal_harness.runtime.workflow import SignalHarnessWorkflow
@@ -45,10 +47,14 @@ from signal_harness.utils.fs import atomic_write_text
 class RunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    fixture: str = "examples/signal_harness/sample_events.json"
+    project_id: str | None = None
+    data_source: Literal["live", "fixture"] = "fixture"
+    fixture: str | None = "examples/signal_harness/sample_events.json"
     mode: RunMode = RunMode.MOCK_AGENT
-    max_events: int | None = Field(default=None, ge=1)
-    max_events_per_source: int | None = Field(default=None, ge=1)
+    provider_id: str | None = None
+    since_days: int = Field(default=14, ge=1, le=30)
+    max_events: int | None = Field(default=None, ge=1, le=50)
+    max_events_per_source: int | None = Field(default=None, ge=1, le=20)
 
 
 class StreamRunRequest(BaseModel):
@@ -102,6 +108,13 @@ class ServicePaths:
 
     def run_state(self, run_id: str) -> Path:
         return self.state_dir / "service-runs" / _validate_run_id(run_id)
+
+    def project_state(self, project_id: str) -> Path:
+        return prepare_project_state(
+            self.state_dir,
+            project_id,
+            migrate_legacy_default=True,
+        )
 
 
 def create_app(
@@ -277,22 +290,56 @@ def create_app(
     async def create_run(request: RunRequest) -> dict[str, Any]:
         run_id = f"run-{uuid4().hex[:12]}"
         run_output = paths.run_output(run_id)
-        run_state = paths.run_state(run_id)
-        fixture = _safe_fixture(paths.cwd, request.fixture)
+        selected_project_id = request.project_id or default_project_id(paths.config_dir)
+        try:
+            project = project_option(selected_project_id, paths.config_dir)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Unknown project selection") from exc
+
+        provider_id = request.provider_id
+        provider = None
+        if request.mode is RunMode.AGENT:
+            provider_id = provider_id or default_provider_id(paths.config_dir)
+            if provider_id is None:
+                raise HTTPException(
+                    status_code=409, detail="No configured real-model provider is available"
+                )
+            try:
+                option = provider_option(provider_id, paths.config_dir)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="Unknown provider selection") from exc
+            if not option.ready:
+                raise HTTPException(status_code=409, detail=f"Provider {provider_id} is not ready")
+            provider = provider_from_selection(provider_id, config_dir=paths.config_dir)
+
+        if request.data_source == "fixture":
+            fixture = _safe_fixture(
+                paths.cwd, request.fixture or "examples/signal_harness/sample_events.json"
+            )
+            since = None
+        else:
+            fixture = None
+            since = datetime.now(timezone.utc) - timedelta(days=request.since_days)
+
         workflow = SignalHarnessWorkflow(
             cwd=paths.cwd,
             config_dir=paths.config_dir,
+            project_profile_path=project.project_profile_path,
+            watchlist_path=project.watchlist_path,
             output_dir=run_output,
-            state_dir=run_state,
+            state_dir=paths.project_state(project.id),
             mode=request.mode,
+            provider=provider,
         )
         created_at = datetime.now(timezone.utc).isoformat()
         try:
-            result = await workflow.scan(
-                fixture=fixture,
-                max_events=request.max_events,
-                max_events_per_source=request.max_events_per_source,
-            )
+            async with streams.project_lock(project.id):
+                result = await workflow.scan(
+                    fixture=fixture,
+                    since=since,
+                    max_events=request.max_events,
+                    max_events_per_source=request.max_events_per_source,
+                )
         except Exception as exc:
             _write_run_metadata(
                 run_output,
@@ -300,6 +347,8 @@ def create_app(
                     "run_id": run_id,
                     "status": "error",
                     "mode": request.mode.value,
+                    "project_id": project.id,
+                    "project_name": project.name,
                     "created_at": created_at,
                     "error_class": exc.__class__.__name__,
                 },
@@ -308,6 +357,9 @@ def create_app(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"SignalHarness run failed: {exc.__class__.__name__}",
             ) from exc
+        finally:
+            if provider is not None:
+                await provider.close()
 
         payload = _run_metadata_payload(
             run_id=run_id,
@@ -316,6 +368,15 @@ def create_app(
             signals=len(result.signals),
             assessments=len(result.assessments),
             failed_sources=len(result.failed_sources),
+        )
+        payload.update(
+            {
+                "project_id": project.id,
+                "project_name": project.name,
+                "source_mode": request.data_source,
+                "provider_id": provider_id if request.mode is RunMode.AGENT else None,
+                "model": getattr(provider, "model", None),
+            }
         )
         _write_run_metadata(run_output, payload)
         return payload
@@ -361,7 +422,11 @@ def create_app(
     @app.post("/feedback")
     async def save_feedback(request: FeedbackRequest) -> dict[str, Any]:
         run_output = _existing_run_output(paths, request.run_id)
-        run_state = paths.run_state(request.run_id)
+        run_meta = _read_json(run_output / "service_run.json", {})
+        project_id = str(
+            run_meta.get("project_id") if isinstance(run_meta, dict) else ""
+        ) or default_project_id(paths.config_dir)
+        project_state = paths.project_state(project_id)
         signals = _read_json(run_output / "signals.json", [])
         assessments = _read_json(run_output / "impact_scores.json", [])
         known_ids = {
@@ -378,12 +443,13 @@ def create_app(
         guard.require("save_feedback")
         guard.require("save_policy_proposal")
         record = create_feedback_record(request.signal_id, request.label, request.note)
-        memory = FeedbackMemory(run_state / "feedback_memory.json")
+        memory = FeedbackMemory(project_state / "feedback_memory.json")
         memory.append(record)
         proposal = generate_policy_proposal(memory.load(), policy)
-        save_policy_proposal(run_state / "policy_update_proposal.json", proposal)
+        save_policy_proposal(project_state / "policy_update_proposal.json", proposal)
         return {
             "run_id": request.run_id,
+            "project_id": project_id,
             "signal_id": request.signal_id,
             "feedback": record.feedback.value,
             "proposal_id": proposal.proposal_id,
@@ -424,7 +490,9 @@ def _safe_fixture(root: Path, value: str) -> Path:
     try:
         resolved.relative_to(root)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Fixture must stay inside the project root") from exc
+        raise HTTPException(
+            status_code=400, detail="Fixture must stay inside the project root"
+        ) from exc
     if resolved.suffix.lower() != ".json" or not resolved.is_file():
         raise HTTPException(status_code=400, detail="Fixture must be an existing JSON file")
     return resolved

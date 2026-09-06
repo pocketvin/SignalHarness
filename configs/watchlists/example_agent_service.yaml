@@ -11,6 +11,8 @@ github:
 rss:
   feeds:
     - name: OpenAI News
+      official: true
       url: https://openai.com/news/rss.xml
     - name: GitHub Changelog
+      official: true
       url: https://github.blog/changelog/feed/

@@ -31,6 +31,7 @@ from signal_harness.agent_team import (
     SignalSupervisorAgent,
 )
 from signal_harness.providers.adapter import AgentCall, ProviderUsage
+from signal_harness.signal.source_authority import event_source_quality
 from signal_harness.signal.schemas import (
     PolicyUpdateProposal,
     SignalCategory,
@@ -38,7 +39,7 @@ from signal_harness.signal.schemas import (
     SignalEvent,
     SourceQuality,
 )
-from signal_harness.signal.text_semantics import any_affirmed_term
+from signal_harness.signal.text_semantics import any_affirmed_term, source_semantic_text
 
 
 class MockProvider:
@@ -98,10 +99,14 @@ class MockProvider:
         events = self._events(payload)
         project_profile = self._project_profile(call)
         if call.agent_name == SignalSupervisorAgent.name:
-            return SignalSupervisorAgent().fallback(
-                events,
-                project_profile,
-            ).model_dump_json()
+            return (
+                SignalSupervisorAgent()
+                .fallback(
+                    events,
+                    project_profile,
+                )
+                .model_dump_json()
+            )
         if call.output_schema == "EvidenceToolPlan":
             return ContextEvidenceAgent().fallback_plan(events).model_dump_json()
         if call.output_schema == "ContextEvidenceOutput":
@@ -110,17 +115,25 @@ class MockProvider:
                 ToolObservation.model_validate(item)
                 for item in payload.get("tool_observations", [])
             ]
-            return ContextEvidenceAgent().fallback(
-                events,
-                plan=plan,
-                observations=observations,
-            ).model_dump_json()
+            return (
+                ContextEvidenceAgent()
+                .fallback(
+                    events,
+                    plan=plan,
+                    observations=observations,
+                )
+                .model_dump_json()
+            )
         if call.agent_name == ImpactAnalystAgent.name:
-            return ImpactAnalystAgent().fallback(
-                events,
-                project_profile,
-                {},
-            ).model_dump_json()
+            return (
+                ImpactAnalystAgent()
+                .fallback(
+                    events,
+                    project_profile,
+                    {},
+                )
+                .model_dump_json()
+            )
         if call.agent_name == ActionPlannerAgent.name:
             impact = ImpactOutput.model_validate(payload["impact"])
             return ActionPlannerAgent().fallback(events, impact).model_dump_json()
@@ -172,12 +185,10 @@ class MockProvider:
                     category=category,
                     analyze=analyze,
                     routing_reason=(
-                        (
-                            "Scripted LLM explicit override of a downweight-only noise "
-                            "hint because project relevance still requires analysis."
-                            if analyze and noise.get("noise_reason")
-                            else "Scripted LLM route based on source, content, and noise hints."
-                        )
+                        "Scripted LLM explicit override of a downweight-only noise "
+                        "hint because project relevance still requires analysis."
+                        if analyze and noise.get("noise_reason")
+                        else "Scripted LLM route based on source, content, and noise hints."
                     ),
                     required_agents=required,
                     skip_reason="Noise route skips deep analysis." if not analyze else None,
@@ -210,9 +221,7 @@ class MockProvider:
             event_ids = [event.event_id for event in grouped]
             if source_type in {"github_release", "github_issue"}:
                 action = (
-                    "fetch_repo_issues"
-                    if source_type == "github_issue"
-                    else "fetch_repo_releases"
+                    "fetch_repo_issues" if source_type == "github_issue" else "fetch_repo_releases"
                 )
                 requests.append(
                     ToolRequest(
@@ -260,9 +269,7 @@ class MockProvider:
                     )
                 )
         return EvidenceToolPlan(
-            source_types_observed=list(
-                dict.fromkeys(event.source_type for event in events)
-            ),
+            source_types_observed=list(dict.fromkeys(event.source_type for event in events)),
             tool_requests=requests,
             planning_summary=(
                 "Request local memory plus fixture-safe mocked source observations "
@@ -282,14 +289,11 @@ class MockProvider:
     def _scripted_evidence(self, payload: dict[str, Any]) -> ContextEvidenceOutput:
         plan = EvidenceToolPlan.model_validate(payload.get("tool_plan", {}))
         observations = [
-            ToolObservation.model_validate(item)
-            for item in payload.get("tool_observations", [])
+            ToolObservation.model_validate(item) for item in payload.get("tool_observations", [])
         ]
         requested = [request.tool_name for request in plan.tool_requests]
         executed = [
-            observation.tool_name
-            for observation in observations
-            if observation.status == "success"
+            observation.tool_name for observation in observations if observation.status == "success"
         ]
         errors = [
             f"{observation.tool_name}: {observation.error or observation.output_summary}"
@@ -298,15 +302,14 @@ class MockProvider:
         ]
         results: list[ContextEvidenceItem] = []
         for event in self._events(payload):
-            official = bool(event.raw_payload.get("official"))
-            if official or event.source_type.startswith("github_"):
-                quality, confidence = SourceQuality.OFFICIAL, 0.9
-            elif event.source_type == "rss":
-                quality, confidence = SourceQuality.SECONDARY, 0.68
-            elif event.source_type == "web_change":
-                quality, confidence = SourceQuality.COMMUNITY, 0.48
-            else:
-                quality, confidence = SourceQuality.UNVERIFIED, 0.35
+            quality = event_source_quality(event)
+            confidence = {
+                SourceQuality.OFFICIAL: 0.9,
+                SourceQuality.MAINTAINER: 0.82,
+                SourceQuality.SECONDARY: 0.68,
+                SourceQuality.COMMUNITY: 0.55,
+                SourceQuality.UNVERIFIED: 0.35,
+            }[quality]
             if not event.url:
                 confidence -= 0.18
             if errors:
@@ -333,20 +336,17 @@ class MockProvider:
 
     def _scripted_impact(self, payload: dict[str, Any]) -> ImpactOutput:
         clusters = [
-            SignalCluster.model_validate(item)
-            for item in payload.get("related_clusters", [])
+            SignalCluster.model_validate(item) for item in payload.get("related_clusters", [])
         ]
         cluster_by_event = {
-            event_id: cluster
-            for cluster in clusters
-            for event_id in cluster.related_event_ids
+            event_id: cluster for cluster in clusters for event_id in cluster.related_event_ids
         }
         results: list[ImpactItem] = []
         for event in self._events(payload):
-            text = (
-                event.title.lower()
-                if event.source_type == "github_issue"
-                else f"{event.title} {event.content}".lower()
+            text = source_semantic_text(
+                source_type=event.source_type,
+                title=event.title,
+                content=event.content,
             )
             if any_affirmed_term(text, ("cve", "vulnerability", "supply chain")):
                 semantic = 92.0
@@ -416,9 +416,7 @@ class MockProvider:
         return ActionOutput(results=results)
 
     def _scripted_learning(self, payload: dict[str, Any]) -> LearningPolicyOutput:
-        active = deepcopy(
-            payload.get("policy_memory", {}).get("active_policy", {})
-        )
+        active = deepcopy(payload.get("policy_memory", {}).get("active_policy", {}))
         proposal = PolicyUpdateProposal(
             proposal_id=f"mock-proposal-{uuid4().hex[:10]}",
             reason="Scripted mock reviewed memory and preserved the active policy.",
@@ -461,10 +459,7 @@ class MockProvider:
 
     @staticmethod
     def _events(payload: dict[str, Any]) -> list[SignalEvent]:
-        return [
-            SignalEvent.model_validate(item)
-            for item in payload.get("events", [])
-        ]
+        return [SignalEvent.model_validate(item) for item in payload.get("events", [])]
 
     def usage_snapshot(self) -> ProviderUsage:
         """Mock runs intentionally report no fabricated token usage."""

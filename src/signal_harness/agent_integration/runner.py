@@ -46,6 +46,7 @@ from signal_harness.agents.classifier import ClassifierAgent
 from signal_harness.providers.adapter import AgentCall, AgentProvider
 from signal_harness.runtime.tool_executor import SignalToolExecutor
 from signal_harness.runtime.tracing import TraceRecorder
+from signal_harness.signal.source_authority import clamp_source_quality
 from signal_harness.signal.schemas import (
     FeedbackRecord,
     NoiseAssessment,
@@ -98,9 +99,7 @@ def _canonical_source_request(event: SignalEvent) -> ToolRequest | None:
         )
     if event.source_type == "rss":
         feed_url = str(
-            event.raw_payload.get("feed_url")
-            or event.raw_payload.get("source_feed_url")
-            or ""
+            event.raw_payload.get("feed_url") or event.raw_payload.get("source_feed_url") or ""
         ).strip()
         if feed_url.startswith(("http://", "https://")):
             return ToolRequest(
@@ -199,9 +198,7 @@ class LLMAgentTeamRunner:
             for item in raw_results or []
             if isinstance(item, dict) and item.get("event_id")
         ]
-        observed = {
-            event_id for event_id in observed_ids if event_id in expected_ids
-        }
+        observed = {event_id for event_id in observed_ids if event_id in expected_ids}
         if observed == expected_ids and len(observed_ids) == len(expected_ids):
             return output
         replacement = fallback()
@@ -324,10 +321,7 @@ class LLMAgentTeamRunner:
                     "budget_blocked_count": len(tool_trace["budget_blocked"]),
                     "permission_checks": [
                         *tool_trace["permission_checks"],
-                        *[
-                            f"{item}:blocked:source_mismatch"
-                            for item in source_blocked
-                        ],
+                        *[f"{item}:blocked:source_mismatch" for item in source_blocked],
                     ],
                     "cache_events": tool_trace["cache_events"],
                 }
@@ -364,6 +358,7 @@ class LLMAgentTeamRunner:
                 trace_index=evidence_trace,
             )
             evidence = self._cap_evidence_after_tool_failures(evidence, observations)
+            evidence = self._clamp_evidence_source_authority(evidence, evidence_events)
             final_step = self.trace.steps[evidence_trace]
             exit_condition = self._evidence_exit_condition(
                 plan,
@@ -376,17 +371,12 @@ class LLMAgentTeamRunner:
                     "blocked_tools": [*tool_trace["blocked"], *source_blocked],
                     "permission_checks": [
                         *tool_trace["permission_checks"],
-                        *[
-                            f"{item}:blocked:source_mismatch"
-                            for item in source_blocked
-                        ],
+                        *[f"{item}:blocked:source_mismatch" for item in source_blocked],
                     ],
                     "cache_events": tool_trace["cache_events"],
                     "event_input_count": len(evidence_events),
                     "tool_observation_count": len(observations),
-                    "source_type_count": len(
-                        {event.source_type for event in evidence_events}
-                    ),
+                    "source_type_count": len({event.source_type for event in evidence_events}),
                     "tools_requested_count": len(plan.tool_requests),
                     "tools_executed_count": len(tool_trace["executed"]),
                     "budget_blocked_count": len(tool_trace["budget_blocked"]),
@@ -395,9 +385,7 @@ class LLMAgentTeamRunner:
             )
         else:
             evidence = ContextEvidenceOutput(results=[])
-        skipped_evidence = [
-            event for event in events if event.event_id not in evidence_ids
-        ]
+        skipped_evidence = [event for event in events if event.event_id not in evidence_ids]
         if skipped_evidence:
             evidence = evidence.model_copy(
                 update={
@@ -412,9 +400,7 @@ class LLMAgentTeamRunner:
         impact_ids = {event.event_id for event in impact_events}
         if impact_events:
             impact_evidence = ContextEvidenceOutput(
-                results=[
-                    item for item in evidence.results if item.event_id in impact_ids
-                ]
+                results=[item for item in evidence.results if item.event_id in impact_ids]
             )
             impact_call = self.impact.build_call(
                 impact_events,
@@ -480,9 +466,7 @@ class LLMAgentTeamRunner:
         action_ids = {event.event_id for event in action_events}
         if action_events:
             action_impact = ImpactOutput(
-                results=[
-                    item for item in impact.results if item.event_id in action_ids
-                ]
+                results=[item for item in impact.results if item.event_id in action_ids]
             )
             action_call = self.action.build_call(
                 action_events,
@@ -521,9 +505,7 @@ class LLMAgentTeamRunner:
         if skipped_action:
             skipped_ids = {event.event_id for event in skipped_action}
             skipped_impact_output = ImpactOutput(
-                results=[
-                    item for item in impact.results if item.event_id in skipped_ids
-                ]
+                results=[item for item in impact.results if item.event_id in skipped_ids]
             )
             action = action.model_copy(
                 update={
@@ -596,9 +578,7 @@ class LLMAgentTeamRunner:
         )
         learning_memories = {
             **memory_snapshot,
-            "current_signal_batch": [
-                event.model_dump(mode="json") for event in events
-            ],
+            "current_signal_batch": [event.model_dump(mode="json") for event in events],
             "current_assessments": [
                 assessment.model_dump(mode="json") for assessment in assessments
             ],
@@ -645,19 +625,13 @@ class LLMAgentTeamRunner:
     ) -> bool:
         llm_health_warning = any(
             step.step == "llm_agent_call"
-            and (
-                step.fallback_used
-                or step.schema_error
-                or step.error
-                or step.tool_errors
-            )
+            and (step.fallback_used or step.schema_error or step.error or step.tool_errors)
             for step in self.trace.steps
         )
         if llm_health_warning:
             return True
         high_priority = any(
-            assessment.decision.value in {"action_required", "alert"}
-            for assessment in assessments
+            assessment.decision.value in {"action_required", "alert"} for assessment in assessments
         )
         return not high_priority and not list(feedback_history)
 
@@ -683,8 +657,7 @@ class LLMAgentTeamRunner:
         return [
             event
             for event in events
-            if routes[event.event_id].analyze
-            and agent in routes[event.event_id].required_agents
+            if routes[event.event_id].analyze and agent in routes[event.event_id].required_agents
         ]
 
     async def _execute_tool_requests(
@@ -727,11 +700,7 @@ class LLMAgentTeamRunner:
             else:
                 blocked.append(request.tool_name)
         existing_keys = {_request_key(request) for request in selected}
-        selected.extend(
-            request
-            for key, request in allowed.items()
-            if key not in existing_keys
-        )
+        selected.extend(request for key, request in allowed.items() if key not in existing_keys)
         deduped = list({_request_key(request): request for request in selected}.values())
         real_agent_cap = min(8, self.tool_limits.max_total_tool_requests_per_run)
         deduped = deduped[:real_agent_cap]
@@ -774,8 +743,7 @@ class LLMAgentTeamRunner:
                 continue
             deterministic = classifier.run(event, project_profile).category
             should_replace = (
-                route.category.value in broad_categories
-                and deterministic is not route.category
+                route.category.value in broad_categories and deterministic is not route.category
             )
             updates: dict[str, Any] = {}
             reason = route.routing_reason
@@ -789,9 +757,7 @@ class LLMAgentTeamRunner:
                 reason += " Required downstream agents filled by routing guardrail."
             if updates:
                 updates["routing_reason"] = reason
-                calibrated.append(
-                    route.model_copy(update=updates)
-                )
+                calibrated.append(route.model_copy(update=updates))
             else:
                 calibrated.append(route)
         return routes.model_copy(update={"routes": calibrated})
@@ -809,6 +775,24 @@ class LLMAgentTeamRunner:
         observations: list[ToolObservation],
     ) -> ContextEvidenceOutput:
         return cap_evidence_after_tool_failures(evidence, observations)
+
+    @staticmethod
+    def _clamp_evidence_source_authority(
+        evidence: ContextEvidenceOutput,
+        events: list[SignalEvent],
+    ) -> ContextEvidenceOutput:
+        by_id = {event.event_id: event for event in events}
+        results = []
+        for item in evidence.results:
+            event = by_id.get(item.event_id)
+            if event is None:
+                results.append(item)
+                continue
+            quality, confidence = clamp_source_quality(event, item.source_quality, item.confidence)
+            results.append(
+                item.model_copy(update={"source_quality": quality, "confidence": confidence})
+            )
+        return evidence.model_copy(update={"results": results})
 
     async def _maybe_run_impact_evidence_repair(
         self,
@@ -891,10 +875,7 @@ class LLMAgentTeamRunner:
                 "budget_blocked_count": len(tool_trace["budget_blocked"]),
                 "permission_checks": [
                     *tool_trace["permission_checks"],
-                    *[
-                        f"{item}:blocked:source_mismatch"
-                        for item in source_blocked
-                    ],
+                    *[f"{item}:blocked:source_mismatch" for item in source_blocked],
                 ],
                 "cache_events": tool_trace["cache_events"],
                 "detail": (
@@ -950,6 +931,7 @@ class LLMAgentTeamRunner:
             repaired_evidence,
             observations,
         )
+        repaired_evidence = self._clamp_evidence_source_authority(repaired_evidence, repair_events)
         final_step = self.trace.steps[evidence_trace]
         self.trace.steps[evidence_trace] = final_step.model_copy(
             update={
@@ -958,10 +940,7 @@ class LLMAgentTeamRunner:
                 "blocked_tools": [*tool_trace["blocked"], *source_blocked],
                 "permission_checks": [
                     *tool_trace["permission_checks"],
-                    *[
-                        f"{item}:blocked:source_mismatch"
-                        for item in source_blocked
-                    ],
+                    *[f"{item}:blocked:source_mismatch" for item in source_blocked],
                 ],
                 "cache_events": tool_trace["cache_events"],
                 "event_input_count": len(repair_events),
@@ -987,11 +966,7 @@ class LLMAgentTeamRunner:
         )
         merged_evidence = merge_context_evidence(evidence, repaired_evidence)
         repaired_impact_input = ContextEvidenceOutput(
-            results=[
-                item
-                for item in merged_evidence.results
-                if item.event_id in expected_ids
-            ]
+            results=[item for item in merged_evidence.results if item.event_id in expected_ids]
         )
         impact_call = self.impact.build_call(
             repair_events,
@@ -1056,9 +1031,7 @@ class LLMAgentTeamRunner:
                     repair_round=repair_round,
                     summary_step="repair_context_evidence",
                 ),
-                tools_requested=[
-                    request.tool_name for request in plan.tool_requests
-                ],
+                tools_requested=[request.tool_name for request in plan.tool_requests],
                 tools_executed=tool_trace["executed"],
                 tool_errors=tool_trace["errors"],
                 blocked_tools=tool_trace["blocked"],
@@ -1145,9 +1118,7 @@ class LLMAgentTeamRunner:
         event_id_set = set(event_ids)
         repair_events = [event for event in events if event.event_id in event_id_set]
         repair_evidence = ContextEvidenceOutput(
-            results=[
-                item for item in evidence.results if item.event_id in event_id_set
-            ]
+            results=[item for item in evidence.results if item.event_id in event_id_set]
         )
         impact_call = self.impact.build_call(
             repair_events,
@@ -1254,8 +1225,7 @@ class LLMAgentTeamRunner:
                 output_count=len(repaired_action.results),
                 duration_ms=0,
                 detail=(
-                    "Reran ActionPlannerAgent after impact repair; "
-                    f"event_ids={','.join(event_ids)}"
+                    f"Reran ActionPlannerAgent after impact repair; event_ids={','.join(event_ids)}"
                 ),
                 metadata=repair_metadata(
                     triggered_by="ImpactAnalystAgent",

@@ -16,6 +16,7 @@ agent_score_weights:
 source_weights:
   official_release: 88
   official_issue: 70
+  maintainer_issue: 62
   official_blog: 78
   expert_blog: 62
   community_discussion: 50

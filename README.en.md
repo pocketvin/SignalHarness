@@ -14,8 +14,8 @@ SignalHarness watches external engineering changes, decides whether they matter 
 | Tool use | Two-turn evidence tool plan; Python owns allowlist, permission checks, budgets, execution, and observations |
 | Reliability | Pydantic structured outputs, schema retry, deterministic fallback, bounded repair, run timeout limits |
 | Guarded decisions | LLM contributes semantics; Python owns final scoring and a primary-source high-risk alert floor |
-| Memory | Project, Signal, Feedback, and Policy memory; no chat-memory abstraction |
-| Eval | 40-case labelled Agent regression suite + multi-provider contract eval |
+| Memory | Project-scoped persistent signal/feedback/learning state, separated from per-run output/trace |
+| Eval | 40-case Agent regression + 3-case cross-project context gate + provider contract eval |
 | Observability | Local trace for Agent calls, schema/retry/fallback, tools, latency, provider-reported tokens, and estimated cost |
 | MCP | Five read-only structured tools for project context, signal history, assessments, trace, and feedback |
 | Service | FastAPI REST API + replayable SSE streaming runs + MCP Streamable HTTP |
@@ -65,7 +65,9 @@ SignalHarness treats those questions as an Agent-runtime problem rather than a c
 ```mermaid
 flowchart LR
     Sources[GitHub / RSS / Web change / fixture]
-    Collect[Collect + Normalize + Deduplicate + Noise Filter]
+    Collect[Collect + Normalize + Deduplicate]
+    Funnel[Project-aware Candidate Funnel]
+    Noise[Noise Filter]
     Supervisor[SignalSupervisorAgent]
     Evidence[ContextEvidenceAgent]
     Tools[Controlled read-only tool loop]
@@ -76,7 +78,7 @@ flowchart LR
     Output[Assessment / Trace / Dashboard / Digest]
     Interfaces[CLI / REST / SSE Demo / MCP]
 
-    Sources --> Collect --> Supervisor --> Evidence --> Impact --> Action --> Learning --> Output
+    Sources --> Collect --> Funnel --> Noise --> Supervisor --> Evidence --> Impact --> Action --> Learning --> Output
     Evidence --> Tools --> Evidence
     Guard -. schema / permission / budgets / fallback / score .-> Supervisor
     Guard -.-> Evidence
@@ -95,6 +97,18 @@ flowchart LR
 5. **LearningPolicyAgent** — reads memory and proposes policy/skill/watchlist changes for review only.
 
 Memory is infrastructure, not a sixth Agent.
+
+### Project Memory V2
+
+Per-run output/trace remains isolated under `service-runs/<run_id>`, while persistent signal, feedback, alert and learning state is stored under `.signal-harness/projects/<project_id>/`. Subsequent runs for the same project reuse that state; different projects are isolated. Shared project-state writes are serialized to prevent concurrent runs from overwriting the same JSON files.
+
+### Candidate Funnel V2
+
+Live collection can return more than a thousand raw events. SignalHarness now normalizes and deduplicates first, then ranks cheaply by project relevance, focus keywords, source authority, recency and novelty, while reserving source diversity before selecting the bounded Agent candidate set. A 2026-09-06 local live acceptance narrowed 1274 raw events to 12 project-aware candidates; that is runtime evidence, not a fixed benchmark.
+
+### Source Authority V2
+
+Repository authority and claim-author authority are distinct. GitHub releases can be official; a normal user issue in an official repo remains community; OWNER/MEMBER/COLLABORATOR issues are maintainer-level. Explicit OpenAI/GitHub official feeds are marked official, while independent expert feeds remain secondary. Python clamps LLM-reported source quality/confidence so a community issue cannot be promoted to official evidence by model output.
 
 ## Python-owned guardrails
 
@@ -149,6 +163,14 @@ Outputs:
 - `outputs/regression-eval/regression_eval_summary.md`
 
 Metrics include exact decision/category accuracy, priority precision/recall, FPR/FNR, TP/FP/TN/FN, decision confusion, missing assessments, and mismatch details. `--enforce` exits non-zero when configured thresholds fail.
+
+## Cross-project context eval
+
+```bash
+uv run signal-harness project-eval --enforce
+```
+
+The committed `project-context-v1` gate currently passes 3/3 cases. Each case evaluates the same event under two project profiles and requires a meaningful score gap in the expected direction, proving that project context changes runtime judgment rather than only changing the UI/Watchlist.
 
 ## Provider contract eval
 
@@ -226,7 +248,7 @@ MCP Streamable HTTP is mounted at:
 /mcp
 ```
 
-Each API run gets isolated output/state directories under `service-runs/<run_id>`. The original `POST /runs` remains synchronous. Streaming demo runs are in-process asyncio tasks started by the first SSE subscriber; they continue if the browser disconnects, but live subscription history is not durable across a service restart. No Redis/Celery/worker tier is claimed.
+Each API run gets isolated output/trace directories under `service-runs/<run_id>`, while persistent memory is project-scoped under `.signal-harness/projects/<project_id>/`. The original `POST /runs` remains synchronous. Streaming demo runs are in-process asyncio tasks started by the first SSE subscriber; they continue if the browser disconnects, but live subscription history is not durable across a service restart. No Redis/Celery/worker tier is claimed.
 
 ## Docker
 

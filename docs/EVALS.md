@@ -1,6 +1,6 @@
 # SignalHarness Evaluation System
 
-SignalHarness has two evaluation layers with different purposes. They should not be mixed into one benchmark claim.
+SignalHarness has three evaluation layers with different purposes. They should not be mixed into one benchmark claim.
 
 ## 1. Agent regression gate
 
@@ -43,7 +43,19 @@ The fixes were architectural rather than case-ID special cases: category weight 
 ## Regression metrics
 
 The summary includes exact decision/category accuracy, priority precision and recall, FPR/FNR, TP/FP/TN/FN, confusion counts, missing assessments, and per-case mismatches.
-## 2. Provider contract eval
+## 2. Cross-project context gate
+
+`project-eval` checks whether the same external event is judged differently when the selected project context changes.
+
+```bash
+uv run signal-harness project-eval --enforce
+```
+
+The committed `project-context-v1` suite currently passes 3/3 cases. Each case names a higher-relevance project, a lower-relevance project, and a minimum score gap. The gate runs deterministic project-aware scoring so CI can prove that multi-project support changes runtime judgment instead of only switching display metadata or Watchlists.
+
+Current committed examples include checkpoint runtime, MCP permission, and Agent-eval/checkpoint migration signals.
+
+## 3. Provider contract eval
 
 `model-eval` answers a separate question: can a provider participate safely in the SignalHarness structured Agent contract?
 
@@ -64,4 +76,4 @@ Historical real-provider snapshots live in `docs/MODEL_EVAL_REPORT.md`. Those nu
 
 ## Evaluation boundary
 
-Neither eval claims general LLM intelligence. Regression eval proves behaviour for SignalHarness product contracts; provider eval proves compatibility and operational stability inside this Harness. Live model quality still depends on provider version, prompt changes, network conditions, source mix, and API configuration.
+None of these evals claims general LLM intelligence. Regression eval proves SignalHarness product contracts; project-context eval proves project-aware differentiation; provider eval proves compatibility and operational stability inside this Harness. Live model quality still depends on provider version, prompt changes, network conditions, source mix, and API configuration.

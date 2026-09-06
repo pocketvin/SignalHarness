@@ -14,6 +14,7 @@ from uuid import uuid4
 from signal_harness.agent_integration.mode import RunMode
 from signal_harness.providers.catalog import provider_from_selection
 from signal_harness.projects.catalog import ProjectOption, default_project_id, project_option
+from signal_harness.projects.state import prepare_project_state
 from signal_harness.runtime.tracing import TraceChangeKind
 from signal_harness.runtime.workflow import SignalHarnessWorkflow
 from signal_harness.signal.schemas import SourceTask, TraceStep
@@ -142,6 +143,7 @@ class StreamRunManager:
         self.state_dir = state_dir
         self.max_sessions = max_sessions
         self.sessions: dict[str, StreamRunSession] = {}
+        self._project_locks: dict[str, asyncio.Lock] = {}
 
     def start(
         self,
@@ -166,7 +168,11 @@ class StreamRunManager:
             mode=mode,
             source_mode=source_mode,
             output_dir=self.output_dir / "service-runs" / run_id,
-            state_dir=self.state_dir / "service-runs" / run_id,
+            state_dir=prepare_project_state(
+                self.state_dir,
+                selected_project.id,
+                migrate_legacy_default=True,
+            ),
             created_at=datetime.now(timezone.utc).isoformat(),
             fixture=fixture,
             since=since,
@@ -178,6 +184,9 @@ class StreamRunManager:
         self.sessions[run_id] = session
         session.publish("run.created", session.public_payload())
         return session
+
+    def project_lock(self, project_id: str) -> asyncio.Lock:
+        return self._project_locks.setdefault(project_id, asyncio.Lock())
 
     def get(self, run_id: str) -> StreamRunSession | None:
         return self.sessions.get(run_id)
@@ -213,23 +222,24 @@ class StreamRunManager:
                     session.provider_id,
                     config_dir=self.config_dir,
                 )
-            workflow = SignalHarnessWorkflow(
-                cwd=self.cwd,
-                config_dir=self.config_dir,
-                project_profile_path=session.project.project_profile_path,
-                watchlist_path=session.project.watchlist_path,
-                output_dir=session.output_dir,
-                state_dir=session.state_dir,
-                mode=session.mode,
-                provider=provider,
-                trace_listener=session.on_trace_change,
-            )
-            result = await workflow.scan(
-                fixture=session.fixture,
-                since=session.since,
-                max_events=session.max_events,
-                max_events_per_source=session.max_events_per_source,
-            )
+            async with self.project_lock(session.project.id):
+                workflow = SignalHarnessWorkflow(
+                    cwd=self.cwd,
+                    config_dir=self.config_dir,
+                    project_profile_path=session.project.project_profile_path,
+                    watchlist_path=session.project.watchlist_path,
+                    output_dir=session.output_dir,
+                    state_dir=session.state_dir,
+                    mode=session.mode,
+                    provider=provider,
+                    trace_listener=session.on_trace_change,
+                )
+                result = await workflow.scan(
+                    fixture=session.fixture,
+                    since=session.since,
+                    max_events=session.max_events,
+                    max_events_per_source=session.max_events_per_source,
+                )
             session.status = "success"
             session.completed_at = datetime.now(timezone.utc).isoformat()
             source_summary = _source_summary(result.source_tasks, result.failed_sources)
@@ -260,12 +270,8 @@ class StreamRunManager:
                 {
                     "run": session.result,
                     "signals": [item.model_dump(mode="json") for item in result.signals],
-                    "assessments": [
-                        item.model_dump(mode="json") for item in result.assessments
-                    ],
-                    "source_tasks": [
-                        item.model_dump(mode="json") for item in result.source_tasks
-                    ],
+                    "assessments": [item.model_dump(mode="json") for item in result.assessments],
+                    "source_tasks": [item.model_dump(mode="json") for item in result.source_tasks],
                     "failed_sources": list(result.failed_sources),
                 },
             )

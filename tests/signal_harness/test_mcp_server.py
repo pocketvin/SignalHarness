@@ -54,7 +54,8 @@ async def test_mcp_in_process_lists_and_calls_read_only_tools(
 ) -> None:
     output_dir = tmp_path / "outputs"
     state_dir = tmp_path / "state"
-    _write_artifacts(output_dir, state_dir)
+    project_state = state_dir / "projects" / "signalharness"
+    _write_artifacts(output_dir, project_state)
     server = build_mcp_server(
         cwd=project_root,
         output_dir=output_dir,
@@ -74,7 +75,9 @@ async def test_mcp_in_process_lists_and_calls_read_only_tools(
 
         context = await client.call_tool("signalharness_get_project_context", {})
         assert context.is_error is False
-        assert (context.structured_content or {})["project_profile"]["project_name"] == "SignalHarness"
+        assert (context.structured_content or {})["project_profile"][
+            "project_name"
+        ] == "SignalHarness"
 
         example_context = await client.call_tool(
             "signalharness_get_project_context",
@@ -87,7 +90,7 @@ async def test_mcp_in_process_lists_and_calls_read_only_tools(
 
         history = await client.call_tool(
             "signalharness_search_signal_history",
-            {"query": "permission", "limit": 10},
+            {"project_id": "signalharness", "query": "permission", "limit": 10},
         )
         assert history.is_error is False
         assert (history.structured_content or {})["count"] == 1
@@ -107,7 +110,7 @@ async def test_mcp_rejects_path_traversal_run_id(
 ) -> None:
     output_dir = tmp_path / "outputs"
     state_dir = tmp_path / "state"
-    _write_artifacts(output_dir, state_dir)
+    _write_artifacts(output_dir, state_dir / "projects" / "signalharness")
     server = build_mcp_server(
         cwd=project_root,
         output_dir=output_dir,
