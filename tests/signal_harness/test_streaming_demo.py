@@ -453,3 +453,37 @@ async def test_stream_manager_recovers_persisted_queued_run(
     final = json.loads((restored.output_dir / "service_run.json").read_text(encoding="utf-8"))
     assert final["status"] == "success"
     assert final["run_id"] == queued.run_id
+
+
+@pytest.mark.asyncio
+async def test_sse_waits_for_terminal_event_even_if_status_flips_first(
+    project_root: Path, tmp_path: Path
+) -> None:
+    manager = StreamRunManager(
+        cwd=project_root,
+        config_dir=project_root / "configs",
+        output_dir=tmp_path / "outputs",
+        state_dir=tmp_path / "state",
+    )
+    session = manager.start(
+        source_mode="fixture",
+        fixture=project_root / "examples/signal_harness/sample_events.json",
+        since=None,
+        mode=RunMode.MOCK_AGENT,
+        provider_id=None,
+    )
+    stream = session.subscribe()
+    first = await anext(stream)
+    assert first.event == "run.created"
+
+    session.status = "success"
+
+    async def publish_terminal() -> None:
+        await asyncio.sleep(0)
+        session.publish("run.completed", {"run": {"status": "success"}})
+
+    producer = asyncio.create_task(publish_terminal())
+    terminal = await asyncio.wait_for(anext(stream), timeout=1)
+    await producer
+    assert terminal.event == "run.completed"
+    await stream.aclose()

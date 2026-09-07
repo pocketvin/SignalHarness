@@ -98,8 +98,8 @@ class StreamRunSession:
                 yield event
                 if event.event in _TERMINAL_EVENTS:
                     return
-            if self.status in {"success", "error"}:
-                return
+            # Terminal delivery is event-driven. Do not exit only because status flipped:
+            # the terminal event may be queued a scheduling tick later.
             while True:
                 event = await queue.get()
                 if event.id <= cursor:
@@ -280,15 +280,15 @@ class StreamRunManager:
         if session.task is not None or session.status != "queued":
             return
         if session.attempt >= self.max_attempts:
-            session.status = "error"
             session.completed_at = datetime.now(timezone.utc).isoformat()
             session.result = {
                 **self._session_metadata(session),
                 "status": "error",
                 "error_class": "RecoveryAttemptsExhausted",
             }
-            self._persist_session(session)
             session.publish("run.failed", {"run": session.result})
+            session.status = "error"
+            _write_run_metadata(session.output_dir, session.result)
             return
         session.task = asyncio.create_task(
             self._execute(session),
@@ -342,7 +342,6 @@ class StreamRunManager:
                     window_mode=session.window_mode,
                     until=session.until,
                 )
-            session.status = "success"
             session.completed_at = datetime.now(timezone.utc).isoformat()
             source_summary = _source_summary(result.source_tasks, result.failed_sources)
             session.result = {
@@ -382,8 +381,8 @@ class StreamRunManager:
                     "failed_sources": list(result.failed_sources),
                 },
             )
+            session.status = "success"
         except Exception as exc:
-            session.status = "error"
             session.completed_at = datetime.now(timezone.utc).isoformat()
             session.result = {
                 "run_id": session.run_id,
@@ -401,6 +400,7 @@ class StreamRunManager:
             }
             _write_run_metadata(session.output_dir, session.result)
             session.publish("run.failed", {"run": session.result})
+            session.status = "error"
         finally:
             if provider is not None:
                 await provider.close()
