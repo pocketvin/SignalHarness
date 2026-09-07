@@ -41,6 +41,7 @@ from signal_harness.resources import (
 from signal_harness.service_streaming import StreamRunManager
 from signal_harness.runtime.permissions import SignalPermissionGuard
 from signal_harness.runtime.workflow import SignalHarnessWorkflow
+from signal_harness.runtime.windows import WindowMode
 from signal_harness.signal.feedback import (
     create_feedback_record,
     generate_policy_proposal,
@@ -61,8 +62,19 @@ class RunRequest(BaseModel):
     mode: RunMode = RunMode.MOCK_AGENT
     provider_id: str | None = None
     since_days: int = Field(default=14, ge=1, le=30)
+    window: Literal["since_last", "24h", "7d", "30d", "custom"] | None = None
+    window_from: datetime | None = None
+    window_to: datetime | None = None
     max_events: int | None = Field(default=None, ge=1, le=50)
     max_events_per_source: int | None = Field(default=None, ge=1, le=20)
+
+    @model_validator(mode="after")
+    def _validate_window(self) -> "RunRequest":
+        if self.window == "custom" and self.window_from is None:
+            raise ValueError("custom window requires window_from")
+        if self.window_from and self.window_to and self.window_from >= self.window_to:
+            raise ValueError("window_from must be before window_to")
+        return self
 
 
 class StreamRunRequest(BaseModel):
@@ -74,8 +86,19 @@ class StreamRunRequest(BaseModel):
     mode: RunMode = RunMode.MOCK_AGENT
     provider_id: str | None = None
     since_days: int = Field(default=14, ge=1, le=30)
+    window: Literal["since_last", "24h", "7d", "30d", "custom"] | None = None
+    window_from: datetime | None = None
+    window_to: datetime | None = None
     max_events: int | None = Field(default=12, ge=1, le=50)
     max_events_per_source: int | None = Field(default=4, ge=1, le=20)
+
+    @model_validator(mode="after")
+    def _validate_window(self) -> "StreamRunRequest":
+        if self.window == "custom" and self.window_from is None:
+            raise ValueError("custom window requires window_from")
+        if self.window_from and self.window_to and self.window_from >= self.window_to:
+            raise ValueError("window_from must be before window_to")
+        return self
 
 
 class FeedbackRequest(BaseModel):
@@ -172,6 +195,7 @@ def create_app(
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         del app
         async with mcp.session_manager.run():
+            await streams.recover_pending()
             try:
                 yield
             finally:
@@ -215,7 +239,11 @@ def create_app(
                 "false_negative_rate": float(evidence.get("false_negative_rate", 0.0)),
             },
             "mcp": {"tool_count": len(MCP_TOOL_NAMES), "tools": list(MCP_TOOL_NAMES)},
-            "streaming": {"transport": "sse", "durability": "in-process"},
+            "streaming": {
+                "transport": "sse",
+                "durability": "persistent-run-retry",
+                "event_replay": "in-process",
+            },
             "providers": [option.public_payload() for option in providers],
             "default_provider_id": default_provider_id(paths.config_dir),
             "projects": [option.public_payload() for option in projects],
@@ -268,26 +296,30 @@ def create_app(
                     },
                 )
 
+        window_mode: WindowMode
         if request.data_source == "fixture":
             fixture = _safe_fixture(
                 paths.cwd,
                 request.fixture or "examples/signal_harness/sample_events.json",
             )
-            since = None
+            since, until, window_mode = None, None, "legacy"
         else:
             fixture = None
-            since = datetime.now(timezone.utc) - timedelta(days=request.since_days)
+            since, until, window_mode = _request_window(request)
 
         session = streams.start(
             source_mode=request.data_source,
             fixture=fixture,
             since=since,
+            until=until,
+            window_mode=window_mode,
             mode=request.mode,
             provider_id=provider_id if request.mode is RunMode.AGENT else None,
             project=project,
             max_events=request.max_events,
             max_events_per_source=request.max_events_per_source,
         )
+        streams.ensure_started(session)
         return session.public_payload()
 
     @app.get("/stream-runs/{run_id}")
@@ -310,10 +342,7 @@ def create_app(
         session = streams.get(validated)
         if session is None:
             raise HTTPException(status_code=404, detail="Stream run not found")
-        async for event in session.subscribe(
-            cursor,
-            on_subscribe=lambda: streams.ensure_started(session),
-        ):
+        async for event in session.subscribe(cursor):
             yield ServerSentEvent(
                 data=event.data,
                 event=event.event,
@@ -351,14 +380,15 @@ def create_app(
                 raise HTTPException(status_code=409, detail=f"Provider {provider_id} is not ready")
             provider = provider_from_selection(provider_id, config_dir=paths.config_dir)
 
+        window_mode: WindowMode
         if request.data_source == "fixture":
             fixture = _safe_fixture(
                 paths.cwd, request.fixture or "examples/signal_harness/sample_events.json"
             )
-            since = None
+            since, until, window_mode = None, None, "legacy"
         else:
             fixture = None
-            since = datetime.now(timezone.utc) - timedelta(days=request.since_days)
+            since, until, window_mode = _request_window(request)
 
         workflow = SignalHarnessWorkflow(
             cwd=paths.cwd,
@@ -380,6 +410,8 @@ def create_app(
                     max_events=request.max_events,
                     max_events_per_source=request.max_events_per_source,
                     scan_id=run_id,
+                    window_mode=window_mode,
+                    until=until,
                 )
         except Exception as exc:
             _write_run_metadata(
@@ -411,7 +443,10 @@ def create_app(
             failed_sources=len(result.failed_sources),
         )
         payload["all_changes"] = result.all_change_count
+        payload["window"] = result.window.public_payload()
+        payload["coverage_status"] = result.coverage_status
         payload["changes_url"] = f"/runs/{run_id}/changes"
+        payload["coverage_url"] = f"/runs/{run_id}/coverage"
         payload.update(
             {
                 "project_id": project.id,
@@ -484,6 +519,23 @@ def create_app(
             "has_more": page.has_more,
         }
 
+    @app.get("/runs/{run_id}/coverage")
+    async def get_run_coverage(run_id: str) -> dict[str, Any]:
+        run_output = _existing_run_output(paths, run_id)
+        run_meta = _read_json(run_output / "service_run.json", {})
+        project_id = str(
+            run_meta.get("project_id") if isinstance(run_meta, dict) else ""
+        ) or default_project_id(paths.config_dir)
+        ledger = ChangeLedger(paths.project_state(project_id) / "change_ledger.sqlite3")
+        items = ledger.source_coverage(run_id)
+        statuses = [str(item.get("coverage_status") or "unknown") for item in items]
+        overall = (
+            "partial" if "partial" in statuses
+            else "unknown" if "unknown" in statuses
+            else "complete"
+        )
+        return {"scan_id": run_id, "coverage_status": overall, "sources": items}
+
     @app.post("/feedback")
     async def save_feedback(request: FeedbackRequest) -> dict[str, Any]:
         run_output = _existing_run_output(paths, request.run_id)
@@ -528,6 +580,16 @@ def create_app(
     )
     app.mount("/mcp", mcp_app, name="mcp")
     return app
+
+
+def _request_window(
+    request: RunRequest | StreamRunRequest,
+) -> tuple[datetime | None, datetime | None, WindowMode]:
+    if request.window is None:
+        return datetime.now(timezone.utc) - timedelta(days=request.since_days), None, "legacy"
+    if request.window == "custom":
+        return request.window_from, request.window_to, "custom"
+    return None, None, request.window
 
 
 def _resolve(root: Path, value: str | Path) -> Path:

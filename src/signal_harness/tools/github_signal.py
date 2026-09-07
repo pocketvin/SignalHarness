@@ -15,6 +15,7 @@ from signal_harness.signal.normalizer import normalize_github_event
 
 HTTP_AUTH_HEADER = "Authori" + "zation"
 BEARER_PREFIX = "Bear" + "er"
+MAX_GITHUB_PAGES = 20
 
 
 class GitHubSignalInput(BaseModel):
@@ -77,19 +78,18 @@ class GitHubSignalTool(BaseTool):
         if authorization:
             headers[HTTP_AUTH_HEADER] = authorization
         try:
-            async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
-                response = await client.get(endpoint, params=params, headers=headers)
-                response.raise_for_status()
-        except (httpx.HTTPError, UnicodeEncodeError) as exc:
+            payload, metadata = await _fetch_paginated(
+                endpoint=endpoint,
+                params=params,
+                headers=headers,
+                since=arguments.since,
+                releases=arguments.action == "fetch_repo_releases",
+            )
+        except (httpx.HTTPError, UnicodeEncodeError, ValueError) as exc:
             return ToolResult(output=f"GitHub request failed: {exc}", is_error=True)
 
-        payload = response.json()
-        if not isinstance(payload, list):
-            return ToolResult(output="GitHub returned a non-list payload", is_error=True)
         if arguments.action == "fetch_repo_releases":
             for index, item in enumerate(payload):
-                if not isinstance(item, dict):
-                    continue
                 previous = payload[index + 1] if index + 1 < len(payload) else None
                 if isinstance(previous, dict) and previous.get("tag_name"):
                     item.setdefault("_previous_tag_name", previous.get("tag_name"))
@@ -103,7 +103,51 @@ class GitHubSignalTool(BaseTool):
                 ]
         if arguments.action == "fetch_repo_issues":
             payload = [item for item in payload if "pull_request" not in item]
-        return ToolResult(output=json.dumps(payload, ensure_ascii=False))
+        metadata["item_count"] = len(payload)
+        return ToolResult(
+            output=json.dumps(payload, ensure_ascii=False),
+            metadata=metadata,
+        )
+
+
+async def _fetch_paginated(
+    *,
+    endpoint: str,
+    params: dict[str, str | int],
+    headers: dict[str, str],
+    since: datetime | None,
+    releases: bool,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    payload: list[dict[str, Any]] = []
+    next_url: str | None = endpoint
+    next_params: dict[str, str | int] | None = dict(params)
+    pages = 0
+    history_limited = False
+    async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+        while next_url is not None and pages < MAX_GITHUB_PAGES:
+            response = await client.get(next_url, params=next_params, headers=headers)
+            response.raise_for_status()
+            page = response.json()
+            if not isinstance(page, list) or not all(isinstance(item, dict) for item in page):
+                raise ValueError("GitHub returned a non-list payload")
+            payload.extend(page)
+            pages += 1
+            if releases and since is not None and page:
+                oldest = page[-1].get("published_at") or page[-1].get("created_at")
+                if isinstance(oldest, str) and not _is_at_or_after(oldest, since):
+                    next_url = None
+                    break
+            link = response.links.get("next")
+            next_url = str(link.get("url")) if isinstance(link, dict) and link.get("url") else None
+            next_params = None
+        if next_url is not None:
+            history_limited = True
+    return payload, {
+        "pages_fetched": pages,
+        "coverage_status": "partial" if history_limited else "complete",
+        "history_limited": history_limited,
+        "diagnostics": ([f"pagination capped at {MAX_GITHUB_PAGES} pages"] if history_limited else []),
+    }
 
 
 def _is_at_or_after(raw: object, since: datetime) -> bool:

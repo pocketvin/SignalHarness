@@ -85,7 +85,7 @@ audit default, not evidence that the skipped downstream Agent ran.
 
 The CLI remains the simplest one-shot execution surface. `signal-harness serve` adds three interfaces over the same Workflow: synchronous REST, a Golden Demo backed by Server-Sent Events, and `/mcp` Streamable HTTP; `signal-harness mcp` provides stdio MCP. Every service run gets isolated output/state directories.
 
-The original `POST /runs` stays synchronous. `POST /stream-runs` creates an in-process queued run; the first SSE subscriber starts the workflow, so `/stream-runs/{id}/events` delivers real TraceRecorder append/update events rather than a finished-run animation. Event IDs support reconnect replay, and disconnecting the browser does not cancel the task. The replay buffer is intentionally memory-only and is not described as a durable queue or distributed worker system.
+The original `POST /runs` stays synchronous. `POST /stream-runs` now starts the workflow immediately and persists queued/running request state for bounded restart recovery; `/stream-runs/{id}/events` is an observation surface rather than the execution trigger. Event IDs support reconnect replay, and disconnecting the browser does not cancel the task. The SSE replay buffer remains memory-only, so this is not described as a distributed durable queue or worker system.
 
 The MCP surface is read-only and exposes project context, signal history, assessments, trace, and feedback. It does not create a second write/permission path. Docker runs the same service entry point and has a `/health` healthcheck. Scheduled execution remains external to the core process.
 

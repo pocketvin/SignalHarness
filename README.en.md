@@ -236,9 +236,9 @@ uv run signal-harness serve --host 127.0.0.1 --port 8000
 
 The Golden Demo is dependency-free HTML/CSS/JS served by FastAPI. It opens in **Chinese by default** and can switch to English in place. A run first selects a **project**, then its data source, analysis path, and optional real-model provider. `configs/projects/*.yaml` is the Project Catalog; each entry binds a project profile to its own Watchlist. The public repo ships `SignalHarness` plus `Example · Agent API Service` to prove project switching without changing runtime code. `mock-agent` remains the default analysis path because it requires no API key while still exercising the real five-Agent orchestration, schemas, tool guard, trace, SSE, and Python scoring.
 
-Clicking **Run Golden Demo** creates a queued stream run; the workflow starts only after the browser establishes the SSE subscription, so the page consumes live runtime events rather than replaying a finished animation. `TraceRecorder` append/update events feed an in-process replay buffer, and browser reconnects can resume with `Last-Event-ID`. Disconnecting the browser does not cancel the workflow.
+Clicking **Run Golden Demo** creates and immediately starts a stream run. Queued/running input and status are persisted for bounded restart recovery; the browser may attach to SSE at any time to consume live `TraceRecorder` append/update events. The replay buffer itself remains in-process, reconnects can resume with `Last-Event-ID`, and disconnecting the browser does not cancel the workflow.
 
-The UI shows the selected project, its Watchlist, source-native change deltas, Agent stages, Python tool guard, schema/fallback/retry state, tool requests/execution/permission checks, final decisions, runtime health, the committed 40-case regression evidence, and the five read-only MCP tools. `signal-harness serve` automatically loads an optional project-root `.env` without overriding variables already exported by the caller. Real `agent` mode can select separately configured OpenAI, Qwen, Kimi, or DeepSeek OpenAI-compatible providers per run. Model profiles carry freshness metadata: known retired model aliases resolve to the current profile with a visible warning, while unknown overrides receive conservative capabilities instead of inheriting another model's JSON/context/pricing claims. `/demo/meta` exposes only non-secret project/provider metadata; it never returns API keys, base URLs, or local config paths, and readiness does not claim network connectivity before a run. `.env` is excluded from Git and the Docker build context. The stream is intentionally in-process: it is not a durable queue or distributed worker system.
+The UI shows the selected project, its Watchlist, source-native change deltas, Agent stages, Python tool guard, schema/fallback/retry state, tool requests/execution/permission checks, final decisions, runtime health, the committed 40-case regression evidence, and the five read-only MCP tools. `signal-harness serve` automatically loads an optional project-root `.env` without overriding variables already exported by the caller. Real `agent` mode can select separately configured OpenAI, Qwen, Kimi, or DeepSeek OpenAI-compatible providers per run. Model profiles carry freshness metadata: known retired model aliases resolve to the current profile with a visible warning, while unknown overrides receive conservative capabilities instead of inheriting another model's JSON/context/pricing claims. `/demo/meta` exposes only non-secret project/provider metadata; it never returns API keys, base URLs, or local config paths, and readiness does not claim network connectivity before a run. `.env` is excluded from Git and the Docker build context. The execution metadata is locally recoverable, but the SSE replay buffer is intentionally in-process; SignalHarness does not claim a distributed durable queue or worker system.
 
 ## REST API + MCP HTTP
 
@@ -254,6 +254,8 @@ POST /runs
 GET  /runs/{run_id}
 GET  /runs/{run_id}/trace
 GET  /runs/{run_id}/assessments
+GET  /runs/{run_id}/changes
+GET  /runs/{run_id}/coverage
 GET  /signals?run_id=...
 POST /feedback
 POST /stream-runs
@@ -269,7 +271,7 @@ MCP Streamable HTTP is mounted at:
 /mcp
 ```
 
-Each API run gets isolated output/trace directories under `service-runs/<run_id>`, while persistent memory is project-scoped under `.signal-harness/projects/<project_id>/`. The original `POST /runs` remains synchronous. Streaming demo runs are in-process asyncio tasks started by the first SSE subscriber; they continue if the browser disconnects, but live subscription history is not durable across a service restart. No Redis/Celery/worker tier is claimed.
+Each API run gets isolated output/trace directories under `service-runs/<run_id>`, while persistent memory is project-scoped under `.signal-harness/projects/<project_id>/`. The original `POST /runs` remains synchronous. Streaming demo runs start when `POST /stream-runs` creates them. Their queued/running request state is persisted and unfinished runs are boundedly recovered after service restart; browser disconnects do not cancel execution. SSE event replay history is still in-process and is not restored after restart. No Redis/Celery/worker tier is claimed.
 
 ## Wheel / running outside the repository
 

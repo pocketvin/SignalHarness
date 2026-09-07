@@ -161,7 +161,7 @@ SignalHarness deliberately keeps two eval layers. `regression-eval` is a labelle
 
 ## MCP and service boundary
 
-MCP is currently a narrow read-only projection over SignalHarness domain artifacts. It cannot write policy/watchlist/project files or bypass the existing permission plane. FastAPI is a thin orchestration surface that calls the same `SignalHarnessWorkflow`; service runs isolate output/state by run ID while P1 persists new domain records in project-scoped SQLite. No durable queue, multi-tenant control plane, or background worker is claimed yet.
+MCP is currently a narrow read-only projection over SignalHarness domain artifacts. It cannot write policy/watchlist/project files or bypass the existing permission plane. FastAPI is a thin orchestration surface that calls the same `SignalHarnessWorkflow`; P1/P2 persist domain records, frozen windows, interactive checkpoints, source coverage, and recoverable local stream-run metadata in project-scoped/local state. Stream runs start on POST and unfinished queued/running jobs can be boundedly recovered after service restart, while SSE event history remains in-process. No distributed durable queue, multi-tenant control plane, or external worker tier is claimed.
 
 ## Usage observability boundary
 

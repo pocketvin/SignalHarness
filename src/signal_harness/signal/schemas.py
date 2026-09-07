@@ -170,6 +170,10 @@ class SourceTask(BaseModel):
     error: str | None = None
     output_count: int = Field(default=0, ge=0)
     cache_hit: bool = False
+    coverage_status: Literal["unknown", "complete", "partial"] = "unknown"
+    pages_fetched: int = Field(default=0, ge=0)
+    history_limited: bool = False
+    diagnostics: list[str] = Field(default_factory=list)
 
 
 class SignalAssessment(BaseModel):

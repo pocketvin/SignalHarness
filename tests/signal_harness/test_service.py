@@ -55,6 +55,13 @@ def test_service_runs_mock_agent_and_exposes_trace_feedback(
         assert next_changes.json()["returned"] == 2
         assert next_changes.json()["has_more"] is False
 
+        coverage = client.get(f"/runs/{run_id}/coverage")
+        assert coverage.status_code == 200
+        coverage_payload = coverage.json()
+        assert coverage_payload["scan_id"] == run_id
+        assert coverage_payload["coverage_status"] == "complete"
+        assert coverage_payload["sources"][0]["coverage_status"] == "complete"
+
         trace = client.get(f"/runs/{run_id}/trace")
         assert trace.status_code == 200
         assert trace.json()["count"] > 0

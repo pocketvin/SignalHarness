@@ -169,3 +169,99 @@ def test_web_change_module_imports_without_runtime_package_cycle() -> None:
     assert module.WebChangeTool.name == "web_change"
     assert runtime.SignalToolExecutor is not None
     assert "web_change" in runtime.SIGNAL_TOOL_ALLOWLIST
+
+
+@pytest.mark.asyncio
+async def test_github_pagination_fetches_following_pages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from signal_harness.tools import github_signal
+
+    class FakeResponse:
+        def __init__(self, payload: list[dict[str, object]], next_url: str | None) -> None:
+            self._payload = payload
+            self.links = {"next": {"url": next_url}} if next_url else {}
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> list[dict[str, object]]:
+            return self._payload
+
+    class FakeClient:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            del args, kwargs
+            self.calls = 0
+
+        async def __aenter__(self) -> "FakeClient":
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            del args
+
+        async def get(self, url: str, **kwargs: object) -> FakeResponse:
+            del kwargs
+            self.calls += 1
+            if self.calls == 1:
+                return FakeResponse([{"id": index} for index in range(100)], "https://next")
+            return FakeResponse([{"id": 100}], None)
+
+    monkeypatch.setattr(github_signal.httpx, "AsyncClient", FakeClient)
+    payload, metadata = await github_signal._fetch_paginated(
+        endpoint="https://api.github.com/repos/example/repo/issues",
+        params={"per_page": 100},
+        headers={},
+        since=None,
+        releases=False,
+    )
+
+    assert len(payload) == 101
+    assert metadata["pages_fetched"] == 2
+    assert metadata["coverage_status"] == "complete"
+    assert metadata["history_limited"] is False
+
+
+@pytest.mark.asyncio
+async def test_github_pagination_cap_reports_partial(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from signal_harness.tools import github_signal
+
+    class FakeResponse:
+        links = {"next": {"url": "https://next"}}
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> list[dict[str, object]]:
+            return [{"id": 1}]
+
+    class FakeClient:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            del args, kwargs
+
+        async def __aenter__(self) -> "FakeClient":
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            del args
+
+        async def get(self, url: str, **kwargs: object) -> FakeResponse:
+            del url, kwargs
+            return FakeResponse()
+
+    monkeypatch.setattr(github_signal.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(github_signal, "MAX_GITHUB_PAGES", 2)
+    payload, metadata = await github_signal._fetch_paginated(
+        endpoint="https://api.github.com/repos/example/repo/issues",
+        params={"per_page": 100},
+        headers={},
+        since=None,
+        releases=False,
+    )
+
+    assert len(payload) == 2
+    assert metadata["pages_fetched"] == 2
+    assert metadata["coverage_status"] == "partial"
+    assert metadata["history_limited"] is True
+    assert metadata["diagnostics"]

@@ -12,12 +12,12 @@ Current repository baseline at planning time:
 
 - branch: `main`
 - planning baseline commit: `7e30625` — `Document SignalHarness target state and phased plan`.
-- P1 implementation is complete; milestone Git/GitHub status is tracked by repository history and CI rather than transient text in this plan.
+- P1 and P2 implementations are complete locally; milestone Git/GitHub status is tracked by repository history and CI rather than transient text in this plan.
 - existing product has project-scoped profile/watchlist state, GitHub release/issues, RSS, Web Snapshot/Diff, candidate funnel, deterministic scoring/guards, five-Agent runner, trace/evals, CLI/REST/SSE, Golden Demo, and five read-only MCP tools.
-- current persistence is primarily YAML/JSON/file artifacts rather than a durable relational Change ledger.
-- current workflow replaces normalized events with the candidate-funnel Top-K before assessment/output persistence.
-- current GitHub signal collector is single-page `per_page=100` for releases/issues.
-- current stream runs are in-process and start when the first SSE subscriber arrives.
+- project-scoped SQLite now persists EventRevision/Change/ProjectImpact/Scan/ScanChange plus window/checkpoint/source-coverage state; legacy YAML/JSON outputs remain compatibility projections.
+- normalized/deduplicated candidates persist before Top-K; All Changes remain queryable independently of deep-analysis budget.
+- GitHub release/issue collection now follows pagination with a bounded cap and explicit `partial/history_limited` coverage when the cap is reached.
+- stream runs start on POST, persist queued/running input/status for bounded restart recovery, and use SSE only as an in-process observation/replay surface.
 - current onboarding is review-required draft + explicit apply rather than auto-active profile.
 - current real-agent scan already defers LearningPolicyAgent reflection from the critical path.
 
@@ -106,6 +106,8 @@ Persist observed/relevant data before deep-analysis Top-K selection. Existing fi
 Do not redesign all Agents, add many new sources, or rebuild the frontend in P1.
 ## P2 — Scan Window & Durable Execution
 
+**Status: IMPLEMENTED / AGENT ACCEPTANCE PASS**
+
 ### Target
 
 Make `since_last`, 24h, 7d, 30d, custom windows, retries, and scheduled scans reliable and explainable.
@@ -127,6 +129,19 @@ Fix existing source completeness gaps while doing this vertical slice, especiall
 - process restart recovers or safely retries the Scan;
 - creating a Scan without opening SSE still runs it;
 - source coverage and history limits are visible rather than inferred from HTTP success.
+
+### P2 implementation evidence
+
+- Added one frozen `ResolvedScanWindow` contract for `since_last`, 24h, 7d, 30d, custom, and legacy compatibility; source-timestamped facts use `[L,U)`.
+- First-use `since_last` explicitly falls back to 7 days; later runs use a project/consumer interactive checkpoint stored separately from source/schedule/notification state.
+- Only successful, checkpoint-eligible, interactive live scans advance the interactive checkpoint; fixture, historical custom, scheduled/non-interactive, and explicit partial/history-limited runs do not.
+- Late-discovered and revised old facts can enter a later `since_last` once with explicit `late_discovery` / `late_revision` semantics; scan-local metadata does not create fake EventRevisions.
+- Web Snapshot observations created during collection are explicitly tagged `observed_during_scan` rather than pretending to have a precise pre-U source timestamp.
+- GitHub releases/issues follow pagination with a bounded page cap; reaching the cap produces visible `partial/history_limited` coverage instead of a false complete result.
+- `scan_sources` persists per-source coverage, pages, history limits, and diagnostics; REST exposes `GET /runs/{run_id}/coverage`.
+- `POST /stream-runs` now starts work immediately. Queued/running input and status are persisted and unfinished runs are boundedly recovered on service startup; SSE remains an in-process live/replay view, not a distributed durable queue.
+- Fresh local verification: 242 tests PASS; Ruff PASS; strict mypy PASS (96 source files); regression-eval PASS; project-eval 3/3 PASS; `uv build` PASS; CLI window options smoke PASS.
+
 ## P3 — Project Profile + Preference Engine
 
 ### Target
@@ -340,9 +355,9 @@ These are intentionally deferred until the relevant phase because they do not bl
 
 ## NEXT ACTION
 
-**Next construction phase: P2 — Scan Window & Durable Execution.**
+**Next construction phase: P3 — Project Profile + Preference Engine.**
 
-Before P2 implementation, refresh Git/HEAD/status and use the new Ledger/Scan records as the persistence base. Prioritize frozen `[L,U)` windows, explicit coverage, separate interactive/source/schedule checkpoints, GitHub pagination, and moving stream execution away from “first SSE subscriber starts work”.
+Use the P1/P2 Ledger and Scan contracts as the stable persistence base. Prioritize auto-active versioned Project Profiles, explicit high-authority user Preferences/Overrides, lockfile/version evidence, and a fast Critical / Important / Normal / Low / Ignore control path before natural-language preference editing.
 
 ## RETROSPECTIVE TEMPLATE
 

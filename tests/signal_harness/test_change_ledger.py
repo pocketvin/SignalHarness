@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -8,13 +9,14 @@ import pytest
 
 from signal_harness.agent_integration.mode import RunMode
 from signal_harness.persistence import ChangeLedger
+from signal_harness.persistence.ledger import SCHEMA_VERSION
 from signal_harness.runtime.workflow import SignalHarnessWorkflow
 from signal_harness.signal.normalizer import normalize_event
 from signal_harness.signal.policy import load_signal_policy, load_yaml_mapping
 
 
 def _raw_event(index: int, *, content: str | None = None) -> dict[str, object]:
-    now = datetime(2026, 9, 8, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 7, 0, 0, tzinfo=timezone.utc)
     return {
         "event_id": f"event-{index:03d}",
         "source_type": "github_issue",
@@ -144,3 +146,56 @@ def test_report_failure_preserves_ledger_and_does_not_consume_seen_memory(
     page = workflow.ledger.list_scan_changes("failed-scan", limit=100)
     assert page.count == 4
     assert not (state_dir / "signal_memory.json").exists()
+
+
+def test_p1_database_migrates_to_p2_window_and_coverage_schema(tmp_path: Path) -> None:
+    database = tmp_path / "ledger.sqlite3"
+    with sqlite3.connect(database) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE schema_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            INSERT INTO schema_meta(key, value) VALUES('schema_version', '1');
+            CREATE TABLE scans(
+                scan_id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                completed_at TEXT,
+                status TEXT NOT NULL,
+                collected_count INTEGER NOT NULL DEFAULT 0,
+                deduped_count INTEGER NOT NULL DEFAULT 0,
+                analyzed_count INTEGER NOT NULL DEFAULT 0,
+                relevant_count INTEGER NOT NULL DEFAULT 0,
+                error TEXT
+            );
+            """
+        )
+
+    ledger = ChangeLedger(database)
+    ledger.begin_scan(
+        scan_id="migrated-scan",
+        project_id="signalharness",
+        collected_count=0,
+        deduped_count=0,
+        window_mode="since_last",
+        window_start=datetime(2026, 9, 7, tzinfo=timezone.utc),
+        window_end=datetime(2026, 9, 8, tzinfo=timezone.utc),
+        checkpoint_eligible=True,
+    )
+
+    with sqlite3.connect(database) as connection:
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(scans)")}
+        version = connection.execute(
+            "SELECT value FROM schema_meta WHERE key='schema_version'"
+        ).fetchone()
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+    assert {
+        "window_mode", "window_start", "window_end", "first_use",
+        "checkpoint_eligible", "coverage_status",
+    }.issubset(columns)
+    assert version == (str(SCHEMA_VERSION),)
+    assert {"scan_sources", "query_checkpoints"}.issubset(tables)

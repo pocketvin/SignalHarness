@@ -32,6 +32,7 @@ class SourceFetchCacheEntry:
     ttl_seconds: int
     payload_hash: str
     payload: Any
+    metadata: dict[str, Any]
 
 
 class SourceFetchCache:
@@ -59,6 +60,7 @@ class SourceFetchCache:
                 ttl_seconds=int(payload["ttl_seconds"]),
                 payload_hash=str(payload["payload_hash"]),
                 payload=payload["payload"],
+                metadata=(dict(payload.get("metadata", {})) if isinstance(payload.get("metadata", {}), dict) else {}),
             )
         except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
             return None
@@ -78,6 +80,7 @@ class SourceFetchCache:
         source_name: str,
         ttl_seconds: int,
         payload: Any,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         try:
             self.root.mkdir(parents=True, exist_ok=True)
@@ -89,6 +92,7 @@ class SourceFetchCache:
                 "ttl_seconds": ttl_seconds,
                 "payload_hash": stable_hash(payload),
                 "payload": payload,
+                "metadata": dict(metadata or {}),
             }
             atomic_write_text(
                 self.root / f"{key}.json",

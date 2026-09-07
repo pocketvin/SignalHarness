@@ -11,9 +11,9 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from signal_harness.signal.candidates import candidate_score
-from signal_harness.signal.schemas import SignalAssessment, SignalEvent
+from signal_harness.signal.schemas import SignalAssessment, SignalEvent, SourceTask
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -56,6 +56,12 @@ def _event_key(event: SignalEvent) -> str:
 
 def _revision_key(event: SignalEvent) -> str:
     payload = event.model_dump(mode="json", exclude={"collected_at"})
+    raw_payload = payload.get("raw_payload")
+    if isinstance(raw_payload, dict):
+        raw_payload = dict(raw_payload)
+        # Scan-local projection metadata must not create a new source EventRevision.
+        raw_payload.pop("window_exception", None)
+        payload["raw_payload"] = raw_payload
     return _hash_text(json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False))
 
 
@@ -81,10 +87,27 @@ class ChangeLedger:
     def _initialize(self) -> None:
         with self._connect() as connection:
             connection.executescript(_SCHEMA)
+            self._ensure_scan_columns(connection)
             connection.execute(
-                "INSERT OR IGNORE INTO schema_meta(key, value) VALUES('schema_version', ?)",
+                "INSERT INTO schema_meta(key, value) VALUES('schema_version', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (str(SCHEMA_VERSION),),
             )
+
+    @staticmethod
+    def _ensure_scan_columns(connection: sqlite3.Connection) -> None:
+        columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(scans)")}
+        additions = {
+            "window_mode": "TEXT NOT NULL DEFAULT 'unbounded'",
+            "window_start": "TEXT",
+            "window_end": "TEXT",
+            "first_use": "INTEGER NOT NULL DEFAULT 0",
+            "checkpoint_eligible": "INTEGER NOT NULL DEFAULT 0",
+            "coverage_status": "TEXT NOT NULL DEFAULT 'unknown'",
+        }
+        for name, definition in additions.items():
+            if name not in columns:
+                connection.execute(f"ALTER TABLE scans ADD COLUMN {name} {definition}")
 
     def begin_scan(
         self,
@@ -93,22 +116,125 @@ class ChangeLedger:
         project_id: str,
         collected_count: int,
         deduped_count: int,
+        window_mode: str = "unbounded",
+        window_start: datetime | None = None,
+        window_end: datetime | None = None,
+        first_use: bool = False,
+        checkpoint_eligible: bool = False,
     ) -> None:
         with self._connect() as connection:
             connection.execute(
                 """
                 INSERT INTO scans(
-                    scan_id, project_id, created_at, status, collected_count, deduped_count
-                ) VALUES(?, ?, ?, 'running', ?, ?)
+                    scan_id, project_id, created_at, status, collected_count, deduped_count,
+                    window_mode, window_start, window_end, first_use, checkpoint_eligible
+                ) VALUES(?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(scan_id) DO UPDATE SET
                     project_id=excluded.project_id,
                     status='running',
                     collected_count=excluded.collected_count,
                     deduped_count=excluded.deduped_count,
+                    window_mode=excluded.window_mode,
+                    window_start=excluded.window_start,
+                    window_end=excluded.window_end,
+                    first_use=excluded.first_use,
+                    checkpoint_eligible=excluded.checkpoint_eligible,
                     error=NULL
                 """,
-                (scan_id, project_id, _utc_now(), collected_count, deduped_count),
+                (
+                    scan_id, project_id, _utc_now(), collected_count, deduped_count, window_mode,
+                    window_start.isoformat() if window_start else None,
+                    window_end.isoformat() if window_end else None,
+                    int(first_use), int(checkpoint_eligible),
+                ),
             )
+
+    def get_interactive_checkpoint(
+        self, *, project_id: str, consumer_id: str = "local-owner"
+    ) -> datetime | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT checkpoint_at FROM query_checkpoints "
+                "WHERE project_id=? AND consumer_id=?",
+                (project_id, consumer_id),
+            ).fetchone()
+        if row is None or row["checkpoint_at"] is None:
+            return None
+        return datetime.fromisoformat(str(row["checkpoint_at"]))
+
+    def advance_interactive_checkpoint(
+        self, *, project_id: str, checkpoint_at: datetime, scan_id: str,
+        consumer_id: str = "local-owner"
+    ) -> None:
+        value = checkpoint_at.astimezone(timezone.utc).isoformat()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO query_checkpoints(
+                    project_id, consumer_id, checkpoint_at, scan_id, updated_at
+                ) VALUES(?, ?, ?, ?, ?)
+                ON CONFLICT(project_id, consumer_id) DO UPDATE SET
+                    checkpoint_at=CASE
+                        WHEN excluded.checkpoint_at > query_checkpoints.checkpoint_at
+                        THEN excluded.checkpoint_at ELSE query_checkpoints.checkpoint_at END,
+                    scan_id=CASE
+                        WHEN excluded.checkpoint_at >= query_checkpoints.checkpoint_at
+                        THEN excluded.scan_id ELSE query_checkpoints.scan_id END,
+                    updated_at=excluded.updated_at
+                """,
+                (project_id, consumer_id, value, scan_id, _utc_now()),
+            )
+
+    def record_source_tasks(self, *, scan_id: str, source_tasks: Iterable[SourceTask]) -> None:
+        with self._connect() as connection:
+            for task in source_tasks:
+                connection.execute(
+                    """
+                    INSERT INTO scan_sources(
+                        scan_id, source_type, source_name, status, coverage_status,
+                        pages_fetched, history_limited, output_count, error, diagnostics_json
+                    ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(scan_id, source_type, source_name) DO UPDATE SET
+                        status=excluded.status,
+                        coverage_status=excluded.coverage_status,
+                        pages_fetched=excluded.pages_fetched,
+                        history_limited=excluded.history_limited,
+                        output_count=excluded.output_count,
+                        error=excluded.error,
+                        diagnostics_json=excluded.diagnostics_json
+                    """,
+                    (
+                        scan_id, task.source_type, task.source_name, task.status,
+                        task.coverage_status, task.pages_fetched, int(task.history_limited),
+                        task.output_count, task.error, json.dumps(task.diagnostics, ensure_ascii=False),
+                    ),
+                )
+
+    def source_coverage(self, scan_id: str) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT source_type, source_name, status, coverage_status, pages_fetched,
+                       history_limited, output_count, error, diagnostics_json
+                FROM scan_sources WHERE scan_id=?
+                ORDER BY source_type, source_name
+                """,
+                (scan_id,),
+            ).fetchall()
+        return [
+            {
+                "source_type": str(row["source_type"]),
+                "source_name": str(row["source_name"]),
+                "status": str(row["status"]),
+                "coverage_status": str(row["coverage_status"]),
+                "pages_fetched": int(row["pages_fetched"]),
+                "history_limited": bool(row["history_limited"]),
+                "output_count": int(row["output_count"]),
+                "error": row["error"],
+                "diagnostics": json.loads(str(row["diagnostics_json"])),
+            }
+            for row in rows
+        ]
 
     def persist_observations(
         self,
@@ -257,15 +383,16 @@ class ChangeLedger:
         scan_id: str,
         analyzed_count: int,
         relevant_count: int,
+        coverage_status: str = "complete",
     ) -> None:
         with self._connect() as connection:
             connection.execute(
                 """
                 UPDATE scans
-                SET status='success', completed_at=?, analyzed_count=?, relevant_count=?, error=NULL
+                SET status='success', completed_at=?, analyzed_count=?, relevant_count=?, coverage_status=?, error=NULL
                 WHERE scan_id=?
                 """,
-                (_utc_now(), analyzed_count, relevant_count, scan_id),
+                (_utc_now(), analyzed_count, relevant_count, coverage_status, scan_id),
             )
 
     def fail_scan(self, *, scan_id: str, error: str) -> None:
@@ -338,6 +465,24 @@ class ChangeLedger:
                 )
         return LedgerChangePage(items=items, count=total, offset=offset, limit=limit)
 
+    def observation_state(self, event: SignalEvent) -> str:
+        """Return new, revision, or seen for one normalized source observation."""
+
+        event_key = _event_key(event)
+        revision_key = _revision_key(event)
+        with self._connect() as connection:
+            exact = connection.execute(
+                "SELECT 1 FROM event_revisions WHERE event_key=? AND revision_key=? LIMIT 1",
+                (event_key, revision_key),
+            ).fetchone()
+            if exact is not None:
+                return "seen"
+            prior = connection.execute(
+                "SELECT 1 FROM event_revisions WHERE event_key=? LIMIT 1",
+                (event_key,),
+            ).fetchone()
+        return "revision" if prior is not None else "new"
+
     def revision_count(self, *, event_id: str) -> int:
         with self._connect() as connection:
             row = connection.execute(
@@ -399,6 +544,29 @@ CREATE TABLE IF NOT EXISTS scans(
     analyzed_count INTEGER NOT NULL DEFAULT 0,
     relevant_count INTEGER NOT NULL DEFAULT 0,
     error TEXT
+);
+
+CREATE TABLE IF NOT EXISTS scan_sources(
+    scan_id TEXT NOT NULL REFERENCES scans(scan_id) ON DELETE CASCADE,
+    source_type TEXT NOT NULL,
+    source_name TEXT NOT NULL,
+    status TEXT NOT NULL,
+    coverage_status TEXT NOT NULL DEFAULT 'unknown',
+    pages_fetched INTEGER NOT NULL DEFAULT 0,
+    history_limited INTEGER NOT NULL DEFAULT 0,
+    output_count INTEGER NOT NULL DEFAULT 0,
+    error TEXT,
+    diagnostics_json TEXT NOT NULL DEFAULT '[]',
+    PRIMARY KEY(scan_id, source_type, source_name)
+);
+
+CREATE TABLE IF NOT EXISTS query_checkpoints(
+    project_id TEXT NOT NULL,
+    consumer_id TEXT NOT NULL,
+    checkpoint_at TEXT NOT NULL,
+    scan_id TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(project_id, consumer_id)
 );
 
 CREATE TABLE IF NOT EXISTS scan_changes(

@@ -123,7 +123,7 @@ sequenceDiagram
   FastAPI REST + SSE + MCP Streamable HTTP 服务层；每次 run 隔离 output/trace，同时按 `project_id` 连接共享的持久 Project State，并携带 source mode 与 provider selection。
 
 - `src/signal_harness/service_streaming.py`
-  in-process stream-run manager：首个 SSE subscriber 启动 queued workflow，保留 event-id 历史用于重连回放；断开浏览器不取消 run。
+  local stream-run manager：POST 创建后立即启动 workflow；queued/running 输入与状态会持久化并在服务启动时做有界恢复。SSE event-id 历史仍仅在进程内用于重连回放，断开浏览器不取消 run。
 
 - `src/signal_harness/resources.py`
   Distribution resource resolver：workspace 本地默认资源优先；缺失时回退到 wheel 内的只读 configs/examples。显式自定义路径不被重定向。
@@ -149,6 +149,17 @@ sequenceDiagram
 - **Compatibility**：`signals.json` / `impact_scores.json` 等旧产物仍表示本次深度分析 shortlist，不伪装成 All Changes；REST `GET /runs/{run_id}/changes` 是 P1 的分页 All-Changes 投影。
 - **Failure boundary**：legacy seen-memory 只在报告成功后更新；Web Snapshot 使用 per-scan pending state，报告成功后才 promote，失败则 discard，所以失败重试不会吞掉尚未提交的网页变化。
 
+
+## P2 window / coverage / recoverable-run boundary
+
+- **Frozen window**：每个 Scan 在创建时冻结 U；有可靠来源时间的事实使用 `[L,U)`。`since_last` 首次显式回溯 7 天，之后读取 project + consumer 的 interactive checkpoint。
+- **Checkpoint separation**：interactive checkpoint 不等于 source cursor、schedule checkpoint、notification dedup 或 Inbox read state。只有成功、面向现在、interactive live 且没有明确 coverage 缺口的 Scan 才推进。
+- **Late facts**：原发布时间早于 L、但本轮首次观察或出现新 revision 的事实可用 `late_discovery` / `late_revision` 进入一次；`window_exception` 是 Scan 元数据，不参与 EventRevision identity。
+- **Observation-only sources**：Web Snapshot diff 是本 Scan 才生成的 observation，若没有可靠 source occurrence time，则标记 `observed_during_scan`，不伪装成精确发生在 U 前。
+- **Source coverage**：`scan_sources` 持久化 `complete/partial/unknown`、分页数、history limit 和 diagnostics；REST `/runs/{run_id}/coverage` 公开同一数据。
+- **GitHub pagination**：release/issues collector 跟随分页；达到 bounded page cap 时标记 `partial/history_limited`，不会因 HTTP 200 错误推进 `since_last`。
+- **Recoverable local runs**：stream run 在 POST 后立即执行，输入/queued/running 状态先落盘；服务启动会对未完成任务做有界恢复。SSE replay history 仍是内存态，因此这不是 Redis/Celery/Temporal 一类分布式 durable queue。
+
 ## Project state / candidate / provenance boundaries
 
 - **Run state**：trace、run metadata 与本次输出按 run 隔离。
@@ -164,7 +175,7 @@ sequenceDiagram
 
 ## 面试展示重点
 
-SignalHarness 的价值不是“又做了一个 dashboard”，而是展示 Agent Harness 的工程边界：LLM 做推理，Python 做约束；模型输出可审计，工具使用可追踪，fallback 不隐藏，learning 不自动改配置。
+SignalHarness 的产品价值是持续回答“项目周围发生了什么、哪些值得知道、会影响什么、该做什么”；当前五 Agent / Tool Guard / Trace 是现阶段实现与工程证据，不是产品必须永远维持的固定形态。
 
 ## Evaluation and observability
 
@@ -178,6 +189,6 @@ Source checkout、wheel install 与 Docker 共享同一 runtime contract。`uv b
 
 ## Service and deployment boundary
 
-`signal-harness serve` 会先读取项目根目录可选的 `.env`（不覆盖显式进程环境变量），再启动 FastAPI，提供 health、同步 run、trace、assessment、signals、feedback，以及 `/demo` Golden Demo；Golden Demo 默认中文并支持 EN 切换，`/demo/meta` 暴露非敏感 Project Catalog 与 Provider readiness。每个 stream-run 先选择 `project_id`，再按该项目的 profile/watchlist 构造 Workflow 上下文；`/stream-runs/{id}/events` 使用 SSE 推送同一 `TraceRecorder` 的真实 append/update。原 `POST /runs` 仍同步；stream-run 是进程内 asyncio task，不是持久化队列。首个 SSE subscriber 才启动 queued run，断线后任务继续，`Last-Event-ID` 可补发内存事件历史。服务重启后 live subscription history 不恢复。Docker 镜像运行相同入口并包含 `/health` healthcheck。
+`signal-harness serve` 会先读取项目根目录可选的 `.env`（不覆盖显式进程环境变量），再启动 FastAPI，提供 health、同步 run、trace、assessment、signals、feedback，以及 `/demo` Golden Demo；Golden Demo 默认中文并支持 EN 切换，`/demo/meta` 暴露非敏感 Project Catalog 与 Provider readiness。每个 stream-run 先选择 `project_id`，再按该项目的 profile/watchlist 构造 Workflow 上下文；`/stream-runs/{id}/events` 使用 SSE 推送同一 `TraceRecorder` 的真实 append/update。原 `POST /runs` 仍同步；`POST /stream-runs` 创建后立即启动后台任务，queued/running 输入与状态落盘并支持服务启动时的有界恢复。断线后任务继续，`Last-Event-ID` 可补发当前进程内的事件历史；服务重启后 SSE event replay history 不恢复，因此这里不声称拥有分布式 durable queue。Docker 镜像运行相同入口并包含 `/health` healthcheck。
 
 MCP 是只读第二入口，不是新的副作用平面。所有可写行为仍由原有 Workflow、permission guard 和 learning gate 控制。

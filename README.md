@@ -131,11 +131,11 @@ Golden Demo 的实时链路是：
 ```text
 POST /stream-runs
         ↓
-queued
+持久化 queued/running 输入与状态
         ↓
-浏览器建立 EventSource
+立即启动 SignalHarnessWorkflow
         ↓
-启动 SignalHarnessWorkflow
+浏览器可随时建立 EventSource
         ↓
 TraceRecorder append / update
         ↓
@@ -144,9 +144,9 @@ SSE
 浏览器实时更新
 ```
 
-首个 SSE subscriber 建立后才真正启动 queued run；浏览器断开不会取消任务；重连可通过 `Last-Event-ID` 补发内存中的历史事件。
+`POST /stream-runs` 创建后就开始执行，不再依赖首个 SSE subscriber。queued/running 输入与状态会持久化，服务重启时可做有界恢复；浏览器断开不会取消任务，重连仍可通过 `Last-Event-ID` 补发当前进程内的历史事件。
 
-这里明确是 **in-process streaming**，不是 Redis/Celery/Kafka，也不声称拥有持久化分布式任务系统。
+这里仍明确不是 Redis/Celery/Kafka 一类分布式 durable queue：**任务输入/状态可恢复，SSE replay history 仍是 in-process。**
 
 ### Project Memory V2：Run 状态与项目长期状态分离
 
@@ -415,6 +415,8 @@ POST /runs
 GET  /runs/{run_id}
 GET  /runs/{run_id}/trace
 GET  /runs/{run_id}/assessments
+GET  /runs/{run_id}/changes
+GET  /runs/{run_id}/coverage
 GET  /signals?run_id=...
 POST /feedback
 POST /stream-runs
@@ -428,7 +430,7 @@ MCP Streamable HTTP：
 /mcp
 ```
 
-原 `POST /runs` 仍是同步 Run；Golden Demo 使用新增的 in-process stream-run，两者复用同一个 `SignalHarnessWorkflow`。
+原 `POST /runs` 仍是同步 Run；stream-run 在 POST 后立即后台执行并具备本地有界重启恢复，SSE 只负责实时观察。两者复用同一个 `SignalHarnessWorkflow`。
 
 ## Observability
 

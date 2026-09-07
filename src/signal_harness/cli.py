@@ -48,6 +48,7 @@ from signal_harness.resources import resolve_config_dir, resolve_example_path
 from signal_harness.runtime.permissions import SignalPermissionGuard
 from signal_harness.runtime.tracing import TraceRecorder
 from signal_harness.runtime.workflow import SignalHarnessWorkflow
+from signal_harness.runtime.windows import WindowMode
 from signal_harness.signal.feedback import (
     create_feedback_record,
     generate_policy_proposal,
@@ -274,6 +275,20 @@ def parse_since(value: str | None) -> datetime | None:
         ) from exc
 
 
+def parse_window_mode(value: str | None) -> WindowMode:
+    if value is None:
+        return "legacy"
+    normalized = value.strip().lower().replace("-", "_")
+    aliases = {"1d": "24h", "since": "since_last"}
+    normalized = aliases.get(normalized, normalized)
+    allowed = {"since_last", "24h", "7d", "30d", "custom"}
+    if normalized not in allowed:
+        raise typer.BadParameter(
+            "Invalid --window. Use since-last, 24h, 7d, 30d, or custom."
+        )
+    return cast(WindowMode, normalized)
+
+
 @app.command("project-draft")
 def project_draft(
     project_path: Path = typer.Argument(..., help="Local project directory to inspect"),
@@ -328,7 +343,11 @@ def project_draft(
 @app.command()
 def scan(
     fixture: Path | None = typer.Option(None, "--fixture", help="Local JSON event fixture"),
-    since: str | None = typer.Option(None, "--since", help="Collect events after ISO time"),
+    since: str | None = typer.Option(None, "--since", help="Custom/legacy lower ISO time"),
+    until: str | None = typer.Option(None, "--until", help="Custom upper ISO time"),
+    window: str | None = typer.Option(
+        None, "--window", help="since-last, 24h, 7d, 30d, or custom"
+    ),
     max_events: int | None = typer.Option(
         None,
         "--max-events",
@@ -382,6 +401,14 @@ def scan(
             raise RuntimeError("agent provider resolution unexpectedly continued")
         provider = provider_from_selection(selected_provider, config_dir=config)
 
+    parsed_window = parse_window_mode(window)
+    parsed_since = parse_since(since)
+    parsed_until = parse_since(until)
+    if parsed_window == "custom" and parsed_since is None:
+        raise typer.BadParameter("--window custom requires --since")
+    if parsed_window != "custom" and parsed_until is not None:
+        raise typer.BadParameter("--until is only supported with --window custom")
+
     workflow = SignalHarnessWorkflow(
         cwd=root,
         config_dir=config,
@@ -398,7 +425,9 @@ def scan(
         try:
             return await workflow.scan(
                 fixture=resolve_example_path(root, fixture) if fixture is not None else None,
-                since=parse_since(since),
+                since=parsed_since,
+                until=parsed_until,
+                window_mode=parsed_window,
                 max_events=max_events,
                 max_events_per_source=max_events_per_source,
             )

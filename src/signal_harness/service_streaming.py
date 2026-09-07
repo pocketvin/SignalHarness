@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from uuid import uuid4
 
 from signal_harness.agent_integration.mode import RunMode
@@ -17,6 +17,7 @@ from signal_harness.projects.catalog import ProjectOption, default_project_id, p
 from signal_harness.projects.state import prepare_project_state
 from signal_harness.runtime.tracing import TraceChangeKind
 from signal_harness.runtime.workflow import SignalHarnessWorkflow
+from signal_harness.runtime.windows import WindowMode
 from signal_harness.signal.schemas import SourceTask, TraceStep
 from signal_harness.utils.fs import atomic_write_text
 
@@ -42,10 +43,13 @@ class StreamRunSession:
     created_at: str
     fixture: Path | None
     since: datetime | None
+    until: datetime | None
+    window_mode: WindowMode
     provider_id: str | None
     project: ProjectOption
     max_events: int | None
     max_events_per_source: int | None
+    attempt: int = 0
     status: StreamRunStatus = "queued"
     completed_at: str | None = None
     result: dict[str, Any] | None = None
@@ -117,8 +121,11 @@ class StreamRunSession:
             "project_id": self.project.id,
             "project_name": self.project.name,
             "since": self.since.isoformat() if self.since else None,
+            "until": self.until.isoformat() if self.until else None,
+            "window_mode": self.window_mode,
             "created_at": self.created_at,
             "completed_at": self.completed_at,
+            "attempt": self.attempt,
             "event_count": len(self.events),
             "events_url": f"/stream-runs/{self.run_id}/events",
             "result_url": f"/runs/{self.run_id}",
@@ -136,12 +143,14 @@ class StreamRunManager:
         output_dir: Path,
         state_dir: Path,
         max_sessions: int = 20,
+        max_attempts: int = 3,
     ) -> None:
         self.cwd = cwd
         self.config_dir = config_dir
         self.output_dir = output_dir
         self.state_dir = state_dir
         self.max_sessions = max_sessions
+        self.max_attempts = max_attempts
         self.sessions: dict[str, StreamRunSession] = {}
         self._project_locks: dict[str, asyncio.Lock] = {}
 
@@ -151,6 +160,8 @@ class StreamRunManager:
         source_mode: StreamSourceMode,
         fixture: Path | None,
         since: datetime | None,
+        until: datetime | None = None,
+        window_mode: WindowMode = "legacy",
         mode: RunMode,
         provider_id: str | None,
         project: ProjectOption | None = None,
@@ -176,6 +187,8 @@ class StreamRunManager:
             created_at=datetime.now(timezone.utc).isoformat(),
             fixture=fixture,
             since=since,
+            until=until,
+            window_mode=window_mode,
             provider_id=provider_id,
             project=selected_project,
             max_events=max_events,
@@ -183,7 +196,79 @@ class StreamRunManager:
         )
         self.sessions[run_id] = session
         session.publish("run.created", session.public_payload())
+        self._persist_session(session)
         return session
+
+    def _session_metadata(self, session: StreamRunSession) -> dict[str, Any]:
+        return {
+            "run_id": session.run_id,
+            "status": session.status,
+            "mode": session.mode.value,
+            "source_mode": session.source_mode,
+            "provider_id": session.provider_id,
+            "project_id": session.project.id,
+            "project_name": session.project.name,
+            "created_at": session.created_at,
+            "completed_at": session.completed_at,
+            "fixture": str(session.fixture) if session.fixture else None,
+            "since": session.since.isoformat() if session.since else None,
+            "until": session.until.isoformat() if session.until else None,
+            "window_mode": session.window_mode,
+            "max_events": session.max_events,
+            "max_events_per_source": session.max_events_per_source,
+            "attempt": session.attempt,
+            "streaming": True,
+            "events_url": f"/stream-runs/{session.run_id}/events",
+        }
+
+    def _persist_session(self, session: StreamRunSession) -> None:
+        _write_run_metadata(session.output_dir, self._session_metadata(session))
+
+    async def recover_pending(self) -> int:
+        recovered = 0
+        run_root = self.output_dir / "service-runs"
+        if not run_root.is_dir():
+            return 0
+        for metadata_path in sorted(run_root.glob("*/service_run.json")):
+            try:
+                payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+                if not isinstance(payload, dict) or payload.get("status") not in {"queued", "running"}:
+                    continue
+                run_id = str(payload["run_id"])
+                project = project_option(str(payload["project_id"]), self.config_dir)
+                mode = RunMode(str(payload["mode"]))
+                source_mode = cast(StreamSourceMode, str(payload["source_mode"]))
+                window_mode = cast(WindowMode, str(payload.get("window_mode") or "legacy"))
+                fixture_raw = payload.get("fixture")
+                fixture = Path(str(fixture_raw)).expanduser().resolve() if fixture_raw else None
+                since = _optional_datetime(payload.get("since"))
+                until = _optional_datetime(payload.get("until"))
+                session = StreamRunSession(
+                    run_id=run_id, mode=mode, source_mode=source_mode,
+                    output_dir=metadata_path.parent,
+                    state_dir=prepare_project_state(
+                        self.state_dir, project.id, migrate_legacy_default=True
+                    ),
+                    created_at=str(payload.get("created_at") or datetime.now(timezone.utc).isoformat()),
+                    fixture=fixture, since=since, until=until, window_mode=window_mode,
+                    provider_id=(str(payload["provider_id"]) if payload.get("provider_id") else None),
+                    project=project,
+                    max_events=(int(payload["max_events"]) if payload.get("max_events") is not None else None),
+                    max_events_per_source=(
+                        int(payload["max_events_per_source"])
+                        if payload.get("max_events_per_source") is not None else None
+                    ),
+                    attempt=int(payload.get("attempt") or 0),
+                    status="queued",
+                )
+            except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+                continue
+            self.sessions[run_id] = session
+            session.publish("run.recovered", session.public_payload())
+            self._persist_session(session)
+            self.ensure_started(session)
+            recovered += 1
+        return recovered
 
     def project_lock(self, project_id: str) -> asyncio.Lock:
         return self._project_locks.setdefault(project_id, asyncio.Lock())
@@ -193,6 +278,17 @@ class StreamRunManager:
 
     def ensure_started(self, session: StreamRunSession) -> None:
         if session.task is not None or session.status != "queued":
+            return
+        if session.attempt >= self.max_attempts:
+            session.status = "error"
+            session.completed_at = datetime.now(timezone.utc).isoformat()
+            session.result = {
+                **self._session_metadata(session),
+                "status": "error",
+                "error_class": "RecoveryAttemptsExhausted",
+            }
+            self._persist_session(session)
+            session.publish("run.failed", {"run": session.result})
             return
         session.task = asyncio.create_task(
             self._execute(session),
@@ -211,7 +307,9 @@ class StreamRunManager:
             await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _execute(self, session: StreamRunSession) -> None:
+        session.attempt += 1
         session.status = "running"
+        self._persist_session(session)
         session.publish("run.started", session.public_payload())
         provider = None
         try:
@@ -241,6 +339,8 @@ class StreamRunManager:
                     max_events=session.max_events,
                     max_events_per_source=session.max_events_per_source,
                     scan_id=session.run_id,
+                    window_mode=session.window_mode,
+                    until=session.until,
                 )
             session.status = "success"
             session.completed_at = datetime.now(timezone.utc).isoformat()
@@ -258,6 +358,8 @@ class StreamRunManager:
                 "completed_at": session.completed_at,
                 "signals": len(result.signals),
                 "all_changes": result.all_change_count,
+                "window": result.window.public_payload(),
+                "coverage_status": result.coverage_status,
                 "assessments": len(result.assessments),
                 "failed_sources": len(result.failed_sources),
                 "source_summary": source_summary,
@@ -265,6 +367,7 @@ class StreamRunManager:
                 "signals_url": f"/signals?run_id={session.run_id}",
                 "assessments_url": f"/runs/{session.run_id}/assessments",
                 "changes_url": f"/runs/{session.run_id}/changes",
+                "coverage_url": f"/runs/{session.run_id}/coverage",
                 "events_url": f"/stream-runs/{session.run_id}/events",
                 "streaming": True,
             }
@@ -312,6 +415,15 @@ class StreamRunManager:
         ]
         while len(self.sessions) >= self.max_sessions and removable:
             self.sessions.pop(removable.pop(0), None)
+
+
+def _optional_datetime(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def _source_summary(

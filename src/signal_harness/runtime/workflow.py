@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 from uuid import uuid4
 
 from signal_harness.utils.fs import atomic_write_text
@@ -27,6 +27,7 @@ from signal_harness.runtime.permissions import SignalPermissionGuard
 from signal_harness.runtime.tool_executor import SignalToolExecutor
 from signal_harness.runtime.tool_registry import create_signal_tool_registry
 from signal_harness.runtime.tracing import TraceListener, TraceRecorder
+from signal_harness.runtime.windows import ResolvedScanWindow, WindowMode, resolve_scan_window
 from signal_harness.resources import resolve_config_dir
 from signal_harness.signal.candidates import select_candidates
 from signal_harness.signal.deltas import annotate_release_lineage
@@ -59,6 +60,8 @@ from signal_harness.ui.dashboard import write_dashboard
 @dataclass(frozen=True)
 class ScanResult:
     scan_id: str
+    window: ResolvedScanWindow
+    coverage_status: str
     all_change_count: int
     signals: list[SignalEvent]
     assessments: list[SignalAssessment]
@@ -152,6 +155,10 @@ class SignalHarnessWorkflow:
         max_events: int | None = None,
         max_events_per_source: int | None = None,
         scan_id: str | None = None,
+        window_mode: WindowMode = "legacy",
+        until: datetime | None = None,
+        consumer_id: str = "local-owner",
+        interactive: bool = True,
     ) -> ScanResult:
         if max_events is not None and max_events < 1:
             raise ValueError("max_events must be a positive integer")
@@ -159,6 +166,15 @@ class SignalHarnessWorkflow:
             raise ValueError("max_events_per_source must be a positive integer")
         run_id = f"run-{uuid4().hex[:12]}"
         active_scan_id = scan_id or f"scan-{uuid4().hex[:12]}"
+        window = resolve_scan_window(
+            ledger=self.ledger,
+            project_id=self.project_id,
+            mode=window_mode,
+            custom_from=since if window_mode == "custom" else None,
+            custom_to=until,
+            legacy_since=since,
+            consumer_id=consumer_id,
+        )
         self.executor.context.metadata["scan_id"] = active_scan_id
         with self.trace.step("load_config", input_count=3) as state:
             profile, policy, watchlist = await self._load_config()
@@ -190,13 +206,15 @@ class SignalHarnessWorkflow:
                             ),
                             output_count=len(fixture_events),
                             cache_hit=False,
+                            coverage_status="complete",
+                            pages_fetched=1,
                         )
                     ],
                 )
             else:
                 collection = await self._collect_watchlist(
                     watchlist,
-                    since=since,
+                    since=window.lower,
                     guard=guard,
                 )
             raw_events = collection.events
@@ -216,17 +234,25 @@ class SignalHarnessWorkflow:
             events = [self._normalize_collected(item) for item in raw_events]
             state["output_count"] = len(events)
 
-        if since is not None:
-            with self.trace.step("time_window_filter", input_count=len(events)) as state:
-                before_window = len(events)
-                events = [event for event in events if self._is_within_window(event, since)]
-                state["output_count"] = len(events)
-                dropped_window = before_window - len(events)
-                if dropped_window:
-                    state["detail"] = (
-                        f"Removed {dropped_window} event(s) older than "
-                        f"{since.isoformat()} after normalization."
-                    )
+        with self.trace.step("time_window_filter", input_count=len(events)) as state:
+            before_window = len(events)
+            filtered_events: list[SignalEvent] = []
+            late_count = 0
+            for event in events:
+                selected = self._select_for_window(event, window)
+                if selected is not None:
+                    filtered_events.append(selected)
+                    if selected.raw_payload.get("window_exception"):
+                        late_count += 1
+            events = filtered_events
+            state["output_count"] = len(events)
+            state["metadata"] = {
+                "window": window.public_payload(),
+                "late_or_revised_count": late_count,
+            }
+            dropped_window = before_window - len(events)
+            if dropped_window:
+                state["detail"] = f"Removed {dropped_window} event(s) outside frozen [L,U)."
 
         with self.trace.step("deduplicate", input_count=len(events)) as state:
             events, duplicate_ids = deduplicate_events(events)
@@ -241,6 +267,14 @@ class SignalHarnessWorkflow:
             project_id=self.project_id,
             collected_count=len(raw_events),
             deduped_count=len(all_events),
+            window_mode=window.mode,
+            window_start=window.lower,
+            window_end=window.upper,
+            first_use=window.first_use,
+            checkpoint_eligible=window.checkpoint_eligible,
+        )
+        self.ledger.record_source_tasks(
+            scan_id=active_scan_id, source_tasks=collection.source_tasks
         )
         event_change_ids = self.ledger.persist_observations(all_events)
 
@@ -444,17 +478,38 @@ class SignalHarnessWorkflow:
             )
             commit_pending_web_snapshots(self.state_dir, active_scan_id)
             save_seen_signals(signal_memory_path, events, assessments)
+            coverage_status = self._coverage_status(
+                collection.source_tasks, collection.failed_sources
+            )
+            checkpoint_safe = self._checkpoint_safe(
+                collection.source_tasks, collection.failed_sources
+            )
             self.ledger.complete_scan(
                 scan_id=active_scan_id,
                 analyzed_count=len(events),
                 relevant_count=len(all_events),
+                coverage_status=coverage_status,
             )
+            if (
+                interactive
+                and fixture is None
+                and window.checkpoint_eligible
+                and checkpoint_safe
+            ):
+                self.ledger.advance_interactive_checkpoint(
+                    project_id=self.project_id,
+                    checkpoint_at=window.upper,
+                    scan_id=active_scan_id,
+                    consumer_id=consumer_id,
+                )
         except Exception as exc:
             discard_pending_web_snapshots(self.state_dir, active_scan_id)
             self.ledger.fail_scan(scan_id=active_scan_id, error=f"{exc.__class__.__name__}: {exc}")
             raise
         return ScanResult(
             active_scan_id,
+            window,
+            coverage_status,
             len(all_events),
             events,
             assessments,
@@ -852,6 +907,13 @@ class SignalHarnessWorkflow:
                 duration_ms=max(0, round((time.perf_counter() - started_clock) * 1000)),
                 output_count=len(cached.payload),
                 cache_hit=True,
+                coverage_status=cast(
+                    Literal["unknown", "complete", "partial"],
+                    str(cached.metadata.get("coverage_status") or "unknown"),
+                ),
+                pages_fetched=int(cached.metadata.get("pages_fetched") or 0),
+                history_limited=bool(cached.metadata.get("history_limited", False)),
+                diagnostics=[str(item) for item in cached.metadata.get("diagnostics", [])],
             )
             return cast(list[dict[str, Any]], cached.payload), task, job
         try:
@@ -871,6 +933,7 @@ class SignalHarnessWorkflow:
                     source_name=job.source_name,
                     ttl_seconds=job.ttl_seconds,
                     payload=payload,
+                    metadata=result.metadata,
                 )
             task = SourceTask(
                 task_id=task_id,
@@ -882,6 +945,13 @@ class SignalHarnessWorkflow:
                 duration_ms=max(0, round((time.perf_counter() - started_clock) * 1000)),
                 output_count=len(payload),
                 cache_hit=False,
+                coverage_status=cast(
+                    Literal["unknown", "complete", "partial"],
+                    str(result.metadata.get("coverage_status") or "unknown"),
+                ),
+                pages_fetched=int(result.metadata.get("pages_fetched") or 0),
+                history_limited=bool(result.metadata.get("history_limited", False)),
+                diagnostics=[str(item) for item in result.metadata.get("diagnostics", [])],
             )
             return cast(list[dict[str, Any]], payload), task, job
         except (TimeoutError, RuntimeError, json.JSONDecodeError) as exc:
@@ -896,20 +966,82 @@ class SignalHarnessWorkflow:
                 error=str(exc),
                 output_count=0,
                 cache_hit=False,
+                coverage_status="partial",
+                diagnostics=[str(exc)],
             )
             return [], task, job
 
+    def _select_for_window(
+        self, event: SignalEvent, window: ResolvedScanWindow
+    ) -> SignalEvent | None:
+        if self._is_within_window(event, window.lower, window.upper):
+            return event
+        # Snapshot diffs are observations created by this Scan, not source facts with a
+        # trustworthy occurrence timestamp. Attribute the observation to this Scan while
+        # keeping the frozen source-time upper bound strict for timestamped sources.
+        if event.source_type == "web_change" and event.raw_payload.get("current_hash"):
+            raw_payload = dict(event.raw_payload)
+            raw_payload["window_exception"] = "observed_during_scan"
+            return event.model_copy(update={"raw_payload": raw_payload})
+        if window.mode != "since_last" or window.first_use or window.lower is None:
+            return None
+        published = event.published_at
+        if published is None:
+            return None
+        if published.tzinfo is None:
+            published = published.replace(tzinfo=timezone.utc)
+        else:
+            published = published.astimezone(timezone.utc)
+        lower = window.lower.astimezone(timezone.utc)
+        upper = window.upper.astimezone(timezone.utc)
+        # Late discovery is only for facts older than L. A future-dated fact at/after U
+        # remains outside this frozen Scan even if it is first observed during collection.
+        if not (published < lower and published < upper):
+            return None
+        observation_state = self.ledger.observation_state(event)
+        if observation_state == "seen":
+            return None
+        raw_payload = dict(event.raw_payload)
+        raw_payload["window_exception"] = (
+            "late_revision" if observation_state == "revision" else "late_discovery"
+        )
+        return event.model_copy(update={"raw_payload": raw_payload})
+
     @staticmethod
-    def _is_within_window(event: SignalEvent, since: datetime) -> bool:
+    def _coverage_status(source_tasks: list[SourceTask], failed_sources: list[str]) -> str:
+        if failed_sources or any(
+            task.coverage_status == "partial" or task.history_limited for task in source_tasks
+        ):
+            return "partial"
+        if any(task.coverage_status == "unknown" for task in source_tasks):
+            return "unknown"
+        return "complete"
+
+    @staticmethod
+    def _checkpoint_safe(source_tasks: list[SourceTask], failed_sources: list[str]) -> bool:
+        return not failed_sources and not any(
+            task.coverage_status == "partial" or task.history_limited for task in source_tasks
+        )
+
+    @staticmethod
+    def _is_within_window(
+        event: SignalEvent, lower: datetime | None, upper: datetime
+    ) -> bool:
         observed = event.published_at
         if observed is None:
             return True
-        boundary = since
-        if observed.tzinfo is not None and boundary.tzinfo is None:
-            boundary = boundary.replace(tzinfo=observed.tzinfo)
-        elif observed.tzinfo is None and boundary.tzinfo is not None:
-            observed = observed.replace(tzinfo=boundary.tzinfo)
-        return observed >= boundary
+        if observed.tzinfo is None:
+            observed = observed.replace(tzinfo=timezone.utc)
+        else:
+            observed = observed.astimezone(timezone.utc)
+        upper_bound = upper if upper.tzinfo else upper.replace(tzinfo=timezone.utc)
+        upper_bound = upper_bound.astimezone(timezone.utc)
+        if observed >= upper_bound:
+            return False
+        if lower is None:
+            return True
+        lower_bound = lower if lower.tzinfo else lower.replace(tzinfo=timezone.utc)
+        return observed >= lower_bound.astimezone(timezone.utc)
 
     @staticmethod
     def _normalize_collected(item: dict[str, Any]) -> SignalEvent:

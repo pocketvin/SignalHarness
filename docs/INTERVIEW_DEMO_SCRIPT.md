@@ -65,11 +65,11 @@ uv run signal-harness serve --host 127.0.0.1 --port 8000
 浏览器打开 `http://127.0.0.1:8000/demo`。
 
 1. 先指顶部 40-case regression evidence 和 5 个 read-only MCP tools，说明这是当前 committed/CI evidence，不是通用 LLM benchmark。
-2. 点击 **Run Golden Demo**。stream-run 在 SSE 连接建立后才启动，因此五 Agent、Tool Guard、Trace 的变化来自真实 runtime event，不是前端定时器。
+2. 点击 **Run Golden Demo**。`POST /stream-runs` 已立即启动真实 workflow；SSE 只是订阅同一运行中的 Trace，因此五 Agent、Tool Guard、Trace 的变化来自真实 runtime event，不是前端定时器。
 3. 点击 `ContextEvidenceAgent`，展示 schema valid、requested/executed tools、permission checks、fallback/retry。
 4. 看右侧 Final decisions，解释 LLM 提供 semantics，但 Python owns the final score/decision。
 5. 下拉到 Live trace ledger，说明同一份 TraceRecorder 同时写审计 JSON 和推 SSE；断线后 workflow 继续，浏览器可用 `Last-Event-ID` 补事件。
-6. 最后说明 `/mcp`、同步 REST 和 Docker 都复用同一 Workflow；SSE 是 in-process observability/demo layer，不冒充 Redis/Celery durable queue。
+6. 最后说明 `/mcp`、同步 REST 和 Docker 都复用同一 Workflow；queued/running 输入与状态支持本地有界恢复，但 SSE replay 仍是 in-process observability layer，不冒充 Redis/Celery 分布式 durable queue。
 
 如果时间只有 2-3 分钟，只展示 `/demo` 的一次 mock-agent run + Evidence Tool Guard + Final decisions。终端 regression command 作为追问时的第二证据。
 

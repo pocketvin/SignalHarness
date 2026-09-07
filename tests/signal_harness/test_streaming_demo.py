@@ -112,7 +112,8 @@ def test_demo_page_and_metadata(
         assert payload["mcp"]["tool_count"] == 5
         assert payload["streaming"] == {
             "transport": "sse",
-            "durability": "in-process",
+            "durability": "persistent-run-retry",
+            "event_replay": "in-process",
         }
         assert payload["providers"]
         assert payload["projects"]
@@ -191,7 +192,7 @@ def test_stream_run_replays_trace_and_final_result(
         run_id = run["run_id"]
         queued = client.get(f"/stream-runs/{run_id}")
         assert queued.status_code == 200
-        assert queued.json()["status"] == "queued"
+        assert queued.json()["status"] in {"queued", "running", "success"}
 
         with client.stream("GET", run["events_url"]) as response:
             assert response.status_code == 200
@@ -374,3 +375,81 @@ def test_demo_metadata_resolves_deprecated_kimi_without_exposing_secret(
         assert kimi["model"] == "kimi-k2.6"
         assert kimi["warning"] == "deprecated_model_auto_upgraded"
         assert kimi["checked_at"] == "2026-09-06"
+
+
+def test_stream_run_starts_without_sse_subscription(
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    import time
+
+    app = create_app(
+        cwd=project_root,
+        output_dir=tmp_path / "outputs",
+        state_dir=tmp_path / "state",
+    )
+    with TestClient(app) as client:
+        created = client.post(
+            "/stream-runs",
+            json={"mode": "mock-agent", "data_source": "fixture"},
+        )
+        assert created.status_code == 202
+        run_id = created.json()["run_id"]
+        status = "queued"
+        for _ in range(100):
+            payload = client.get(f"/stream-runs/{run_id}").json()
+            status = payload["status"]
+            if status in {"success", "error"}:
+                break
+            time.sleep(0.01)
+
+        assert status == "success"
+        persisted = client.get(f"/runs/{run_id}")
+        assert persisted.status_code == 200
+        assert persisted.json()["status"] == "success"
+
+
+@pytest.mark.asyncio
+async def test_stream_manager_recovers_persisted_queued_run(
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "outputs"
+    state_dir = tmp_path / "state"
+    fixture = project_root / "examples" / "signal_harness" / "sample_events.json"
+
+    first = StreamRunManager(
+        cwd=project_root,
+        config_dir=project_root / "configs",
+        output_dir=output_dir,
+        state_dir=state_dir,
+    )
+    queued = first.start(
+        source_mode="fixture",
+        fixture=fixture,
+        since=None,
+        mode=RunMode.DEMO,
+        provider_id=None,
+    )
+    metadata = json.loads((queued.output_dir / "service_run.json").read_text(encoding="utf-8"))
+    assert metadata["status"] == "queued"
+    assert metadata["attempt"] == 0
+
+    second = StreamRunManager(
+        cwd=project_root,
+        config_dir=project_root / "configs",
+        output_dir=output_dir,
+        state_dir=state_dir,
+    )
+    recovered = await second.recover_pending()
+    assert recovered == 1
+    restored = second.get(queued.run_id)
+    assert restored is not None
+    assert restored.task is not None
+    await restored.task
+
+    assert restored.status == "success"
+    assert restored.attempt == 1
+    final = json.loads((restored.output_dir / "service_run.json").read_text(encoding="utf-8"))
+    assert final["status"] == "success"
+    assert final["run_id"] == queued.run_id
