@@ -7,6 +7,8 @@ import difflib
 import hashlib
 import ipaddress
 import json
+import os
+import shutil
 import socket
 from datetime import datetime, timezone
 from html.parser import HTMLParser
@@ -240,6 +242,7 @@ async def collect_web_change(
     state_dir: str | Path,
     official: bool = False,
     max_bytes: int = _DEFAULT_MAX_BYTES,
+    scan_id: str | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Create a baseline or emit one event when normalized visible content changes."""
 
@@ -252,6 +255,14 @@ async def collect_web_change(
     snapshot_root.mkdir(parents=True, exist_ok=True)
     snapshot_id = hashlib.sha256(url.encode("utf-8")).hexdigest()[:20]
     snapshot_path = snapshot_root / f"{snapshot_id}.json"
+    pending_path: Path | None = None
+    if scan_id:
+        safe_scan_id = "".join(ch for ch in scan_id if ch.isalnum() or ch in {"-", "_"})
+        if not safe_scan_id or safe_scan_id != scan_id:
+            raise ValueError("Invalid web snapshot scan_id")
+        pending_root = Path(state_dir).expanduser().resolve() / "web_snapshot_pending" / safe_scan_id
+        pending_root.mkdir(parents=True, exist_ok=True)
+        pending_path = pending_root / f"{snapshot_id}.json"
     now = datetime.now(timezone.utc)
     previous: dict[str, Any] = {}
     if snapshot_path.is_file():
@@ -273,9 +284,11 @@ async def collect_web_change(
         "text": normalized[:120_000],
         "observed_at": now.isoformat(),
     }
-    atomic_write_text(snapshot_path, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+    write_target = pending_path or snapshot_path
+    atomic_write_text(write_target, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
     metadata = {
         "snapshot_path": str(snapshot_path),
+        "pending_snapshot_path": str(pending_path) if pending_path else None,
         "content_hash": current_hash,
         "previous_hash": previous_hash or None,
         "baseline_created": not previous_hash,
@@ -303,3 +316,27 @@ async def collect_web_change(
         "current_excerpt": normalized[:600],
     }
     return [event], metadata
+
+
+def commit_pending_web_snapshots(state_dir: str | Path, scan_id: str) -> int:
+    """Atomically promote snapshots collected by one successful Scan."""
+
+    root = Path(state_dir).expanduser().resolve()
+    pending_root = root / "web_snapshot_pending" / scan_id
+    if not pending_root.is_dir():
+        return 0
+    snapshot_root = root / "web_snapshots"
+    snapshot_root.mkdir(parents=True, exist_ok=True)
+    promoted = 0
+    for pending in sorted(pending_root.glob("*.json")):
+        os.replace(pending, snapshot_root / pending.name)
+        promoted += 1
+    shutil.rmtree(pending_root, ignore_errors=True)
+    return promoted
+
+
+def discard_pending_web_snapshots(state_dir: str | Path, scan_id: str) -> None:
+    """Drop uncommitted snapshot state after a failed Scan."""
+
+    root = Path(state_dir).expanduser().resolve()
+    shutil.rmtree(root / "web_snapshot_pending" / scan_id, ignore_errors=True)

@@ -1,7 +1,7 @@
 # SignalHarness Working Plan
 
 > Status: Rolling construction plan
-> Updated: 2026-09-07
+> Updated: 2026-09-08
 > Governing target: `docs/SIGNALHARNESS_TARGET_STATE.md`
 
 This document records where construction should go next and how each phase should be verified. It is intentionally mutable. After every completed phase, update Current State, Retrospective, Acceptance evidence, and the next phase before continuing.
@@ -11,8 +11,8 @@ This document records where construction should go next and how each phase shoul
 Current repository baseline at planning time:
 
 - branch: `main`
-- HEAD: `682a299` — `Add project onboarding and live web change monitoring`
-- tracked working tree was clean before these planning-document edits.
+- planning baseline commit: `7e30625` — `Document SignalHarness target state and phased plan`.
+- P1 implementation is complete; milestone Git/GitHub status is tracked by repository history and CI rather than transient text in this plan.
 - existing product has project-scoped profile/watchlist state, GitHub release/issues, RSS, Web Snapshot/Diff, candidate funnel, deterministic scoring/guards, five-Agent runner, trace/evals, CLI/REST/SSE, Golden Demo, and five read-only MCP tools.
 - current persistence is primarily YAML/JSON/file artifacts rather than a durable relational Change ledger.
 - current workflow replaces normalized events with the candidate-funnel Top-K before assessment/output persistence.
@@ -60,6 +60,8 @@ Target State
 Do not use nested Codex completion reviewers for normal final acceptance in this project.
 ## P1 — Persistent Change Ledger
 
+**Status: IMPLEMENTED / AGENT ACCEPTANCE PASS**
+
 ### Target
 
 Changes collected from real sources must no longer disappear because of Top-K selection, a later run, or report failure. A user must be able to query all relevant Changes belonging to a Scan.
@@ -86,6 +88,18 @@ Persist observed/relevant data before deep-analysis Top-K selection. Existing fi
 - a report-stage failure cannot consume a Web Change so that retry sees zero;
 - All Relevant Changes can be paginated from a frozen Scan;
 - legacy output remains truthful and no legacy history is fabricated during migration.
+
+### P1 implementation evidence
+
+- Added project-scoped SQLite `change_ledger.sqlite3` with schema version metadata.
+- Normalize/dedup output is persisted before Candidate Funnel Top-K.
+- Event identity and EventRevision are separate; ScanChange pins the exact revision used by that Scan.
+- `project_impacts` stores basic project-aware relevance for All, while analyzed items attach the existing assessment JSON.
+- REST `GET /runs/{run_id}/changes?offset=&limit=` exposes frozen paginated ScanChange data.
+- Legacy `signals.json` remains the deep-analysis shortlist; no legacy history is fabricated.
+- Web Snapshot now uses pending-per-scan state and only promotes after report success.
+- Regression includes 320 observed Changes with analysis budget 12, frozen revision history, report-failure retry, REST pagination, and existing compatibility paths.
+- Fresh local verification: 229 tests PASS; Ruff PASS; strict mypy PASS (95 source files); regression-eval PASS; project-eval 3/3 PASS; `uv build` PASS.
 
 ### Explicitly defer
 
@@ -326,9 +340,9 @@ These are intentionally deferred until the relevant phase because they do not bl
 
 ## NEXT ACTION
 
-**Next construction phase: P1 — Persistent Change Ledger.**
+**Next construction phase: P2 — Scan Window & Durable Execution.**
 
-Before modifying implementation code, refresh Git/HEAD/status, run the project preflight/skill routing, inspect the minimum relevant persistence/workflow/tests, establish baseline behavior, and build one vertical slice that proves “deep-analysis Top-K does not delete All Relevant Changes”.
+Before P2 implementation, refresh Git/HEAD/status and use the new Ledger/Scan records as the persistence base. Prioritize frozen `[L,U)` windows, explicit coverage, separate interactive/source/schedule checkpoints, GitHub pagination, and moving stream execution away from “first SSE subscriber starts work”.
 
 ## RETROSPECTIVE TEMPLATE
 

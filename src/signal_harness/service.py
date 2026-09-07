@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from signal_harness.agent_integration.mode import RunMode
 from signal_harness.mcp_server import MCP_TOOL_NAMES, build_mcp_server, validate_run_id
 from signal_harness.memory import FeedbackMemory
+from signal_harness.persistence import ChangeLedger
 from signal_harness.providers.catalog import (
     default_provider_id,
     provider_catalog,
@@ -368,6 +369,7 @@ def create_app(
             state_dir=paths.project_state(project.id),
             mode=request.mode,
             provider=provider,
+            project_id=project.id,
         )
         created_at = datetime.now(timezone.utc).isoformat()
         try:
@@ -377,6 +379,7 @@ def create_app(
                     since=since,
                     max_events=request.max_events,
                     max_events_per_source=request.max_events_per_source,
+                    scan_id=run_id,
                 )
         except Exception as exc:
             _write_run_metadata(
@@ -407,6 +410,8 @@ def create_app(
             assessments=len(result.assessments),
             failed_sources=len(result.failed_sources),
         )
+        payload["all_changes"] = result.all_change_count
+        payload["changes_url"] = f"/runs/{run_id}/changes"
         payload.update(
             {
                 "project_id": project.id,
@@ -456,6 +461,28 @@ def create_app(
         payload = _read_json(run_output / "signals.json", [])
         items = payload if isinstance(payload, list) else []
         return _collection(items, limit)
+
+    @app.get("/runs/{run_id}/changes")
+    async def get_run_changes(
+        run_id: str,
+        offset: int = Query(default=0, ge=0),
+        limit: int = Query(default=100, ge=1, le=1000),
+    ) -> dict[str, Any]:
+        run_output = _existing_run_output(paths, run_id)
+        run_meta = _read_json(run_output / "service_run.json", {})
+        project_id = str(
+            run_meta.get("project_id") if isinstance(run_meta, dict) else ""
+        ) or default_project_id(paths.config_dir)
+        ledger = ChangeLedger(paths.project_state(project_id) / "change_ledger.sqlite3")
+        page = ledger.list_scan_changes(run_id, offset=offset, limit=limit)
+        return {
+            "items": page.items,
+            "count": page.count,
+            "offset": page.offset,
+            "limit": page.limit,
+            "returned": len(page.items),
+            "has_more": page.has_more,
+        }
 
     @app.post("/feedback")
     async def save_feedback(request: FeedbackRequest) -> dict[str, Any]:

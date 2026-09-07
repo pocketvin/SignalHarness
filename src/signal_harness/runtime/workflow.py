@@ -18,6 +18,7 @@ from signal_harness.agent_integration.schemas import LearningPolicyOutput
 from signal_harness.alerts import AlertPolicy, write_alert_outputs
 from signal_harness.agents import SupervisorAgent
 from signal_harness.memory import MemoryBundle
+from signal_harness.persistence import ChangeLedger
 from signal_harness.providers.adapter import AgentProvider
 from signal_harness.providers.factory import provider_from_env
 from signal_harness.providers.mock_provider import MockProvider
@@ -42,6 +43,10 @@ from signal_harness.signal.normalizer import (
     normalize_github_event,
     normalize_rss_item,
 )
+from signal_harness.tools.web_snapshot import (
+    commit_pending_web_snapshots,
+    discard_pending_web_snapshots,
+)
 from signal_harness.signal.schemas import (
     SignalAssessment,
     SignalEvent,
@@ -53,6 +58,8 @@ from signal_harness.ui.dashboard import write_dashboard
 
 @dataclass(frozen=True)
 class ScanResult:
+    scan_id: str
+    all_change_count: int
     signals: list[SignalEvent]
     assessments: list[SignalAssessment]
     output_dir: Path
@@ -100,6 +107,7 @@ class SignalHarnessWorkflow:
         provider: AgentProvider | None = None,
         agent_loop_limits: AgentLoopLimits | None = None,
         trace_listener: TraceListener | None = None,
+        project_id: str | None = None,
     ) -> None:
         self.cwd = Path(cwd).expanduser().resolve()
         self.config_dir = resolve_config_dir(self.cwd, config_dir or "configs")
@@ -109,6 +117,8 @@ class SignalHarnessWorkflow:
         self.watchlist_path = self._resolve(watchlist_path or self.config_dir / "watchlist.yaml")
         self.output_dir = self._resolve(output_dir or "outputs")
         self.state_dir = self._resolve(state_dir or ".signal-harness")
+        self.project_id = project_id or self.state_dir.name
+        self.ledger = ChangeLedger(self.state_dir / "change_ledger.sqlite3")
         self.mode = RunMode(mode)
         self.provider = provider
         self.agent_loop_limits = agent_loop_limits
@@ -141,12 +151,15 @@ class SignalHarnessWorkflow:
         since: datetime | None = None,
         max_events: int | None = None,
         max_events_per_source: int | None = None,
+        scan_id: str | None = None,
     ) -> ScanResult:
         if max_events is not None and max_events < 1:
             raise ValueError("max_events must be a positive integer")
         if max_events_per_source is not None and max_events_per_source < 1:
             raise ValueError("max_events_per_source must be a positive integer")
         run_id = f"run-{uuid4().hex[:12]}"
+        active_scan_id = scan_id or f"scan-{uuid4().hex[:12]}"
+        self.executor.context.metadata["scan_id"] = active_scan_id
         with self.trace.step("load_config", input_count=3) as state:
             profile, policy, watchlist = await self._load_config()
             state["output_count"] = 3
@@ -221,6 +234,15 @@ class SignalHarnessWorkflow:
             state["output_count"] = len(events)
             if duplicate_ids:
                 state["detail"] = f"Removed duplicates: {', '.join(duplicate_ids)}"
+
+        all_events = list(events)
+        self.ledger.begin_scan(
+            scan_id=active_scan_id,
+            project_id=self.project_id,
+            collected_count=len(raw_events),
+            deduped_count=len(all_events),
+        )
+        event_change_ids = self.ledger.persist_observations(all_events)
 
         signal_memory_path = self.state_dir / "signal_memory.json"
         feedback_path = self.state_dir / "feedback_memory.json"
@@ -395,21 +417,45 @@ class SignalHarnessWorkflow:
                     await provider.close()
 
         self.state_dir.mkdir(parents=True, exist_ok=True)
-        if learning_observation is not None:
-            self._save_learning_observation(
-                learning_observation,
-                run_id=run_id,
-            )
-        save_seen_signals(signal_memory_path, events, assessments)
-        await self._write_outputs(
-            events,
-            assessments,
-            guard=guard,
+        analyzed_event_ids = {event.event_id for event in events}
+        self.ledger.freeze_scan_changes(
+            scan_id=active_scan_id,
+            project_id=self.project_id,
+            events=all_events,
+            event_change_ids=event_change_ids,
+            project_profile=profile,
             policy=policy,
-            failed_sources=collection.failed_sources,
-            source_tasks=collection.source_tasks,
+            analyzed_event_ids=analyzed_event_ids,
+            assessments=assessments,
         )
+        try:
+            if learning_observation is not None:
+                self._save_learning_observation(
+                    learning_observation,
+                    run_id=run_id,
+                )
+            await self._write_outputs(
+                events,
+                assessments,
+                guard=guard,
+                policy=policy,
+                failed_sources=collection.failed_sources,
+                source_tasks=collection.source_tasks,
+            )
+            commit_pending_web_snapshots(self.state_dir, active_scan_id)
+            save_seen_signals(signal_memory_path, events, assessments)
+            self.ledger.complete_scan(
+                scan_id=active_scan_id,
+                analyzed_count=len(events),
+                relevant_count=len(all_events),
+            )
+        except Exception as exc:
+            discard_pending_web_snapshots(self.state_dir, active_scan_id)
+            self.ledger.fail_scan(scan_id=active_scan_id, error=f"{exc.__class__.__name__}: {exc}")
+            raise
         return ScanResult(
+            active_scan_id,
+            len(all_events),
             events,
             assessments,
             self.output_dir,

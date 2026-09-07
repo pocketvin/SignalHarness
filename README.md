@@ -2,7 +2,7 @@
 
 **中文** | [English](README.en.md)
 
-> 一个面向真实工程场景的 Multi-Agent Harness：用外部技术变化作为业务载体，重点展示五 Agent 编排、受控工具调用、Python Guardrails、Agent Eval、Trace/Observability、MCP、SSE、FastAPI 与 Docker。
+> 一个面向持续开发软件项目的 Project Environment Intelligence 系统：连接项目后持续收集、聚合和分析周围的工程环境变化，回答“发生了什么、哪些值得关注、会影响什么、应该做什么”。Multi-Agent、规则、Search 与 Scoring 都只是可替换的实现技术。
 
 SignalHarness 会实时监听 GitHub / RSS / 配置化网页快照等外部工程信号；它判断这些变化是否真正影响当前选择的项目，并把结果转成**可解释、可审计、可回归验证**的决策，而不是再做一个信息聚合器或聊天机器人。
 
@@ -17,17 +17,18 @@ SignalHarness 会实时监听 GitHub / RSS / 配置化网页快照等外部工�
 - 一次判断为什么发生，之后能不能复盘？
 - 修改 Prompt / Router / Scoring 后，如何防止旧能力被改坏？
 
-SignalHarness 的核心答案是：**LLM 负责推理，Python runtime 负责约束、执行、评分、Fallback 和审计。**
+SignalHarness 的核心答案是：**稳定的环境事实与 Scan 状态由 Python/runtime 持久化和约束，LLM 只负责真正需要语义判断的分析节点。** 当前五 Agent 路径保留为 Analyzer baseline，后续通过 Eval 决定哪些组件真正值得长期保留。
 
 ## 当前已实现能力
 
 | 能力 | 当前实现 |
 | --- | --- |
-| Agent 编排 | 固定五 Agent：Supervisor → Evidence → Impact → Action → Learning |
+| Analyzer baseline | 当前五 Agent：Supervisor → Evidence → Impact → Action → Learning；P4 通过 Harness Ablation 决定最终形态 |
 | Tool Calling | Evidence 两阶段工具计划；Python 负责 allowlist、permission、budget、execution、observation |
 | 结构化输出 | Pydantic Schema、一次 schema retry、确定性 fallback |
 | Guarded Scoring | LLM 提供语义判断；Python 持有 authoritative final score |
-| Memory | Project-scoped persistent Signal / Feedback / Learning Memory；Run 输出与项目长期状态分离 |
+| Change Ledger | Project-scoped SQLite：EventRevision → Change → ProjectImpact → ScanChange；Top-K 不再决定事实是否存在 |
+| Memory / State | Project-scoped Signal / Feedback / Learning 兼容状态；新业务历史逐步迁移到结构化 Ledger |
 | Agent Eval | 40 条项目级 Regression Suite + 3 条 Cross-project Context Gate + Provider Contract Eval |
 | Observability | Agent、Schema、Retry、Fallback、Tools、Latency、Tokens、Estimated Cost Trace |
 | MCP | 5 个只读 structured tools |

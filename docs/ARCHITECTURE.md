@@ -1,6 +1,6 @@
 # SignalHarness Architecture
 
-SignalHarness 是一个 project-centric signal intelligence Agent Harness。它把外部变化源转成可审计的 assessment、digest、dashboard、trace 和 review-only learning proposal，并通过 CLI、REST、SSE Golden Demo 与只读 MCP 暴露同一套 domain/runtime 能力。
+SignalHarness 的目标产品是 Project Environment Intelligence；当前仍保留五-Agent routed analyzer 作为可验证 baseline。P1 已引入 SQLite Change Ledger，使 pre-funnel 变化、EventRevision、Change、ProjectImpact 与 ScanChange 拥有独立于旧 JSON 输出的持久业务状态。CLI/REST/SSE Golden Demo 与当前只读 MCP 仍复用同一 runtime；未来 Analyzer 数量不再是产品约束。
 
 ## Workflow flowchart
 
@@ -139,6 +139,15 @@ sequenceDiagram
 
 - `outputs/task_trace.json`
   本地 trace 产物。记录 Agent calls、schema/fallback/retry、tool requests/executions、permission checks、source task health。
+
+## P1 durable Change Ledger
+
+- **Ledger path**：每个 project state 下使用 `change_ledger.sqlite3`；当前是本地/单 owner 的 SQLite v1 schema。
+- **Persist before Top-K**：Normalize + in-batch dedup 后，所有 pre-funnel candidates 先写入 EventRevision/Change，再由 candidate funnel 决定哪些进入当前深度分析 budget。
+- **Frozen ScanChange**：`scan_changes` 固定本次使用的 `event_revision_id`、basic relevance、rank 与是否进入深度分析，因此后续 revision 不会改写旧 Scan 看到的事实。
+- **ProjectImpact**：所有 ScanChange 都保存 basic project-aware relevance；只有被 Analyzer 实际处理的 Change 才附带完整 assessment。
+- **Compatibility**：`signals.json` / `impact_scores.json` 等旧产物仍表示本次深度分析 shortlist，不伪装成 All Changes；REST `GET /runs/{run_id}/changes` 是 P1 的分页 All-Changes 投影。
+- **Failure boundary**：legacy seen-memory 只在报告成功后更新；Web Snapshot 使用 per-scan pending state，报告成功后才 promote，失败则 discard，所以失败重试不会吞掉尚未提交的网页变化。
 
 ## Project state / candidate / provenance boundaries
 

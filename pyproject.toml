@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "signalharness"
 version = "0.1.0"
-description = "Standalone LLM-enhanced multi-agent signal intelligence harness"
+description = "Project Environment Intelligence for software engineering changes"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [

@@ -2,19 +2,20 @@
 
 [中文](README.md) | **English**
 
-**A production-oriented multi-agent harness for project-level signal intelligence, with controlled tool use, regression evals, observability, MCP, and a thin service layer.**
+**Project Environment Intelligence for continuously developed software projects: collect environmental changes, preserve them durably, decide what matters to a project, explain impact, and recommend action.**
 
-SignalHarness watches GitHub, RSS, and configured public-page snapshots, decides whether those changes matter to a project, and turns them into auditable assessments instead of another noisy feed. The signal-intelligence use case is the business carrier; the engineering focus is the Agent Harness itself: orchestration, structured contracts, tool guardrails, deterministic fallback, evaluation, traceability, and human-gated learning.
+SignalHarness watches GitHub, RSS, and configured public-page snapshots, decides whether those changes matter to a project, and turns them into durable, auditable project intelligence instead of another noisy feed. Multi-agent orchestration, single-agent analysis, rules, search, and scoring are implementation techniques rather than the product identity; the current five-Agent path remains an evaluation baseline.
 
 ## At a glance
 
 | Area | What is implemented |
 | --- | --- |
-| Agent orchestration | Fixed five-Agent route: Supervisor → Evidence → Impact → Action → Learning |
+| Analyzer baseline | Current five-Agent route: Supervisor → Evidence → Impact → Action → Learning; P4 Harness ablation decides the long-term form |
 | Tool use | Two-turn evidence tool plan; Python owns allowlist, permission checks, budgets, execution, and observations |
 | Reliability | Pydantic structured outputs, schema retry, deterministic fallback, bounded repair, run timeout limits |
 | Guarded decisions | LLM contributes semantics; Python owns final scoring and a primary-source high-risk alert floor |
-| Memory | Project-scoped persistent signal/feedback/learning state, separated from per-run output/trace |
+| Change ledger | Project-scoped SQLite EventRevision → Change → ProjectImpact → ScanChange; Top-K no longer controls durable existence |
+| Memory / state | Existing project-scoped signal/feedback/learning compatibility state remains separated from per-run output/trace |
 | Eval | 40-case Agent regression + 3-case cross-project context gate + provider contract eval |
 | Observability | Local trace for Agent calls, schema/retry/fallback, tools, latency, provider-reported tokens, and estimated cost |
 | MCP | Five read-only structured tools for project context, signal history, assessments, trace, and feedback |

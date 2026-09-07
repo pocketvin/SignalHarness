@@ -13,6 +13,8 @@ from signal_harness.tools.web_change import WebChangeTool
 from signal_harness.tools.web_snapshot import (
     assert_public_http_url,
     collect_web_change,
+    commit_pending_web_snapshots,
+    discard_pending_web_snapshots,
     normalize_web_text,
     snapshot_diff_summary,
 )
@@ -116,6 +118,51 @@ async def test_collect_web_change_creates_baseline_then_emits_only_real_change(
 
 
 @pytest.mark.asyncio
+async def test_failed_scan_does_not_consume_web_snapshot_change(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    versions = iter(
+        [
+            ("https://example.com/docs", "text/html", "<p>Version 1</p>"),
+            ("https://example.com/docs", "text/html", "<p>Version 2</p>"),
+            ("https://example.com/docs", "text/html", "<p>Version 2</p>"),
+        ]
+    )
+
+    async def fake_fetch(url: str, *, max_bytes: int):
+        del url, max_bytes
+        return next(versions)
+
+    monkeypatch.setattr(web_snapshot, "fetch_public_text", fake_fetch)
+    baseline, _ = await collect_web_change(
+        url="https://example.com/docs",
+        source_name="Docs",
+        state_dir=tmp_path,
+    )
+    assert baseline == []
+
+    failed_events, failed_meta = await collect_web_change(
+        url="https://example.com/docs",
+        source_name="Docs",
+        state_dir=tmp_path,
+        scan_id="failed-scan",
+    )
+    assert len(failed_events) == 1
+    assert failed_meta["pending_snapshot_path"]
+    discard_pending_web_snapshots(tmp_path, "failed-scan")
+
+    retry_events, _ = await collect_web_change(
+        url="https://example.com/docs",
+        source_name="Docs",
+        state_dir=tmp_path,
+        scan_id="retry-scan",
+    )
+    assert len(retry_events) == 1
+    assert commit_pending_web_snapshots(tmp_path, "retry-scan") == 1
+
+
+@pytest.mark.asyncio
 async def test_web_change_tool_uses_project_state_snapshot(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -191,6 +238,81 @@ async def test_web_change_tool_blocks_url_not_approved_by_watchlist(tmp_path: Pa
     )
     assert result.is_error is True
     assert "not approved by the current project Watchlist" in result.output
+
+
+@pytest.mark.asyncio
+async def test_workflow_report_failure_does_not_consume_web_change(
+    project_root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import shutil
+    import yaml
+
+    from signal_harness.agent_integration.mode import RunMode
+    from signal_harness.runtime.workflow import SignalHarnessWorkflow
+
+    config = tmp_path / "configs"
+    shutil.copytree(project_root / "configs", config)
+    (config / "watchlist.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "web_changes": {
+                    "sources": [
+                        {
+                            "name": "Official Docs",
+                            "adapter": "http",
+                            "url": "https://example.com/docs",
+                            "official": True,
+                        }
+                    ]
+                }
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    versions = iter(
+        [
+            ("https://example.com/docs", "text/html", "<p>Version 1</p>"),
+            ("https://example.com/docs", "text/html", "<p>Version 2</p>"),
+            ("https://example.com/docs", "text/html", "<p>Version 2</p>"),
+        ]
+    )
+
+    async def fake_fetch(url: str, *, max_bytes: int):
+        del url, max_bytes
+        return next(versions)
+
+    monkeypatch.setattr(web_snapshot, "fetch_public_text", fake_fetch)
+    state_dir = tmp_path / "state"
+    baseline = SignalHarnessWorkflow(
+        cwd=project_root, config_dir=config, output_dir=tmp_path / "baseline",
+        state_dir=state_dir, mode=RunMode.DEMO, project_id="signalharness"
+    )
+    baseline_result = await baseline.scan(scan_id="baseline-scan")
+    assert baseline_result.signals == []
+
+    failed = SignalHarnessWorkflow(
+        cwd=project_root, config_dir=config, output_dir=tmp_path / "failed",
+        state_dir=state_dir, mode=RunMode.DEMO, project_id="signalharness"
+    )
+
+    async def fail_outputs(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise RuntimeError("forced report failure")
+
+    monkeypatch.setattr(failed, "_write_outputs", fail_outputs)
+    with pytest.raises(RuntimeError, match="forced report failure"):
+        await failed.scan(scan_id="failed-scan")
+
+    retry = SignalHarnessWorkflow(
+        cwd=project_root, config_dir=config, output_dir=tmp_path / "retry",
+        state_dir=state_dir, mode=RunMode.DEMO, project_id="signalharness"
+    )
+    retry_result = await retry.scan(scan_id="retry-scan")
+    assert len(retry_result.signals) == 1
+    assert retry_result.signals[0].raw_payload["current_hash"]
 
 
 def test_web_change_source_quality_respects_watchlist_authority() -> None:

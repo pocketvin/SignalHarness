@@ -33,6 +33,8 @@ def test_service_runs_mock_agent_and_exposes_trace_feedback(
         run_id = run["run_id"]
         assert run["status"] == "success"
         assert run["signals"] == 4
+        assert run["all_changes"] == 4
+        assert run["changes_url"] == f"/runs/{run_id}/changes"
         fetched = client.get(f"/runs/{run_id}")
         assert fetched.status_code == 200
         assert fetched.json()["run_id"] == run_id
@@ -40,6 +42,18 @@ def test_service_runs_mock_agent_and_exposes_trace_feedback(
         signals = client.get("/signals", params={"run_id": run_id})
         assert signals.status_code == 200
         assert signals.json()["count"] == 4
+
+        changes = client.get(f"/runs/{run_id}/changes", params={"limit": 2})
+        assert changes.status_code == 200
+        assert changes.json()["count"] == 4
+        assert changes.json()["returned"] == 2
+        assert changes.json()["has_more"] is True
+        next_changes = client.get(
+            f"/runs/{run_id}/changes", params={"offset": 2, "limit": 2}
+        )
+        assert next_changes.status_code == 200
+        assert next_changes.json()["returned"] == 2
+        assert next_changes.json()["has_more"] is False
 
         trace = client.get(f"/runs/{run_id}/trace")
         assert trace.status_code == 200

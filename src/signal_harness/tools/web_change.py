@@ -103,6 +103,7 @@ class WebChangeTool(BaseTool):
                     state_dir=str(state_dir),
                     official=arguments.official,
                     max_bytes=arguments.max_bytes,
+                    scan_id=str(context.metadata.get("scan_id") or "") or None,
                 )
             except (ValueError, OSError, httpx.HTTPError) as exc:
                 return ToolResult(output=f"Web snapshot failed: {exc}", is_error=True)

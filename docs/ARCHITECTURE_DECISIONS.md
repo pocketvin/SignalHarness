@@ -1,19 +1,16 @@
 # Architecture Decisions
 
-SignalHarness is an independent project: a standalone LLM-enhanced routed
-multi-agent signal intelligence harness for GitHub/RSS/web-change signals.
-It is inspired by general agent harness design patterns. It does not vendor or
-depend on OpenHarness code.
+SignalHarness is an independent Project Environment Intelligence project.
+The repository currently retains a routed five-Agent analyzer as a measured baseline,
+but Agent count is no longer the product identity or a permanent architecture constraint.
+SignalHarness is inspired by general harness design patterns and does not vendor or depend on OpenHarness code.
 
 ## Public identity
 
-The public identity is SignalHarness:
-
-- five structured Agents for routing, evidence, impact, action, and learning;
-- a controlled two-step evidence tool-use loop;
-- deterministic guardrails for permissions, budgets, schema validation,
-  fallback, trace, output, and final scoring;
-- review-only learning proposals.
+The public identity is SignalHarness as Project Environment Intelligence. The current
+five structured Agents, controlled evidence loop, deterministic guardrails, and review-only
+learning artifacts remain implementation/current-state evidence until P4 Harness ablation
+determines which components are still load-bearing.
 
 ## One command surface
 
@@ -82,6 +79,18 @@ JSON; Python owns tool execution.
 `prompt_json_retry` for schemas and `controlled_tool_request` for tools.
 Profiles are documentation and selection metadata, not permission to use
 native tool calling.
+
+## Durable Change Ledger boundary
+
+P1 adds a project-scoped SQLite ledger as the authoritative store for newly observed
+EventRevision/Change/ProjectImpact/ScanChange records. It is additive: legacy JSON/Markdown
+artifacts remain compatibility/report projections and old history is not fabricated or
+backfilled without evidence. Top-K is an analysis budget only and never deletes pre-funnel
+Scan membership. ScanChange pins the observed EventRevision so historical scans stay frozen.
+
+Web Snapshot state follows the same commit boundary: a scan writes pending snapshots and
+promotes them only after report/output success. A failed report therefore cannot advance the
+committed webpage baseline or legacy seen-memory.
 
 ## Eval boundary
 
@@ -152,7 +161,7 @@ SignalHarness deliberately keeps two eval layers. `regression-eval` is a labelle
 
 ## MCP and service boundary
 
-MCP is a narrow read-only projection over SignalHarness domain artifacts. It cannot write policy/watchlist/project files or bypass the existing permission plane. FastAPI is a thin orchestration surface that calls the same `SignalHarnessWorkflow`; service runs isolate output/state by run ID. No queue, database, multi-tenant control plane, or background worker is claimed in this MVP.
+MCP is currently a narrow read-only projection over SignalHarness domain artifacts. It cannot write policy/watchlist/project files or bypass the existing permission plane. FastAPI is a thin orchestration surface that calls the same `SignalHarnessWorkflow`; service runs isolate output/state by run ID while P1 persists new domain records in project-scoped SQLite. No durable queue, multi-tenant control plane, or background worker is claimed yet.
 
 ## Usage observability boundary
 

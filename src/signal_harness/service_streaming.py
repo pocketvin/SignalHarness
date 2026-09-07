@@ -233,12 +233,14 @@ class StreamRunManager:
                     mode=session.mode,
                     provider=provider,
                     trace_listener=session.on_trace_change,
+                    project_id=session.project.id,
                 )
                 result = await workflow.scan(
                     fixture=session.fixture,
                     since=session.since,
                     max_events=session.max_events,
                     max_events_per_source=session.max_events_per_source,
+                    scan_id=session.run_id,
                 )
             session.status = "success"
             session.completed_at = datetime.now(timezone.utc).isoformat()
@@ -255,12 +257,14 @@ class StreamRunManager:
                 "created_at": session.created_at,
                 "completed_at": session.completed_at,
                 "signals": len(result.signals),
+                "all_changes": result.all_change_count,
                 "assessments": len(result.assessments),
                 "failed_sources": len(result.failed_sources),
                 "source_summary": source_summary,
                 "trace_url": f"/runs/{session.run_id}/trace",
                 "signals_url": f"/signals?run_id={session.run_id}",
                 "assessments_url": f"/runs/{session.run_id}/assessments",
+                "changes_url": f"/runs/{session.run_id}/changes",
                 "events_url": f"/stream-runs/{session.run_id}/events",
                 "streaming": True,
             }

@@ -391,6 +391,7 @@ def scan(
         state_dir=state,
         mode=mode,
         provider=provider,
+        project_id=project.id,
     )
 
     async def run_scan() -> Any:
