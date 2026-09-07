@@ -1,8 +1,12 @@
 # SignalHarness Agent Guide
 
-SignalHarness is a standalone LLM-enhanced routed multi-agent signal
-intelligence harness.
-Keep the fixed five-Agent architecture under `src/signal_harness/agent_team/`.
+SignalHarness currently contains a standalone LLM-enhanced routed multi-agent signal
+intelligence implementation.
+
+For future product direction and construction planning, `docs/SIGNALHARNESS_TARGET_STATE.md`
+and `docs/SIGNALHARNESS_WORKING_PLAN.md` take precedence over older fixed-five-Agent
+product assumptions. The existing five-Agent implementation remains a protected current-state
+baseline until an evidence-based Analyzer/Harness migration is implemented and verified.
 
 Key directories:
 
