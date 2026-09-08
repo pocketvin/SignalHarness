@@ -20,12 +20,14 @@ async def test_harness_ablation_uses_frozen_inputs_and_removes_supervisor_call(
     assert summary.passed is True
     assert summary.inputs_frozen is True
     assert len({item.input_fingerprint for item in summary.variants}) == 1
-    baseline, routed, deferred, evidence, selective = summary.variants
+    baseline, routed, deferred, evidence, selective, merged, verified = summary.variants
     assert baseline.variant is HarnessVariant.FIVE_AGENT
     assert routed.variant is HarnessVariant.DETERMINISTIC_SUPERVISOR
     assert deferred.variant is HarnessVariant.DETERMINISTIC_SUPERVISOR_DEFERRED_LEARNING
     assert evidence.variant is HarnessVariant.DETERMINISTIC_EVIDENCE_RESOLVER
     assert selective.variant is HarnessVariant.SELECTIVE_EVIDENCE_RESEARCHER
+    assert merged.variant is HarnessVariant.SELECTIVE_EVIDENCE_IMPACT_ACTION
+    assert verified.variant is HarnessVariant.SELECTIVE_EVIDENCE_IMPACT_ACTION_VERIFIER
     assert routed.llm_call_count < baseline.llm_call_count
     assert deferred.llm_call_count < routed.llm_call_count
     assert evidence.llm_call_count < deferred.llm_call_count
@@ -35,9 +37,17 @@ async def test_harness_ablation_uses_frozen_inputs_and_removes_supervisor_call(
     assert "LearningPolicyAgent" not in deferred.llm_calls_by_agent
     assert "ContextEvidenceAgent" not in evidence.llm_calls_by_agent
     assert selective.llm_calls_by_agent.get("ContextEvidenceAgent") == 1
+    assert merged.llm_calls_by_agent.get("ContextEvidenceAgent") == 1
+    assert merged.llm_calls_by_agent.get("ImpactActionAnalyzerAgent") == 1
+    assert "ActionPlannerAgent" not in merged.llm_calls_by_agent
+    assert merged.llm_call_count < selective.llm_call_count
+    assert verified.llm_calls_by_agent.get("SelectiveVerifierAgent") == 1
+    assert verified.llm_call_count > merged.llm_call_count
     assert evidence.regression.decision_accuracy < baseline.regression.decision_accuracy
     assert selective.regression.decision_accuracy >= baseline.regression.decision_accuracy
-    assert summary.recommendation is HarnessVariant.SELECTIVE_EVIDENCE_RESEARCHER
+    assert merged.regression.decision_accuracy >= baseline.regression.decision_accuracy
+    assert verified.regression.decision_accuracy >= baseline.regression.decision_accuracy
+    assert summary.recommendation is HarnessVariant.SELECTIVE_EVIDENCE_IMPACT_ACTION
 
 
 def test_non_inferior_metrics_require_every_dimension_to_hold() -> None:
@@ -47,3 +57,23 @@ def test_non_inferior_metrics_require_every_dimension_to_hold() -> None:
     assert _metrics_non_inferior((0.91, 0.90, 0.90, 0.90), baseline) is True
     assert _metrics_non_inferior((0.95, 0.90, 0.89, 0.90), baseline) is False
     assert _metrics_non_inferior((0.90, 0.91, 0.90, 0.89), baseline) is False
+
+
+@pytest.mark.asyncio
+async def test_real_world_harness_corpus_preserves_project_state_hard_negatives(
+    project_root: Path,
+) -> None:
+    summary = await run_harness_ablation(
+        root=project_root,
+        config_dir=project_root / "configs",
+        fixture=project_root / "examples/signal_harness/real_world_events_2026q3.json",
+        expectations=project_root / "examples/signal_harness/real_world_expectations_2026q3.json",
+    )
+
+    assert summary.passed is True
+    assert summary.inputs_frozen is True
+    for item in summary.variants:
+        assert item.regression.decision_accuracy == 1.0
+        assert item.regression.priority_precision == 1.0
+        assert item.regression.priority_recall == 1.0
+        assert item.regression.missing_event_ids == []

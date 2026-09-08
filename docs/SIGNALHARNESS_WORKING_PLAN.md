@@ -179,7 +179,7 @@ Start with the first real project's needs rather than generic support for every 
 
 ## P4 — Analyzer/Harness V2 + Eval System
 
-**Status: IN PROGRESS — first Harness ablation slice AGENT ACCEPTANCE PASS**
+**Status: AGENT ACCEPTANCE PASS — offline Analyzer V2 candidate selected; live-provider comparison pending explicit cost authorization**
 
 ### Target
 
@@ -226,7 +226,14 @@ Relevance recall, false positives/negatives, impact/module correctness, citation
 - Added `signal-harness generic-monitor-eval` as the external product baseline harness. It gives one live model only a compact project brief plus the frozen event corpus, performs one structured LLM call, and records schema validity, prompt size, tokens, estimated cost, and the same labelled regression metrics.
 - The compact baseline brief intentionally excludes dependency-version evidence, critical-module details, Change Ledger/revision state, coverage/checkpoints, tools, and historical ProjectImpact state; focused tests prove those deeper structured facts do not leak into the baseline context.
 - Generic-monitor plumbing tests PASS and the CLI help path is usable. No live-provider comparison was executed in this slice because that would incur external model cost/credentials; the live measurement remains environment/owner-controlled evidence.
-- A modest real-world frozen corpus remains the next P4 construction slice before production analyzer replacement.
+- Added a 15-case frozen real-world 2026-Q3 corpus built from current upstream release/spec/repository facts plus explicit project-state labels. It includes hard negatives for already-installed/superseded versions and for ecosystem releases that merely mention a direct dependency.
+- The first real-world run exposed a shared deterministic-layer failure rather than an Agent-count problem: all variants started at 0.400 decision accuracy with priority recall 0.000. Source-identity matching, resolved-version applicability, protocol identity, and project-specific risk floors were then moved into a shared deterministic `ProjectChangeState` layer.
+- After that repair, the same real-world corpus reaches decision/precision/recall 1.000 across all compared Harness variants while the original 40-case corpus remains regression-clean. Direct dependencies are now resolved from source/package identity rather than body mentions, and installed/superseded/fixed-on-current-major changes can be conservatively ignored.
+- Added `selective-evidence-impact-action`: deterministic Supervisor + deterministic evidence resolution + selective EvidenceResearcher + one merged ImpactActionAnalyzer call. On the original 40-case corpus it matches five-Agent decision/precision/recall 1.000 with 2 LLM calls instead of 6; the 15-case real-world corpus is also 1.000/1.000/1.000 with 2 calls.
+- Added `selective-evidence-impact-action-verifier` as an explicit SelectiveVerifier ablation. It also preserves quality but requires 3 LLM calls and provides no measured gain on either frozen corpus, so SelectiveVerifier is not recommended for the Scan hot path at this stage. Verifier outputs are constrained so Python can only apply conservative confidence/relevance/risk/action reductions.
+- Pure deterministic Evidence also uses 2 calls and passes the real-world corpus, but remains 0.975 decision accuracy on the original corpus. Across both corpora, the robust offline candidate is therefore `selective-evidence-impact-action`, not fully deterministic Evidence.
+- The existing five-Agent default remains protected for real-provider runs until a live-provider/manual quality smoke is explicitly authorized; changing that default without live-model evidence would overstate what the offline scripted provider proves.
+- Generic Monitor live comparison remains environment/owner-controlled because it invokes a paid external model. Its harness is implemented and ready, but no external model cost was incurred automatically.
 
 ## P5 — Product Intelligence Experience
 
@@ -392,9 +399,9 @@ These are intentionally deferred until the relevant phase because they do not bl
 
 ## NEXT ACTION
 
-**Continue P4 — Analyzer/Harness V2 + Eval System.**
+**Proceed to P5 — Product Intelligence Experience.**
 
-The first local ablation slice and the Generic LLM Monitor comparison harness are implemented. Commit them with fresh verification, then build a modest real-world frozen corpus and use it to test whether selective EvidenceResearcher, merged Impact+Action, and optional verification still earn their complexity. A live Generic Monitor run can be added when explicit provider-cost authorization is available. Keep CLI-first product-interface work scoped to P5 except for contracts/eval hooks needed to measure interface/context overhead.
+P4 agent-verifiable construction is complete enough to choose an offline Analyzer V2 candidate: `selective-evidence-impact-action`. Keep the five-Agent real-provider default protected until an explicitly authorized live-provider/manual comparison is run, and keep the paid Generic LLM Monitor baseline pending the same cost boundary. Proceed with P5 product-intelligence work using the existing core Scan service and CLI-first interface direction; do not make P5 depend on MCP becoming the primary Agent interface.
 
 ## RETROSPECTIVE TEMPLATE
 

@@ -224,6 +224,47 @@ class ActionOutput(BaseModel):
     repair_requests: list[RepairRequest] = Field(default_factory=list)
 
 
+class ImpactActionItem(BaseModel):
+    """One combined semantic analysis result used only by the merged ablation variant."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    event_id: str
+    impact: ImpactItem
+    action: ActionItem
+
+    @model_validator(mode="after")
+    def _event_ids_match(self) -> "ImpactActionItem":
+        if self.impact.event_id != self.event_id or self.action.event_id != self.event_id:
+            raise ValueError("combined impact/action event_ids must match")
+        return self
+
+
+class ImpactActionOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    results: list[ImpactActionItem]
+
+
+class VerificationItem(BaseModel):
+    """Conservative verifier output; Python decides whether and how to apply caps."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    event_id: str
+    supported: bool = True
+    confidence_cap: float | None = Field(default=None, ge=0, le=1)
+    impact_overstated: bool = False
+    action_overstated: bool = False
+    notes: str = ""
+
+
+class VerificationOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    results: list[VerificationItem]
+
+
 class ReplayEvaluation(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

@@ -1,0 +1,259 @@
+[
+  {
+    "event_id": "rw-001",
+    "source_type": "github_release",
+    "source_name": "mcp",
+    "title": "MCP Python SDK v2.2.0 changes Streamable HTTP and OAuth behavior",
+    "content": "Version 2.2.0 changes redirect handling, expires idle legacy Streamable HTTP sessions, tightens OAuth issuer validation, and fixes outputSchema reference resolution. SignalHarness currently resolves mcp 2.1.1.",
+    "url": "https://github.com/modelcontextprotocol/python-sdk/releases/tag/v2.2.0",
+    "published_at": "2026-09-07T15:53:00Z",
+    "change_kind": "released",
+    "current_version": "2.2.0",
+    "previous_version": "2.1.1",
+    "raw_payload": {
+      "official": true,
+      "source_snapshot_date": "2026-09-09",
+      "fact_basis": "official release"
+    },
+    "collected_at": "2026-09-09T00:00:00Z"
+  },
+  {
+    "event_id": "rw-002",
+    "source_type": "github_issue",
+    "source_name": "mcp",
+    "title": "Resource allowlist check does not collapse dot segments",
+    "content": "Open issue #3464 reports that check_resource_allowed can treat paths such as /api/../admin as under /api. The issue is labeled as affecting both v1 and v2 lines.",
+    "url": "https://github.com/modelcontextprotocol/python-sdk/issues/3464",
+    "published_at": "2026-09-06T00:00:00Z",
+    "change_kind": "new",
+    "raw_payload": {
+      "source_authority": "community",
+      "source_snapshot_date": "2026-09-09",
+      "fact_basis": "upstream issue"
+    },
+    "collected_at": "2026-09-09T00:00:00Z"
+  },
+  {
+    "event_id": "rw-003",
+    "source_type": "web_change",
+    "source_name": "Model Context Protocol",
+    "title": "MCP 2026-07-28 specification moves to a stateless protocol core",
+    "content": "The 2026-07-28 MCP specification retires initialize/initialized and Mcp-Session-Id, makes requests self-describing, adds header-based routing and cacheable list responses, and updates Tier 1 SDKs with migration guidance.",
+    "url": "https://blog.modelcontextprotocol.io/posts/2026-07-28/",
+    "published_at": "2026-07-28T00:00:00Z",
+    "change_kind": "published",
+    "raw_payload": {
+      "official": true,
+      "source_snapshot_date": "2026-09-09",
+      "fact_basis": "official specification announcement"
+    },
+    "collected_at": "2026-09-09T00:00:00Z"
+  },
+  {
+    "event_id": "rw-004",
+    "source_type": "github_release",
+    "source_name": "typer",
+    "title": "Typer 0.27.0 updates metavar printing",
+    "content": "Typer 0.27.0 lists one breaking change: metavar printing was updated. SignalHarness currently resolves Typer 0.26.7 and uses Typer for its CLI.",
+    "url": "https://github.com/fastapi/typer/blob/master/docs/release-notes.md",
+    "published_at": "2026-07-15T00:00:00Z",
+    "change_kind": "released",
+    "current_version": "0.27.0",
+    "previous_version": "0.26.7",
+    "raw_payload": {
+      "official": true,
+      "source_snapshot_date": "2026-09-09",
+      "fact_basis": "official release notes"
+    },
+    "collected_at": "2026-09-09T00:00:00Z"
+  },
+  {
+    "event_id": "rw-005",
+    "source_type": "github_release",
+    "source_name": "pydantic",
+    "title": "Pydantic 2.13.5 maintenance fixes",
+    "content": "Pydantic 2.13.5 fixes validator reuse with plugins, missing garbage-collector traversal fields, and smart-union validated-field counting. SignalHarness currently resolves Pydantic 2.13.4.",
+    "url": "https://github.com/pydantic/pydantic/releases/tag/v2.13.5",
+    "published_at": "2026-08-28T14:06:00Z",
+    "change_kind": "released",
+    "current_version": "2.13.5",
+    "previous_version": "2.13.4",
+    "raw_payload": {
+      "official": true,
+      "source_snapshot_date": "2026-09-09",
+      "fact_basis": "official release"
+    },
+    "collected_at": "2026-09-09T00:00:00Z"
+  },
+  {
+    "event_id": "rw-006",
+    "source_type": "github_release",
+    "source_name": "fastapi",
+    "title": "FastAPI 0.141.1 fixes app.frontend dependency background tasks and headers",
+    "content": "FastAPI 0.141.1 fixes background tasks and headers from dependencies in app.frontend. SignalHarness already resolves FastAPI 0.141.1 and does not rely on this as a newly pending upgrade.",
+    "url": "https://github.com/fastapi/fastapi/releases/tag/0.141.1",
+    "published_at": "2026-07-29T17:17:00Z",
+    "change_kind": "released",
+    "current_version": "0.141.1",
+    "previous_version": "0.141.0",
+    "raw_payload": {
+      "official": true,
+      "source_snapshot_date": "2026-09-09",
+      "fact_basis": "official release"
+    },
+    "collected_at": "2026-09-09T00:00:00Z"
+  },
+  {
+    "event_id": "rw-007",
+    "source_type": "github_release",
+    "source_name": "fastapi",
+    "title": "FastAPI 0.140.13 fixes status codes for SSE and JSONL streams",
+    "content": "FastAPI 0.140.13 fixes status_code being ignored for SSE and JSONL streaming endpoints. SignalHarness uses SSE but already resolves the later FastAPI 0.141.1 release.",
+    "url": "https://github.com/fastapi/fastapi/releases/tag/0.140.13",
+    "published_at": "2026-07-28T15:36:00Z",
+    "change_kind": "released",
+    "current_version": "0.140.13",
+    "previous_version": "0.140.12",
+    "raw_payload": {
+      "official": true,
+      "source_snapshot_date": "2026-09-09",
+      "fact_basis": "official release"
+    },
+    "collected_at": "2026-09-09T00:00:00Z"
+  },
+  {
+    "event_id": "rw-008",
+    "source_type": "github_release",
+    "source_name": "uvicorn",
+    "title": "Uvicorn 0.52.4 fixes duplicate Date headers in WebSocket handshakes",
+    "content": "Uvicorn 0.52.4 fixes duplicate Date headers in accepted WebSocket handshakes using the websockets-sansio implementation. SignalHarness already resolves 0.52.4 and its primary live stream is SSE.",
+    "url": "https://github.com/Kludex/uvicorn/releases/tag/0.52.4",
+    "published_at": "2026-08-19T06:00:00Z",
+    "change_kind": "released",
+    "current_version": "0.52.4",
+    "previous_version": "0.52.3",
+    "raw_payload": {
+      "official": true,
+      "source_snapshot_date": "2026-09-09",
+      "fact_basis": "official release"
+    },
+    "collected_at": "2026-09-09T00:00:00Z"
+  },
+  {
+    "event_id": "rw-009",
+    "source_type": "github_release",
+    "source_name": "rich",
+    "title": "Rich 15.0.0 drops Python 3.8 support",
+    "content": "Rich 15.0.0 is a major release because Python 3.8 support was dropped. SignalHarness already resolves Rich 15.0.0 and requires Python 3.10 or newer.",
+    "url": "https://github.com/Textualize/rich/releases/tag/v15.0.0",
+    "published_at": "2026-04-12T00:00:00Z",
+    "change_kind": "released",
+    "current_version": "15.0.0",
+    "previous_version": "14.3.4",
+    "raw_payload": {
+      "official": true,
+      "source_snapshot_date": "2026-09-09",
+      "fact_basis": "official release"
+    },
+    "collected_at": "2026-09-09T00:00:00Z"
+  },
+  {
+    "event_id": "rw-010",
+    "source_type": "github_release",
+    "source_name": "langchain-ai/langgraph",
+    "title": "LangGraph 1.2.11 exposes trace_policy and updates checkpoint behavior",
+    "content": "LangGraph 1.2.11 exposes trace_policy on add_node and includes checkpoint-related fixes and conformance work. LangGraph is a monitored ecosystem project and competitor, not a direct SignalHarness dependency.",
+    "url": "https://github.com/langchain-ai/langgraph/releases/tag/1.2.11",
+    "published_at": "2026-08-11T14:00:00Z",
+    "change_kind": "released",
+    "current_version": "1.2.11",
+    "raw_payload": {
+      "official": true,
+      "source_snapshot_date": "2026-09-09",
+      "fact_basis": "official release"
+    },
+    "collected_at": "2026-09-09T00:00:00Z"
+  },
+  {
+    "event_id": "rw-011",
+    "source_type": "github_release",
+    "source_name": "openai/openai-agents-python",
+    "title": "OpenAI Agents Python 0.21.0 adds provider-neutral testing APIs",
+    "content": "Version 0.21.0 adds provider-neutral deterministic testing APIs, OpenAI Python v3 compatibility, and reliability improvements around RunState and MCP lifecycle handling. The release states there is no known breaking SDK behavior change.",
+    "url": "https://github.com/openai/openai-agents-python/releases/tag/v0.21.0",
+    "published_at": "2026-08-15T02:49:00Z",
+    "change_kind": "released",
+    "current_version": "0.21.0",
+    "raw_payload": {
+      "official": true,
+      "source_snapshot_date": "2026-09-09",
+      "fact_basis": "official release"
+    },
+    "collected_at": "2026-09-09T00:00:00Z"
+  },
+  {
+    "event_id": "rw-012",
+    "source_type": "github_release",
+    "source_name": "openai/openai-agents-python",
+    "title": "OpenAI Agents Python 0.20.0 changes its default model and MCP dependency integration",
+    "content": "Version 0.20.0 changes the SDK's implicit default model and includes a potentially breaking MCP dependency migration for applications with customized local HTTP transports. SignalHarness does not depend on openai-agents-python directly.",
+    "url": "https://github.com/openai/openai-agents-python/releases/tag/v0.20.0",
+    "published_at": "2026-08-11T03:12:00Z",
+    "change_kind": "released",
+    "current_version": "0.20.0",
+    "raw_payload": {
+      "official": true,
+      "source_snapshot_date": "2026-09-09",
+      "fact_basis": "official release"
+    },
+    "collected_at": "2026-09-09T00:00:00Z"
+  },
+  {
+    "event_id": "rw-013",
+    "source_type": "web_change",
+    "source_name": "microsoft/autogen",
+    "title": "AutoGen enters maintenance mode and points new users to Microsoft Agent Framework",
+    "content": "The AutoGen repository now states that AutoGen is in maintenance mode, will receive no new features or enhancements, and is community managed; new users are directed to Microsoft Agent Framework. AutoGen is a tracked SignalHarness competitor.",
+    "url": "https://github.com/microsoft/autogen",
+    "published_at": null,
+    "change_kind": "updated",
+    "raw_payload": {
+      "official": true,
+      "source_snapshot_date": "2026-09-09",
+      "fact_basis": "official repository README snapshot"
+    },
+    "collected_at": "2026-09-08T16:00:00Z"
+  },
+  {
+    "event_id": "rw-014",
+    "source_type": "github_issue",
+    "source_name": "mcp",
+    "title": "CallToolResult structuredContent may not match aliased outputSchema",
+    "content": "Open issue #3467 reports that CallToolResult structuredContent is not alias-normalized to match outputSchema and identifies the current stable 2.x release line. This can make clients reject otherwise server-produced structured tool payloads.",
+    "url": "https://github.com/modelcontextprotocol/python-sdk/issues/3467",
+    "published_at": "2026-09-07T00:00:00Z",
+    "change_kind": "new",
+    "raw_payload": {
+      "source_authority": "community",
+      "source_snapshot_date": "2026-09-09",
+      "fact_basis": "upstream issue"
+    },
+    "collected_at": "2026-09-09T00:00:00Z"
+  },
+  {
+    "event_id": "rw-015",
+    "source_type": "github_issue",
+    "source_name": "mcp",
+    "title": "MCP v1 Streamable HTTP unresolved-request bug is already fixed on 2.x",
+    "content": "Open issue #3441 requests a v1.x backport for a Streamable HTTP client bug where an SSE response stream could end without resolving a request. The issue explicitly says the bug is fixed on 2.x; SignalHarness currently resolves mcp 2.1.1.",
+    "url": "https://github.com/modelcontextprotocol/python-sdk/issues/3441",
+    "published_at": "2026-09-04T00:00:00Z",
+    "change_kind": "new",
+    "raw_payload": {
+      "source_authority": "community",
+      "source_snapshot_date": "2026-09-09",
+      "fact_basis": "upstream issue"
+    },
+    "collected_at": "2026-09-09T00:00:00Z"
+  }
+]

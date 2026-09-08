@@ -22,6 +22,8 @@ class HarnessVariant(StrEnum):
     DETERMINISTIC_SUPERVISOR_DEFERRED_LEARNING = "deterministic-supervisor-deferred-learning"
     DETERMINISTIC_EVIDENCE_RESOLVER = "deterministic-evidence-resolver"
     SELECTIVE_EVIDENCE_RESEARCHER = "selective-evidence-researcher"
+    SELECTIVE_EVIDENCE_IMPACT_ACTION = "selective-evidence-impact-action"
+    SELECTIVE_EVIDENCE_IMPACT_ACTION_VERIFIER = "selective-evidence-impact-action-verifier"
 
     @property
     def analyzer_version(self) -> str:
@@ -31,6 +33,8 @@ class HarnessVariant(StrEnum):
             self.DETERMINISTIC_SUPERVISOR_DEFERRED_LEARNING: "deterministic-router-deferred-learning-v1",
             self.DETERMINISTIC_EVIDENCE_RESOLVER: "deterministic-evidence-resolver-v1",
             self.SELECTIVE_EVIDENCE_RESEARCHER: "selective-evidence-researcher-v1",
+            self.SELECTIVE_EVIDENCE_IMPACT_ACTION: "selective-evidence-impact-action-v1",
+            self.SELECTIVE_EVIDENCE_IMPACT_ACTION_VERIFIER: "selective-evidence-impact-action-verifier-v1",
         }[self]
 
 

@@ -13,6 +13,8 @@ from signal_harness.agent_integration.schemas import (
     ContextEvidenceItem,
     ContextEvidenceOutput,
     EvidenceToolPlan,
+    ImpactActionItem,
+    ImpactActionOutput,
     ImpactItem,
     ImpactOutput,
     LearningPolicyOutput,
@@ -20,14 +22,18 @@ from signal_harness.agent_integration.schemas import (
     SupervisorOutput,
     SupervisorRoute,
     ToolObservation,
+    VerificationItem,
+    VerificationOutput,
     ToolRequest,
 )
 from signal_harness.agents.classifier import ClassifierAgent
 from signal_harness.agent_team import (
     ActionPlannerAgent,
     ContextEvidenceAgent,
+    ImpactActionAnalyzerAgent,
     ImpactAnalystAgent,
     LearningPolicyAgent,
+    SelectiveVerifierAgent,
     SignalSupervisorAgent,
 )
 from signal_harness.providers.adapter import AgentCall, ProviderUsage
@@ -88,8 +94,12 @@ class MockProvider:
             return self._scripted_evidence(payload).model_dump_json()
         if call.output_schema == "ImpactOutput":
             return self._scripted_impact(payload).model_dump_json()
+        if call.output_schema == "ImpactActionOutput":
+            return self._scripted_impact_action(payload).model_dump_json()
         if call.output_schema == "ActionOutput":
             return self._scripted_action(payload).model_dump_json()
+        if call.output_schema == "VerificationOutput":
+            return self._scripted_verification(payload).model_dump_json()
         if call.output_schema == "LearningPolicyOutput":
             return self._scripted_learning(payload).model_dump_json()
         raise ValueError(f"Unknown scripted schema: {call.output_schema}")
@@ -134,9 +144,17 @@ class MockProvider:
                 )
                 .model_dump_json()
             )
+        if call.agent_name == ImpactActionAnalyzerAgent.name:
+            return (
+                ImpactActionAnalyzerAgent()
+                .fallback(events, project_profile, {})
+                .model_dump_json()
+            )
         if call.agent_name == ActionPlannerAgent.name:
             impact = ImpactOutput.model_validate(payload["impact"])
             return ActionPlannerAgent().fallback(events, impact).model_dump_json()
+        if call.agent_name == SelectiveVerifierAgent.name:
+            return SelectiveVerifierAgent().fallback(events).model_dump_json()
         if call.agent_name == LearningPolicyAgent.name:
             return LearningPolicyAgent().fallback(payload).model_dump_json()
         raise ValueError(f"Unknown fallback Agent: {call.agent_name}")
@@ -394,6 +412,23 @@ class MockProvider:
             )
         return ImpactOutput(results=results)
 
+    def _scripted_impact_action(self, payload: dict[str, Any]) -> ImpactActionOutput:
+        impact = self._scripted_impact(payload)
+        action_payload = {**payload, "impact": impact.model_dump(mode="json")}
+        action = self._scripted_action(action_payload)
+        impact_by_id = {item.event_id: item for item in impact.results}
+        action_by_id = {item.event_id: item for item in action.results}
+        return ImpactActionOutput(
+            results=[
+                ImpactActionItem(
+                    event_id=event.event_id,
+                    impact=impact_by_id[event.event_id],
+                    action=action_by_id[event.event_id],
+                )
+                for event in self._events(payload)
+            ]
+        )
+
     def _scripted_action(self, payload: dict[str, Any]) -> ActionOutput:
         impact = ImpactOutput.model_validate(payload["impact"])
         impact_by_id = {item.event_id: item for item in impact.results}
@@ -414,6 +449,18 @@ class MockProvider:
                 )
             )
         return ActionOutput(results=results)
+
+    def _scripted_verification(self, payload: dict[str, Any]) -> VerificationOutput:
+        return VerificationOutput(
+            results=[
+                VerificationItem(
+                    event_id=event.event_id,
+                    supported=True,
+                    notes="Scripted verifier found no unsupported escalation.",
+                )
+                for event in self._events(payload)
+            ]
+        )
 
     def _scripted_learning(self, payload: dict[str, Any]) -> LearningPolicyOutput:
         active = deepcopy(payload.get("policy_memory", {}).get("active_policy", {}))

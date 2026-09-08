@@ -22,12 +22,18 @@ PROFILE = {
 }
 
 
-def _event(title: str, *, source_type: str = "github_release", official: bool = True):
+def _event(
+    title: str,
+    *,
+    source_type: str = "github_release",
+    source_name: str = "langchain-ai/langgraph",
+    official: bool = True,
+):
     return normalize_event(
         {
             "event_id": title.lower().replace(" ", "-"),
             "source_type": source_type,
-            "source_name": "langchain-ai/langgraph",
+            "source_name": source_name,
             "title": title,
             "content": title,
             "url": "https://example.com/item",
@@ -172,7 +178,10 @@ def test_security_breaking_dependency_can_require_action(project_root) -> None:
 def test_monitored_ecosystem_scores_below_direct_dependency(project_root) -> None:
     policy = load_signal_policy(project_root / "configs" / "signal_policy.yaml")
     dependency = score_signal(
-        _event("pydantic JSON schema compatibility migration"),
+        _event(
+            "pydantic JSON schema compatibility migration",
+            source_name="pydantic/pydantic",
+        ),
         PROFILE,
         policy,
         now=NOW,
@@ -202,7 +211,10 @@ def test_dependency_relevance_does_not_match_inside_words(project_root) -> None:
         now=NOW,
     )
     direct = score_signal(
-        _event("rich compatibility regression"),
+        _event(
+            "rich compatibility regression",
+            source_name="Textualize/rich",
+        ),
         {
             **PROFILE,
             "dependencies": ["rich"],

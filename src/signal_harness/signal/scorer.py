@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
+from signal_harness.signal.project_state import resolve_project_change_state
 from signal_harness.signal.schemas import (
     FeedbackRecord,
     ScoreBreakdown,
@@ -187,16 +188,20 @@ def relevance_score(
     text = _semantic_text(event, include_source=True)
     groups = (
         ("critical_modules", 30),
-        ("dependencies", 28),
         ("monitored_ecosystem", 12),
         ("tech_stack", 15),
         ("competitors", 10),
         ("focus_keywords", 15),
     )
     score = 10.0
+    state = resolve_project_change_state(event, profile)
+    if state.direct_dependency:
+        score += 28
     for key, points in groups:
         if _matched(text, _keywords(profile, key)):
             score += points
+    if state.already_satisfied:
+        score -= 45
     suggested, keyword_weights = _policy_keywords(active_policy)
     adaptive_hits = _matched(text, list(dict.fromkeys([*suggested, *keyword_weights])))
     score += min(

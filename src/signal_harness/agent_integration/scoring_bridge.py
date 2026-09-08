@@ -13,6 +13,10 @@ from signal_harness.agent_integration.schemas import (
 )
 from signal_harness.runtime.permissions import SignalPermissionGuard
 from signal_harness.signal.policy import decision_for_score
+from signal_harness.signal.project_state import (
+    project_preference_importance,
+    resolve_project_change_state,
+)
 from signal_harness.signal.scorer import score_signal
 from signal_harness.signal.text_semantics import any_affirmed_term
 from signal_harness.signal.schemas import (
@@ -101,9 +105,32 @@ def guarded_assessments(
             source_quality=evidence_item.source_quality.value,
             policy=policy,
         )
-        if priority_floor is not None:
-            final_score = max(final_score, priority_floor)
+        project_floor = _project_state_priority_floor_score(
+            event=event,
+            category=route.category,
+            source_quality=evidence_item.source_quality.value,
+            project_profile=project_profile,
+            policy=policy,
+        )
+        for floor in (priority_floor, project_floor):
+            if floor is not None:
+                final_score = max(final_score, floor)
         decision = decision_for_score(final_score, policy)
+        project_state = resolve_project_change_state(event, project_profile)
+        importance = project_preference_importance(project_state, project_profile)
+        if project_state.already_satisfied or importance == "ignore":
+            decision = SignalDecision.IGNORE
+        elif project_state.newer_direct_release and decision is SignalDecision.IGNORE:
+            decision = SignalDecision.SAVE
+        elif (
+            route.category is SignalCategory.COMPETITOR_UPDATE
+            and decision is SignalDecision.IGNORE
+            and any_affirmed_term(
+                f"{event.title} {event.content}".lower(),
+                ("maintenance mode", "no new features", "archived", "sunset", "deprecated"),
+            )
+        ):
+            decision = SignalDecision.SAVE
         if route.category is SignalCategory.NOISE or not route.analyze:
             decision = SignalDecision.IGNORE
 
@@ -205,6 +232,48 @@ def _is_tool_debug_text(text: str) -> bool:
     )
     return any(marker in lowered for marker in debug_markers)
 
+
+
+def _project_state_priority_floor_score(
+    *,
+    event: SignalEvent,
+    category: SignalCategory,
+    source_quality: str,
+    project_profile: dict[str, Any],
+    policy: dict[str, Any],
+) -> float | None:
+    """Protect project-specific protocol/dependency risks that generic scoring can under-rate."""
+
+    state = resolve_project_change_state(event, project_profile)
+    if state.already_satisfied or source_quality == "unverified":
+        return None
+    text = f"{event.title} {event.content}".lower()
+    direct_terms = (
+        "migration", "compatibility", "schema", "oauth", "transport",
+    )
+    protocol_terms = (
+        "allowlist", "path traversal", "structuredcontent", "structured content",
+        "outputschema", "output schema", "session", "initialize", "streamable http",
+        "oauth", "routing",
+    )
+    direct_risk = (
+        state.newer_direct_release
+        and category is SignalCategory.DEPENDENCY_UPDATE
+        and any_affirmed_term(text, direct_terms)
+    )
+    protocol_risk = (
+        state.protocol_name is not None
+        and category in {
+            SignalCategory.POLICY_SIGNAL,
+            SignalCategory.AGENT_RUNTIME_SIGNAL,
+            SignalCategory.STRUCTURED_OUTPUT_SIGNAL,
+        }
+        and any_affirmed_term(text, protocol_terms)
+    )
+    if not direct_risk and not protocol_risk:
+        return None
+    thresholds = policy.get("thresholds", {})
+    return max(0.0, min(100.0, float(thresholds.get("alert", 80.0))))
 
 def _priority_floor_score(
     *,

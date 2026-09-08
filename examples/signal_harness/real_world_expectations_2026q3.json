@@ -1,0 +1,117 @@
+{
+  "suite": "real-world-2026q3-v1",
+  "description": "15 frozen real-world upstream changes verified from official release/spec/repository evidence or clearly identified upstream issues as of 2026-09-09. Labels are project-state-aware, including installed-version and direct-vs-transitive hard negatives.",
+  "thresholds": {
+    "decision_accuracy": 0.8,
+    "category_accuracy": 0.7,
+    "priority_precision": 0.8,
+    "priority_recall": 0.75
+  },
+  "cases": [
+    {
+      "event_id": "rw-001",
+      "expected_decision": "alert",
+      "expected_category": "dependency_update",
+      "expected_priority": true,
+      "rationale": "Direct MCP SDK upgrade from installed 2.1.1 to 2.2.0 changes transport/OAuth/schema behavior used by SignalHarness."
+    },
+    {
+      "event_id": "rw-002",
+      "expected_decision": "alert",
+      "expected_category": "policy_signal",
+      "expected_priority": true,
+      "rationale": "Current MCP v2 resource allowlist path-normalization issue crosses a permission boundary and affects the installed major line."
+    },
+    {
+      "event_id": "rw-003",
+      "expected_decision": "alert",
+      "expected_category": "agent_runtime_signal",
+      "expected_priority": true,
+      "rationale": "MCP protocol session/initialization semantics changed materially and SignalHarness exposes Streamable HTTP MCP."
+    },
+    {
+      "event_id": "rw-004",
+      "expected_decision": "save",
+      "expected_category": "dependency_update",
+      "expected_priority": false,
+      "rationale": "Typer is direct and newer, but the documented breaking change is metavar presentation rather than a demonstrated runtime blocker."
+    },
+    {
+      "event_id": "rw-005",
+      "expected_decision": "save",
+      "expected_category": "ecosystem_issue",
+      "expected_priority": false,
+      "rationale": "Pydantic patch is newer than the installed direct dependency but contains maintenance fixes without a demonstrated SignalHarness break."
+    },
+    {
+      "event_id": "rw-006",
+      "expected_decision": "ignore",
+      "expected_category": "ecosystem_issue",
+      "expected_priority": false,
+      "rationale": "SignalHarness already resolves FastAPI 0.141.1, so the observed 0.141.1 release is not a pending project change."
+    },
+    {
+      "event_id": "rw-007",
+      "expected_decision": "ignore",
+      "expected_category": "ecosystem_issue",
+      "expected_priority": false,
+      "rationale": "FastAPI 0.140.13 is older than the installed 0.141.1 and its SSE fix is already superseded for this project."
+    },
+    {
+      "event_id": "rw-008",
+      "expected_decision": "ignore",
+      "expected_category": "ecosystem_issue",
+      "expected_priority": false,
+      "rationale": "SignalHarness already resolves Uvicorn 0.52.4 and the fix targets WebSocket handshakes rather than the primary SSE path."
+    },
+    {
+      "event_id": "rw-009",
+      "expected_decision": "ignore",
+      "expected_category": "ecosystem_issue",
+      "expected_priority": false,
+      "rationale": "SignalHarness already resolves Rich 15.0.0 and requires Python 3.10+, so the dropped Python 3.8 support is already satisfied."
+    },
+    {
+      "event_id": "rw-010",
+      "expected_decision": "save",
+      "expected_category": "checkpoint_persistence_signal",
+      "expected_priority": false,
+      "rationale": "LangGraph is monitored ecosystem context; checkpoint/trace-policy changes are useful competitive architecture evidence but not direct project breakage."
+    },
+    {
+      "event_id": "rw-011",
+      "expected_decision": "save",
+      "expected_category": "provider_compatibility_signal",
+      "expected_priority": false,
+      "rationale": "OpenAI Agents SDK testing/provider-neutral changes are relevant ecosystem evidence but the package is not a direct dependency."
+    },
+    {
+      "event_id": "rw-012",
+      "expected_decision": "save",
+      "expected_category": "provider_compatibility_signal",
+      "expected_priority": false,
+      "rationale": "OpenAI Agents SDK changes model/MCP integration but is not a direct SignalHarness dependency; it must not be escalated as an MCP package upgrade."
+    },
+    {
+      "event_id": "rw-013",
+      "expected_decision": "save",
+      "expected_category": "competitor_update",
+      "expected_priority": false,
+      "rationale": "AutoGen maintenance mode is a material tracked-competitor lifecycle change, useful strategically but not an immediate project failure."
+    },
+    {
+      "event_id": "rw-014",
+      "expected_decision": "alert",
+      "expected_category": "structured_output_signal",
+      "expected_priority": true,
+      "rationale": "Current MCP 2.x structuredContent/outputSchema mismatch can affect SignalHarness structured MCP tool payload compatibility."
+    },
+    {
+      "event_id": "rw-015",
+      "expected_decision": "ignore",
+      "expected_category": "agent_runtime_signal",
+      "expected_priority": false,
+      "rationale": "The upstream issue explicitly targets a v1 backport and states the bug is fixed on 2.x; SignalHarness resolves mcp 2.1.1."
+    }
+  ]
+}

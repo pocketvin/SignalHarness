@@ -22,12 +22,14 @@ from signal_harness.agent_integration.schemas import (
     ActionOutput,
     ContextEvidenceOutput,
     EvidenceToolPlan,
+    ImpactActionOutput,
     ImpactOutput,
     LearningPolicyOutput,
     RequiredAgent,
     SupervisorOutput,
     ToolObservation,
     ToolRequest,
+    VerificationOutput,
 )
 from signal_harness.agent_integration.scoring_bridge import guarded_assessments
 from signal_harness.agent_integration.tool_loop import (
@@ -39,14 +41,17 @@ from signal_harness.agent_integration.tool_loop import (
 from signal_harness.agent_team import (
     ActionPlannerAgent,
     ContextEvidenceAgent,
+    ImpactActionAnalyzerAgent,
     ImpactAnalystAgent,
     LearningPolicyAgent,
+    SelectiveVerifierAgent,
     SignalSupervisorAgent,
 )
 from signal_harness.agents.classifier import ClassifierAgent
 from signal_harness.providers.adapter import AgentCall, AgentProvider
 from signal_harness.runtime.tool_executor import SignalToolExecutor
 from signal_harness.runtime.tracing import TraceRecorder
+from signal_harness.signal.project_state import resolve_project_change_state
 from signal_harness.signal.source_authority import clamp_source_quality
 from signal_harness.signal.text_semantics import any_affirmed_term
 from signal_harness.signal.schemas import (
@@ -169,7 +174,9 @@ class LLMAgentTeamRunner:
         self.supervisor = SignalSupervisorAgent()
         self.evidence = ContextEvidenceAgent()
         self.impact = ImpactAnalystAgent()
+        self.impact_action = ImpactActionAnalyzerAgent()
         self.action = ActionPlannerAgent()
+        self.verifier = SelectiveVerifierAgent()
         self.learning = LearningPolicyAgent()
 
     async def _invoke(
@@ -272,6 +279,8 @@ class LLMAgentTeamRunner:
             HarnessVariant.DETERMINISTIC_SUPERVISOR_DEFERRED_LEARNING,
             HarnessVariant.DETERMINISTIC_EVIDENCE_RESOLVER,
             HarnessVariant.SELECTIVE_EVIDENCE_RESEARCHER,
+            HarnessVariant.SELECTIVE_EVIDENCE_IMPACT_ACTION,
+            HarnessVariant.SELECTIVE_EVIDENCE_IMPACT_ACTION_VERIFIER,
         }:
             routes = route_fallback()
             self.trace.steps.append(
@@ -321,6 +330,8 @@ class LLMAgentTeamRunner:
             in {
                 HarnessVariant.DETERMINISTIC_EVIDENCE_RESOLVER,
                 HarnessVariant.SELECTIVE_EVIDENCE_RESEARCHER,
+                HarnessVariant.SELECTIVE_EVIDENCE_IMPACT_ACTION,
+                HarnessVariant.SELECTIVE_EVIDENCE_IMPACT_ACTION_VERIFIER,
             }
         ):
             plan = self.evidence.fallback_plan(evidence_events)
@@ -366,7 +377,11 @@ class LLMAgentTeamRunner:
                     ),
                 )
             )
-            if self.harness_variant is HarnessVariant.SELECTIVE_EVIDENCE_RESEARCHER:
+            if self.harness_variant in {
+                HarnessVariant.SELECTIVE_EVIDENCE_RESEARCHER,
+                HarnessVariant.SELECTIVE_EVIDENCE_IMPACT_ACTION,
+                HarnessVariant.SELECTIVE_EVIDENCE_IMPACT_ACTION_VERIFIER,
+            }:
                 selected_ids = self._selective_evidence_event_ids(
                     evidence_events,
                     evidence,
@@ -553,52 +568,133 @@ class LLMAgentTeamRunner:
 
         impact_events = self._events_for(events, route_by_id, "impact")
         impact_ids = {event.event_id for event in impact_events}
+        action_events = self._events_for(events, route_by_id, "action")
+        action_ids = {event.event_id for event in action_events}
+        merged_variant = self.harness_variant in {
+            HarnessVariant.SELECTIVE_EVIDENCE_IMPACT_ACTION,
+            HarnessVariant.SELECTIVE_EVIDENCE_IMPACT_ACTION_VERIFIER,
+        }
+        action_trace: int | None = None
+        action = ActionOutput(results=[])
         if impact_events:
             impact_evidence = ContextEvidenceOutput(
                 results=[item for item in evidence.results if item.event_id in impact_ids]
             )
-            impact_call = self.impact.build_call(
-                impact_events,
-                project_profile,
-                routes,
-                impact_evidence,
-                clusters=active_clusters,
-                policy=policy,
-                volatile_metadata=volatile,
-            )
-            impact, impact_trace = await self._invoke(
-                impact_call,
-                ImpactOutput,
-                lambda: self.impact.fallback(
+            if merged_variant:
+                combined_call = self.impact_action.build_call(
                     impact_events,
                     project_profile,
-                    policy,
-                    active_clusters,
-                ),
-                event_ids=[event.event_id for event in impact_events],
-            )
-            impact = self._ensure_coverage(
-                impact,
-                expected_ids=impact_ids,
-                fallback=lambda: self.impact.fallback(
+                    routes,
+                    impact_evidence,
+                    clusters=active_clusters,
+                    policy=policy,
+                    volatile_metadata={**volatile, "merged_impact_action": True},
+                )
+                combined, action_trace = await self._invoke(
+                    combined_call,
+                    ImpactActionOutput,
+                    lambda: self.impact_action.fallback(
+                        impact_events,
+                        project_profile,
+                        policy,
+                        active_clusters,
+                    ),
+                    event_ids=[event.event_id for event in impact_events],
+                )
+                combined = self._ensure_coverage(
+                    combined,
+                    expected_ids=impact_ids,
+                    fallback=lambda: self.impact_action.fallback(
+                        impact_events,
+                        project_profile,
+                        policy,
+                        active_clusters,
+                    ),
+                    trace_index=action_trace,
+                )
+                impact = ImpactOutput(results=[item.impact for item in combined.results])
+                action = ActionOutput(
+                    results=[
+                        item.action for item in combined.results if item.event_id in action_ids
+                    ]
+                )
+                repair_rounds_before = self.repair.repair_rounds_used
+                evidence, impact = await self._maybe_run_impact_evidence_repair(
+                    events=impact_events,
+                    routes=routes,
+                    evidence=evidence,
+                    impact=impact,
+                    project_profile=project_profile,
+                    policy=policy,
+                    clusters=active_clusters,
+                    memory_snapshot=memory_snapshot,
+                    volatile_metadata=volatile,
+                )
+                if self.repair.repair_rounds_used > repair_rounds_before and action_events:
+                    repaired_action_impact = ImpactOutput(
+                        results=[
+                            item for item in impact.results if item.event_id in action_ids
+                        ]
+                    )
+                    action = self.action.fallback(action_events, repaired_action_impact)
+                    self.trace.steps.append(
+                        TraceStep(
+                            step="merged_action_recomputed_after_repair",
+                            status="success",
+                            agent="DeterministicActionRecompute",
+                            input_count=len(action_events),
+                            output_count=len(action.results),
+                            duration_ms=0,
+                            metadata={"harness_variant": self.harness_variant.value},
+                            detail=(
+                                "Impact evidence repair changed the combined semantic result; "
+                                "actions were recomputed deterministically from repaired impact."
+                            ),
+                        )
+                    )
+            else:
+                impact_call = self.impact.build_call(
                     impact_events,
                     project_profile,
-                    policy,
-                    active_clusters,
-                ),
-                trace_index=impact_trace,
-            )
-            evidence, impact = await self._maybe_run_impact_evidence_repair(
-                events=impact_events,
-                routes=routes,
-                evidence=evidence,
-                impact=impact,
-                project_profile=project_profile,
-                policy=policy,
-                clusters=active_clusters,
-                memory_snapshot=memory_snapshot,
-                volatile_metadata=volatile,
-            )
+                    routes,
+                    impact_evidence,
+                    clusters=active_clusters,
+                    policy=policy,
+                    volatile_metadata=volatile,
+                )
+                impact, impact_trace = await self._invoke(
+                    impact_call,
+                    ImpactOutput,
+                    lambda: self.impact.fallback(
+                        impact_events,
+                        project_profile,
+                        policy,
+                        active_clusters,
+                    ),
+                    event_ids=[event.event_id for event in impact_events],
+                )
+                impact = self._ensure_coverage(
+                    impact,
+                    expected_ids=impact_ids,
+                    fallback=lambda: self.impact.fallback(
+                        impact_events,
+                        project_profile,
+                        policy,
+                        active_clusters,
+                    ),
+                    trace_index=impact_trace,
+                )
+                evidence, impact = await self._maybe_run_impact_evidence_repair(
+                    events=impact_events,
+                    routes=routes,
+                    evidence=evidence,
+                    impact=impact,
+                    project_profile=project_profile,
+                    policy=policy,
+                    clusters=active_clusters,
+                    memory_snapshot=memory_snapshot,
+                    volatile_metadata=volatile,
+                )
         else:
             impact = ImpactOutput(results=[])
         skipped_impact = [event for event in events if event.event_id not in impact_ids]
@@ -617,9 +713,7 @@ class LLMAgentTeamRunner:
                 }
             )
 
-        action_events = self._events_for(events, route_by_id, "action")
-        action_ids = {event.event_id for event in action_events}
-        if action_events:
+        if action_events and not merged_variant:
             action_impact = ImpactOutput(
                 results=[item for item in impact.results if item.event_id in action_ids]
             )
@@ -653,9 +747,6 @@ class LLMAgentTeamRunner:
                 clusters=active_clusters,
                 volatile_metadata=volatile,
             )
-        else:
-            action = ActionOutput(results=[])
-            action_trace = None
         skipped_action = [event for event in events if event.event_id not in action_ids]
         if skipped_action:
             skipped_ids = {event.event_id for event in skipped_action}
@@ -673,6 +764,47 @@ class LLMAgentTeamRunner:
                     ]
                 }
             )
+
+        if (
+            self.harness_variant
+            is HarnessVariant.SELECTIVE_EVIDENCE_IMPACT_ACTION_VERIFIER
+        ):
+            verifier_ids = self._selective_verifier_event_ids(events, evidence, impact)
+            if verifier_ids:
+                verifier_events = [event for event in events if event.event_id in verifier_ids]
+                verifier_evidence = ContextEvidenceOutput(
+                    results=[item for item in evidence.results if item.event_id in verifier_ids]
+                )
+                verifier_impact = ImpactOutput(
+                    results=[item for item in impact.results if item.event_id in verifier_ids]
+                )
+                verifier_action = ActionOutput(
+                    results=[item for item in action.results if item.event_id in verifier_ids]
+                )
+                verifier_call = self.verifier.build_call(
+                    verifier_events,
+                    verifier_evidence,
+                    verifier_impact,
+                    verifier_action,
+                    project_profile=project_profile,
+                    policy=policy,
+                    volatile_metadata={**volatile, "selective_verifier": True},
+                )
+                verification, verifier_trace = await self._invoke(
+                    verifier_call,
+                    VerificationOutput,
+                    lambda: self.verifier.fallback(verifier_events),
+                    event_ids=[event.event_id for event in verifier_events],
+                )
+                verification = self._ensure_coverage(
+                    verification,
+                    expected_ids=verifier_ids,
+                    fallback=lambda: self.verifier.fallback(verifier_events),
+                    trace_index=verifier_trace,
+                )
+                evidence, impact, action = self._apply_verification(
+                    evidence, impact, action, verification
+                )
 
         audit_completion_event_ids = [
             event.event_id
@@ -749,6 +881,8 @@ class LLMAgentTeamRunner:
                 HarnessVariant.DETERMINISTIC_SUPERVISOR_DEFERRED_LEARNING,
                 HarnessVariant.DETERMINISTIC_EVIDENCE_RESOLVER,
                 HarnessVariant.SELECTIVE_EVIDENCE_RESEARCHER,
+                HarnessVariant.SELECTIVE_EVIDENCE_IMPACT_ACTION,
+                HarnessVariant.SELECTIVE_EVIDENCE_IMPACT_ACTION_VERIFIER,
             }
         )
         if needs_learning and effective_defer_learning:
@@ -949,14 +1083,6 @@ class LLMAgentTeamRunner:
         evidence: ContextEvidenceOutput,
         project_profile: dict[str, Any],
     ) -> set[str]:
-        dependency_names: set[str] = set()
-        for item in project_profile.get("dependencies", []):
-            if isinstance(item, dict):
-                name = str(item.get("name") or "").strip().lower()
-            else:
-                name = str(item).strip().lower()
-            if name:
-                dependency_names.add(name)
         evidence_by_id = {item.event_id: item for item in evidence.results}
         risk_terms = (
             "breaking",
@@ -974,19 +1100,109 @@ class LLMAgentTeamRunner:
             item = evidence_by_id.get(event.event_id)
             if item is None or item.source_quality.value != "official":
                 continue
-            source = event.source_name.lower()
-            direct_dependency = any(
-                dependency == source
-                or dependency in source.split("/")
-                or dependency in f"{event.title} {event.content}".lower()
-                for dependency in dependency_names
-            )
-            if not direct_dependency:
+            if not resolve_project_change_state(event, project_profile).direct_dependency:
                 continue
             text = f"{event.title} {event.content}"
             if any_affirmed_term(text, risk_terms):
                 selected.add(event.event_id)
         return selected
+
+    @staticmethod
+    def _selective_verifier_event_ids(
+        events: list[SignalEvent],
+        evidence: ContextEvidenceOutput,
+        impact: ImpactOutput,
+    ) -> set[str]:
+        """Select only uncertain or conflict-prone semantic results for a second look."""
+
+        evidence_by_id = {item.event_id: item for item in evidence.results}
+        impact_by_id = {item.event_id: item for item in impact.results}
+        selected: set[str] = set()
+        for event in events:
+            evidence_item = evidence_by_id.get(event.event_id)
+            impact_item = impact_by_id.get(event.event_id)
+            if evidence_item is None or impact_item is None:
+                continue
+            low_confidence = evidence_item.confidence < 0.70
+            elevated_risk = impact_item.risk_level in {"high", "critical"}
+            has_conflict = bool(impact_item.conflicting_evidence)
+            if has_conflict or (low_confidence and impact_item.semantic_relevance >= 55) or (
+                elevated_risk and evidence_item.confidence < 0.85
+            ):
+                selected.add(event.event_id)
+        return selected
+
+    @staticmethod
+    def _apply_verification(
+        evidence: ContextEvidenceOutput,
+        impact: ImpactOutput,
+        action: ActionOutput,
+        verification: VerificationOutput,
+    ) -> tuple[ContextEvidenceOutput, ImpactOutput, ActionOutput]:
+        """Apply only conservative verifier changes; verifier output can never raise authority."""
+
+        checks = {item.event_id: item for item in verification.results}
+        verified_evidence = []
+        for evidence_item in evidence.results:
+            check = checks.get(evidence_item.event_id)
+            if check is None or check.confidence_cap is None:
+                verified_evidence.append(evidence_item)
+                continue
+            verified_evidence.append(
+                evidence_item.model_copy(
+                    update={
+                        "confidence": min(evidence_item.confidence, check.confidence_cap)
+                    }
+                )
+            )
+
+        verified_impact = []
+        for impact_item in impact.results:
+            check = checks.get(impact_item.event_id)
+            if check is None or (check.supported and not check.impact_overstated):
+                verified_impact.append(impact_item)
+                continue
+            cap = 49.0 if check.supported else 35.0
+            verified_impact.append(
+                impact_item.model_copy(
+                    update={
+                        "semantic_relevance": min(impact_item.semantic_relevance, cap),
+                        "risk_level": "medium" if check.supported else "low",
+                        "affected_modules": (
+                            impact_item.affected_modules if check.supported else []
+                        ),
+                        "impact_reason": (
+                            impact_item.impact_reason
+                            + " Selective verifier applied a conservative support cap."
+                        ),
+                    }
+                )
+            )
+
+        verified_action = []
+        for action_item in action.results:
+            check = checks.get(action_item.event_id)
+            if check is None or (check.supported and not check.action_overstated):
+                verified_action.append(action_item)
+                continue
+            verified_action.append(
+                action_item.model_copy(
+                    update={
+                        "action_items": ["Review evidence before taking any project action."],
+                        "critic_notes": (
+                            action_item.critic_notes
+                            + " Selective verifier removed an unsupported action escalation."
+                        ),
+                        "approval_required": False,
+                        "requested_actions": [],
+                    }
+                )
+            )
+        return (
+            evidence.model_copy(update={"results": verified_evidence}),
+            impact.model_copy(update={"results": verified_impact}),
+            action.model_copy(update={"results": verified_action}),
+        )
 
     @staticmethod
     def _evidence_exit_condition(

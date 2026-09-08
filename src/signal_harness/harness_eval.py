@@ -129,6 +129,8 @@ async def run_harness_ablation(
         HarnessVariant.DETERMINISTIC_SUPERVISOR_DEFERRED_LEARNING,
         HarnessVariant.DETERMINISTIC_EVIDENCE_RESOLVER,
         HarnessVariant.SELECTIVE_EVIDENCE_RESEARCHER,
+        HarnessVariant.SELECTIVE_EVIDENCE_IMPACT_ACTION,
+        HarnessVariant.SELECTIVE_EVIDENCE_IMPACT_ACTION_VERIFIER,
     ]
     results: list[HarnessVariantEval] = []
     with TemporaryDirectory(prefix="signalharness-harness-eval-") as temp:

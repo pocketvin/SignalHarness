@@ -11,6 +11,7 @@ from signal_harness.signal.text_semantics import (
     source_semantic_text,
     strip_untrusted_directives,
 )
+from signal_harness.signal.project_state import resolve_project_change_state
 from signal_harness.signal.schemas import SignalCategory, SignalEvent
 
 DEPENDENCY_IMPACT_TERMS = (
@@ -88,9 +89,9 @@ class ClassifierAgent:
                 reason="The GitHub issue proposes a policy, permission, or compliance change.",
             )
 
-        dependencies = [str(value).lower() for value in project_profile.get("dependencies", [])]
         competitors = [str(value).lower() for value in project_profile.get("competitors", [])]
-        direct_dependency = any(_term_in_text(text, value) for value in dependencies)
+        project_state = resolve_project_change_state(event, project_profile)
+        direct_dependency = project_state.direct_dependency
         dependency_context = (
             content_text if event.source_type == "github_issue" else runtime_content_text
         )
@@ -98,12 +99,35 @@ class ClassifierAgent:
             dependency_context if direct_dependency else text,
             DEPENDENCY_IMPACT_TERMS,
         )
-        if direct_dependency and dependency_impact:
+        if event.source_type == "github_issue" and any(
+            value in content_text for value in ("allowlist", "permission boundary", "path traversal")
+        ):
+            category = SignalCategory.POLICY_SIGNAL
+            reason = "The upstream issue may cross a project permission or resource-allowlist boundary."
+        elif event.source_type == "github_issue" and project_state.protocol_name and any(
+            value in text for value in ("structuredcontent", "structured content", "outputschema", "output schema")
+        ):
+            category = SignalCategory.STRUCTURED_OUTPUT_SIGNAL
+            reason = "The upstream protocol issue affects structured tool-output schema compatibility."
+        elif direct_dependency and dependency_impact:
             category = SignalCategory.DEPENDENCY_UPDATE
             reason = (
-                "The signal names a tracked direct dependency and includes breaking, "
+                "The source identity matches a tracked direct dependency and includes breaking, "
                 "security, migration, schema, API compatibility, or regression impact."
             )
+        elif project_state.protocol_name and any(
+            value in text
+            for value in (
+                "protocol",
+                "session",
+                "initialize",
+                "transport",
+                "routing",
+                "streamable http",
+            )
+        ):
+            category = SignalCategory.AGENT_RUNTIME_SIGNAL
+            reason = "The signal changes semantics of a protocol used by the project runtime."
         elif any(value in text for value in ("cve", "vulnerability", "supply chain", "malware")):
             category = SignalCategory.SECURITY_SUPPLY_CHAIN
             reason = "The signal describes security or supply-chain risk."
@@ -120,7 +144,15 @@ class ClassifierAgent:
             category = SignalCategory.CHECKPOINT_PERSISTENCE_SIGNAL
             reason = "The signal affects checkpointing or persistence semantics."
         elif any(
-            value in text for value in ("provider", "model api", "openai-compatible", "json mode")
+            value in text
+            for value in (
+                "provider",
+                "provider-neutral",
+                "model api",
+                "default model",
+                "openai-compatible",
+                "json mode",
+            )
         ):
             category = SignalCategory.PROVIDER_COMPATIBILITY_SIGNAL
             reason = "The signal may affect provider or model API compatibility."
