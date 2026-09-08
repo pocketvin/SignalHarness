@@ -20,8 +20,10 @@ SignalHarness watches GitHub, RSS, and configured public-page snapshots, decides
 | Eval | 40-case Agent regression + 3-case cross-project context gate + provider contract eval |
 | Observability | Local trace for Agent calls, schema/retry/fallback, tools, latency, provider-reported tokens, and estimated cost |
 | MCP | Five read-only structured tools for project context, signal history, assessments, trace, and feedback |
-| Service | FastAPI REST API + replayable SSE streaming runs + MCP Streamable HTTP |
-| Golden Demo | Chinese by default with an in-page English switch; local project connection, Profile inspection, fast importance controls, and live Trace are available without exposing secrets |
+| Product intelligence | One frozen Scan projection for Overall Report → Top Changes → All Relevant Changes → Change Detail |
+| CLI | CLI-first developer / coding-Agent surface with stable JSON reads and shared Markdown export |
+| Service | FastAPI REST API + replayable SSE streaming runs + Product Intelligence REST + MCP Streamable HTTP |
+| Golden Demo | Chinese by default with an in-page English switch; Profile → Overall Report → Top → All → Detail → Audit on the same frozen Scan |
 | Deployment | Docker image with health check; package/CLI remains usable without a server |
 | Learning | Review-only proposals → risk classification → replay gate → explicit human apply |
 
@@ -111,6 +113,22 @@ Per-run output/trace remains isolated under `service-runs/<run_id>`, while persi
 ProfileRevision records purpose, stack, declared/resolved dependency-version evidence, runtime/protocol/provider, critical modules, evidence, and unknowns. Explicit user preferences use Critical / Important / Normal / Low / Ignore across dependency/provider/runtime/protocol/module/ecosystem/source/category/topic scopes. Auto profile refresh cannot overwrite explicit preferences; structured REST/UI controls and deterministic natural-language updates write the same preference model, and later ranking/Agent context consumes the resulting effective Profile.
 
 The Golden Demo can connect a browser-selected directory without arbitrary server filesystem access. The browser uploads only allowlisted manifest/lockfile text and relative path names, never source files or `.env`.
+
+### Product Intelligence V1: CLI-first shared read model
+
+The first P5 vertical slice adds `ProductIntelligenceService`, a shared projection over one frozen Scan + Change Ledger. It exposes Overall Report, Top Changes, All Relevant Changes, and Change Detail from the same business state. Changing Top count does not change `all_count`, and report statistics/themes are computed from the full Scan rather than only the deep-analysis shortlist.
+
+Shell-capable coding Agents can use the CLI directly instead of requiring MCP:
+
+```bash
+uv run signal-harness scan --fixture examples/signal_harness/sample_events.json --mode mock-agent --json
+uv run signal-harness report --scan <scan_id> --json
+uv run signal-harness changes --scan <scan_id> --json --limit 20
+uv run signal-harness change <change_id> --scan <scan_id> --json
+uv run signal-harness export --scan <scan_id> --mode report --out report.md
+```
+
+In JSON mode, requested data stays on stdout; machine-readable errors go to stderr with a non-zero exit code. REST and Golden Demo delegate to the same `ProductIntelligenceService`. All Relevant Changes supports frozen pagination, search, analysis/decision/source/category filters, and rank/impact/newest sorting; Change Detail expands what/why/modules/actions/Before-After/evidence/audit.
 
 ### Candidate Funnel V2
 
@@ -257,7 +275,10 @@ POST /runs
 GET  /runs/{run_id}
 GET  /runs/{run_id}/trace
 GET  /runs/{run_id}/assessments
+GET  /runs/{run_id}/product
+GET  /runs/{run_id}/report
 GET  /runs/{run_id}/changes
+GET  /runs/{run_id}/changes/{change_id}
 GET  /runs/{run_id}/coverage
 GET  /signals?run_id=...
 POST /feedback

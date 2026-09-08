@@ -80,7 +80,9 @@ def test_demo_page_and_metadata(
         assert "最近外部技术环境，哪些变化真的影响当前项目" in page.text
         assert "实时 Watchlist" in page.text
         assert "真实模型" in page.text
-        assert "发现了什么变化" in page.text
+        assert "项目环境报告" in page.text
+        assert "重点变化" in page.text
+        assert "全部相关变化" in page.text
         assert "Agent 审计过程" in page.text
         assert "面试演示建议" not in page.text
         assert "interview demos" not in page.text
@@ -106,6 +108,10 @@ def test_demo_page_and_metadata(
         assert 'id="preferenceInput"' in page.text
         assert "preferences/natural-language" in javascript.text
         assert "data-pref-scope" in javascript.text
+        assert "loadProduct" in javascript.text
+        assert "/product?top=12&all_limit=20" in javascript.text
+        assert 'id="allChanges"' in page.text
+        assert 'id="changeDetail"' in page.text
 
         meta = client.get("/demo/meta")
         assert meta.status_code == 200
@@ -228,6 +234,13 @@ def test_stream_run_replays_trace_and_final_result(
         assessments = client.get(f"/runs/{run_id}/assessments")
         assert assessments.status_code == 200
         assert assessments.json()["count"] == 4
+
+        product = client.get(f"/runs/{run_id}/product", params={"top": 2})
+        assert product.status_code == 200
+        product_payload = product.json()
+        assert product_payload["scan_id"] == run_id
+        assert product_payload["report"]["stats"]["all_change_count"] == 4
+        assert product_payload["top_changes"]
 
 
 def test_sse_last_event_id_replays_only_newer_events(

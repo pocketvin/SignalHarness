@@ -32,6 +32,11 @@ from signal_harness.evals import (
 )
 from signal_harness.memory import FeedbackMemory, MemoryBundle
 from signal_harness.persistence import ChangeLedger
+from signal_harness.product_intelligence import (
+    ChangeSort,
+    MarkdownMode,
+    ProductIntelligenceService,
+)
 from signal_harness.memory.replay import evaluate_policy_replay
 from signal_harness.learning import (
     apply_staged_learning,
@@ -152,6 +157,43 @@ async def _run_learning_with_provider(
         ).run_learning(snapshot)
     finally:
         await provider.close()
+
+
+def _emit_json(payload: object, *, err: bool = False) -> None:
+    """Emit one stable JSON document to the requested stream."""
+
+    typer.echo(json.dumps(payload, indent=2, ensure_ascii=False, default=str), err=err)
+
+
+def _product_cli_error(exc: Exception, *, json_output: bool) -> None:
+    if json_output:
+        _emit_json(
+            {"error": {"code": "product_intelligence_error", "message": str(exc)}},
+            err=True,
+        )
+        raise typer.Exit(code=2)
+    raise typer.BadParameter(str(exc)) from exc
+
+
+def _product_service_for_project(
+    *,
+    root: Path,
+    config_dir: Path,
+    state_dir: Path,
+    project_id: str | None,
+) -> tuple[ProductIntelligenceService, str]:
+    selected = project_id or default_project_id(config_dir)
+    project = project_option(selected, config_dir)
+    state = prepare_project_state(
+        _resolve(root, state_dir), project.id, migrate_legacy_default=True
+    )
+    return (
+        ProductIntelligenceService(
+            ledger=ChangeLedger(state / "change_ledger.sqlite3"),
+            project_id=project.id,
+        ),
+        project.id,
+    )
 
 
 def _write_json(path: Path, payload: object) -> Path:
@@ -431,6 +473,10 @@ def scan(
     config_dir: Path = typer.Option(Path("configs"), "--config-dir"),
     output_dir: Path = typer.Option(Path("outputs"), "--output-dir"),
     state_dir: Path = typer.Option(Path(".signal-harness"), "--state-dir"),
+    json_output: bool = typer.Option(
+        False, "--json", help="Emit the product Scan projection as JSON"
+    ),
+    top_count: int = typer.Option(12, "--top", min=1, max=50),
     mode: RunMode = typer.Option(
         RunMode.DEMO,
         "--mode",
@@ -499,23 +545,198 @@ def scan(
                 await provider.close()
 
     result = asyncio.run(run_scan())
+    if json_output:
+        product = ProductIntelligenceService(ledger=workflow.ledger, project_id=project.id)
+        _emit_json(
+            product.projection(
+                result.scan_id, top_count=top_count, all_limit=min(20, result.all_change_count or 1)
+            ).model_dump(mode="json")
+        )
+        return
     render_assessment_table(result.signals, result.assessments)
     typer.echo(f"Generated SignalHarness outputs in {result.output_dir}")
 
 
 @app.command()
 def report(
+    scan_id: str | None = typer.Option(None, "--scan", help="Scan id; defaults to latest"),
+    project_id: str | None = typer.Option(None, "--project", help="Project catalog id"),
+    top_count: int = typer.Option(12, "--top", min=1, max=50),
+    json_output: bool = typer.Option(False, "--json", help="Emit the product report as JSON"),
     cwd: Path = typer.Option(Path.cwd(), "--cwd", hidden=True),
-    output_dir: Path = typer.Option(Path("outputs"), "--output-dir"),
+    config_dir: Path = typer.Option(Path("configs"), "--config-dir"),
+    state_dir: Path = typer.Option(Path(".signal-harness"), "--state-dir"),
 ) -> None:
-    """Render the latest structured scan results."""
+    """Read the overall product report for one frozen Scan."""
 
     root = cwd.expanduser().resolve()
-    resolved_output = _resolve(root, output_dir)
-    signals, assessments = _load_outputs(resolved_output)
-    render_assessment_table(signals, assessments)
-    digest = resolved_output / "radar_digest.md"
-    typer.echo(f"Radar digest: {digest}")
+    config = resolve_config_dir(root, config_dir)
+    try:
+        product, _ = _product_service_for_project(
+            root=root, config_dir=config, state_dir=state_dir, project_id=project_id
+        )
+        selected = product.resolve_scan_id(scan_id)
+        payload = product.report(selected, top_count=top_count)
+    except (ValueError, OSError) as exc:
+        _product_cli_error(exc, json_output=json_output)
+        return
+    if json_output:
+        _emit_json(payload.model_dump(mode="json"))
+        return
+    typer.echo(product.render_markdown(selected, mode="report", top_count=top_count))
+
+
+@app.command()
+def changes(
+    scan_id: str | None = typer.Option(None, "--scan", help="Scan id; defaults to latest"),
+    project_id: str | None = typer.Option(None, "--project", help="Project catalog id"),
+    offset: int = typer.Option(0, "--offset", min=0),
+    limit: int = typer.Option(20, "--limit", min=1, max=1000),
+    query: str = typer.Option("", "--query", help="Free-text search inside the frozen Scan"),
+    decision: str | None = typer.Option(None, "--decision"),
+    source_type: str | None = typer.Option(None, "--source-type"),
+    category: str | None = typer.Option(None, "--category"),
+    analysis: str = typer.Option("all", "--analysis", help="all, analyzed, or unanalyzed"),
+    sort: str = typer.Option("rank", "--sort", help="rank, score, or newest"),
+    json_output: bool = typer.Option(False, "--json", help="Emit a stable JSON page"),
+    cwd: Path = typer.Option(Path.cwd(), "--cwd", hidden=True),
+    config_dir: Path = typer.Option(Path("configs"), "--config-dir"),
+    state_dir: Path = typer.Option(Path(".signal-harness"), "--state-dir"),
+) -> None:
+    """List/filter/search All Relevant Changes from one frozen Scan."""
+
+    analysis_mode = analysis.strip().lower()
+    if analysis_mode not in {"all", "analyzed", "unanalyzed"}:
+        _product_cli_error(
+            ValueError("--analysis must be all, analyzed, or unanalyzed"),
+            json_output=json_output,
+        )
+        return
+    sort_mode = sort.strip().lower()
+    if sort_mode not in {"rank", "score", "newest"}:
+        _product_cli_error(
+            ValueError("--sort must be rank, score, or newest"), json_output=json_output
+        )
+        return
+    analyzed = None if analysis_mode == "all" else analysis_mode == "analyzed"
+    root = cwd.expanduser().resolve()
+    config = resolve_config_dir(root, config_dir)
+    try:
+        product, _ = _product_service_for_project(
+            root=root, config_dir=config, state_dir=state_dir, project_id=project_id
+        )
+        page = product.list_changes(
+            scan_id,
+            offset=offset,
+            limit=limit,
+            query=query,
+            decision=decision,
+            source_type=source_type,
+            category=category,
+            analyzed=analyzed,
+            sort=cast(ChangeSort, sort_mode),
+        )
+    except (ValueError, OSError) as exc:
+        _product_cli_error(exc, json_output=json_output)
+        return
+    if json_output:
+        _emit_json(page.model_dump(mode="json"))
+        return
+    typer.echo(f"Scan {page.scan_id}: {page.count}/{page.all_count} changes")
+    for item in page.items:
+        typer.echo(f"{item.rank:>3}  {item.change_id}  {item.summary_zh}")
+
+
+@app.command("change")
+def change_detail(
+    change_id: str = typer.Argument(..., help="Stable Change id"),
+    scan_id: str | None = typer.Option(None, "--scan", help="Scan id; defaults to latest"),
+    project_id: str | None = typer.Option(None, "--project", help="Project catalog id"),
+    json_output: bool = typer.Option(False, "--json", help="Emit structured Change detail"),
+    cwd: Path = typer.Option(Path.cwd(), "--cwd", hidden=True),
+    config_dir: Path = typer.Option(Path("configs"), "--config-dir"),
+    state_dir: Path = typer.Option(Path(".signal-harness"), "--state-dir"),
+) -> None:
+    """Read one Change detail from a frozen Scan."""
+
+    root = cwd.expanduser().resolve()
+    config = resolve_config_dir(root, config_dir)
+    try:
+        product, _ = _product_service_for_project(
+            root=root, config_dir=config, state_dir=state_dir, project_id=project_id
+        )
+        selected = product.resolve_scan_id(scan_id)
+        detail = product.change_detail(change_id, scan_id=selected)
+    except (ValueError, OSError) as exc:
+        _product_cli_error(exc, json_output=json_output)
+        return
+    if json_output:
+        _emit_json(detail.model_dump(mode="json"))
+        return
+    typer.echo(product.render_markdown(selected, mode="change", change_id=change_id))
+
+
+@app.command("export")
+def export_product(
+    scan_id: str | None = typer.Option(None, "--scan", help="Scan id; defaults to latest"),
+    project_id: str | None = typer.Option(None, "--project", help="Project catalog id"),
+    mode: str = typer.Option("report", "--mode", help="report, top, or change"),
+    change_id: str | None = typer.Option(None, "--change-id"),
+    top_count: int = typer.Option(12, "--top", min=1, max=50),
+    out: Path | None = typer.Option(None, "--out", help="Markdown output path"),
+    json_output: bool = typer.Option(False, "--json", help="Emit export metadata as JSON"),
+    cwd: Path = typer.Option(Path.cwd(), "--cwd", hidden=True),
+    config_dir: Path = typer.Option(Path("configs"), "--config-dir"),
+    state_dir: Path = typer.Option(Path(".signal-harness"), "--state-dir"),
+    output_dir: Path = typer.Option(Path("outputs/exports"), "--output-dir"),
+) -> None:
+    """Export overall report, Top set, or one Change as clean Markdown."""
+
+    normalized_mode = mode.strip().lower()
+    if normalized_mode not in {"report", "top", "change"}:
+        _product_cli_error(
+            ValueError("--mode must be report, top, or change"), json_output=json_output
+        )
+        return
+    if normalized_mode == "change" and not change_id:
+        _product_cli_error(
+            ValueError("--mode change requires --change-id"), json_output=json_output
+        )
+        return
+    root = cwd.expanduser().resolve()
+    config = resolve_config_dir(root, config_dir)
+    try:
+        product, _ = _product_service_for_project(
+            root=root, config_dir=config, state_dir=state_dir, project_id=project_id
+        )
+        selected = product.resolve_scan_id(scan_id)
+        markdown = product.render_markdown(
+            selected,
+            mode=cast(MarkdownMode, normalized_mode),
+            top_count=top_count,
+            change_id=change_id,
+        )
+    except (ValueError, OSError) as exc:
+        _product_cli_error(exc, json_output=json_output)
+        return
+    if out is None:
+        suffix = f"change-{change_id}" if normalized_mode == "change" else normalized_mode
+        target = _resolve(root, output_dir) / f"{selected}-{suffix}.md"
+    else:
+        target = _resolve(root, out)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(target, markdown)
+    payload = {
+        "scan_id": selected,
+        "mode": normalized_mode,
+        "change_id": change_id,
+        "path": str(target),
+        "bytes": len(markdown.encode("utf-8")),
+    }
+    if json_output:
+        _emit_json(payload)
+        return
+    typer.echo(f"Exported Markdown: {target}")
 
 
 @app.command()

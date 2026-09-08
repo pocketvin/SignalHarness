@@ -20,6 +20,7 @@ from signal_harness.agent_integration.mode import RunMode
 from signal_harness.mcp_server import MCP_TOOL_NAMES, build_mcp_server, validate_run_id
 from signal_harness.memory import FeedbackMemory
 from signal_harness.persistence import ChangeLedger
+from signal_harness.product_intelligence import ProductIntelligenceService
 from signal_harness.providers.catalog import (
     default_provider_id,
     provider_catalog,
@@ -294,6 +295,17 @@ def create_app(
         policy = load_signal_policy(paths.config_dir / "signal_policy.yaml")
         guard = SignalPermissionGuard(policy)
         guard.require("modify_project_profile", confirmed=True)
+
+    def product_service_for_run(run_id: str) -> ProductIntelligenceService:
+        run_output = _existing_run_output(paths, run_id)
+        run_meta = _read_json(run_output / "service_run.json", {})
+        project_id = str(
+            run_meta.get("project_id") if isinstance(run_meta, dict) else ""
+        ) or default_project_id(paths.config_dir)
+        return ProductIntelligenceService(
+            ledger=ChangeLedger(paths.project_state(project_id) / "change_ledger.sqlite3"),
+            project_id=project_id,
+        )
 
     @app.get("/projects/{project_id}/profile")
     async def get_project_profile(project_id: str) -> dict[str, Any]:
@@ -572,6 +584,8 @@ def create_app(
         payload["profile_revision_id"] = workflow.ledger.scan_profile_revision_id(scan_id=run_id)
         payload["changes_url"] = f"/runs/{run_id}/changes"
         payload["coverage_url"] = f"/runs/{run_id}/coverage"
+        payload["product_url"] = f"/runs/{run_id}/product"
+        payload["report_url"] = f"/runs/{run_id}/report"
         payload.update(
             {
                 "project_id": project.id,
@@ -622,27 +636,67 @@ def create_app(
         items = payload if isinstance(payload, list) else []
         return _collection(items, limit)
 
+    @app.get("/runs/{run_id}/product")
+    async def get_run_product(
+        run_id: str,
+        top: int = Query(default=12, ge=1, le=50),
+        all_limit: int = Query(default=20, ge=1, le=1000),
+    ) -> dict[str, Any]:
+        try:
+            product = product_service_for_run(run_id)
+            return product.projection(
+                run_id, top_count=top, all_limit=all_limit
+            ).model_dump(mode="json")
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/runs/{run_id}/report")
+    async def get_run_report(
+        run_id: str,
+        top: int = Query(default=12, ge=1, le=50),
+    ) -> dict[str, Any]:
+        try:
+            product = product_service_for_run(run_id)
+            return product.report(run_id, top_count=top).model_dump(mode="json")
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
     @app.get("/runs/{run_id}/changes")
     async def get_run_changes(
         run_id: str,
         offset: int = Query(default=0, ge=0),
         limit: int = Query(default=100, ge=1, le=1000),
+        query: str = Query(default="", max_length=500),
+        decision: str | None = Query(default=None),
+        source_type: str | None = Query(default=None),
+        category: str | None = Query(default=None),
+        analysis: Literal["all", "analyzed", "unanalyzed"] = Query(default="all"),
+        sort: Literal["rank", "score", "newest"] = Query(default="rank"),
     ) -> dict[str, Any]:
-        run_output = _existing_run_output(paths, run_id)
-        run_meta = _read_json(run_output / "service_run.json", {})
-        project_id = str(
-            run_meta.get("project_id") if isinstance(run_meta, dict) else ""
-        ) or default_project_id(paths.config_dir)
-        ledger = ChangeLedger(paths.project_state(project_id) / "change_ledger.sqlite3")
-        page = ledger.list_scan_changes(run_id, offset=offset, limit=limit)
-        return {
-            "items": page.items,
-            "count": page.count,
-            "offset": page.offset,
-            "limit": page.limit,
-            "returned": len(page.items),
-            "has_more": page.has_more,
-        }
+        try:
+            product = product_service_for_run(run_id)
+            analyzed = None if analysis == "all" else analysis == "analyzed"
+            return product.list_changes(
+                run_id,
+                offset=offset,
+                limit=limit,
+                query=query,
+                decision=decision,
+                source_type=source_type,
+                category=category,
+                analyzed=analyzed,
+                sort=sort,
+            ).model_dump(mode="json")
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/runs/{run_id}/changes/{change_id}")
+    async def get_run_change_detail(run_id: str, change_id: str) -> dict[str, Any]:
+        try:
+            product = product_service_for_run(run_id)
+            return product.change_detail(change_id, scan_id=run_id).model_dump(mode="json")
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.get("/runs/{run_id}/coverage")
     async def get_run_coverage(run_id: str) -> dict[str, Any]:

@@ -632,6 +632,52 @@ class ChangeLedger:
                 )
         return LedgerChangePage(items=items, count=total, offset=offset, limit=limit)
 
+    def scan_metadata(self, scan_id: str) -> dict[str, Any] | None:
+        """Return one durable Scan record as a stable public-read payload."""
+
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM scans WHERE scan_id=?", (scan_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "scan_id": str(row["scan_id"]),
+            "project_id": str(row["project_id"]),
+            "created_at": str(row["created_at"]),
+            "completed_at": row["completed_at"],
+            "status": str(row["status"]),
+            "collected_count": int(row["collected_count"]),
+            "deduped_count": int(row["deduped_count"]),
+            "analyzed_count": int(row["analyzed_count"]),
+            "relevant_count": int(row["relevant_count"]),
+            "coverage_status": str(row["coverage_status"]),
+            "profile_revision_id": row["profile_revision_id"],
+            "window": {
+                "mode": str(row["window_mode"]),
+                "from": row["window_start"],
+                "to": row["window_end"],
+                "first_use": bool(row["first_use"]),
+                "checkpoint_eligible": bool(row["checkpoint_eligible"]),
+            },
+            "error": row["error"],
+        }
+
+    def latest_successful_scan_id(self, *, project_id: str) -> str | None:
+        """Return the newest successful Scan id for one project."""
+
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT scan_id FROM scans
+                WHERE project_id=? AND status='success'
+                ORDER BY COALESCE(completed_at, created_at) DESC, rowid DESC
+                LIMIT 1
+                """,
+                (project_id,),
+            ).fetchone()
+        return str(row["scan_id"]) if row is not None else None
+
     def observation_state(self, event: SignalEvent) -> str:
         """Return new, revision, or seen for one normalized source observation."""
 

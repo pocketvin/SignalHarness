@@ -33,8 +33,10 @@ SignalHarness 的核心答案是：**稳定的环境事实与 Scan 状态由 Pyt
 | Agent Eval | 40 条项目级 Regression Suite + 3 条 Cross-project Context Gate + Provider Contract Eval |
 | Observability | Agent、Schema、Retry、Fallback、Tools、Latency、Tokens、Estimated Cost Trace |
 | MCP | 5 个只读 structured tools |
-| Service | FastAPI REST + SSE Streaming Run + MCP Streamable HTTP |
-| Golden Demo | 默认中文，可切换 English；可连接本地项目、查看 Profile、快速修改重要性，并实时消费同一份 Trace |
+| Product Intelligence | 同一 frozen Scan 的 Overall Report → Top Changes → All Relevant Changes → Change Detail，共用一份 core projection |
+| CLI | CLI-first developer / Coding Agent surface：`scan/report/changes/change --json` + shared Markdown export |
+| Service | FastAPI REST + SSE Streaming Run + Product Intelligence REST + MCP Streamable HTTP |
+| Golden Demo | 默认中文，可切换 English；Profile → Overall Report → Top → All → Detail → Audit，并实时消费同一份 Trace |
 | Deployment | Docker + `/health` healthcheck |
 | Learning | Review-only proposal → replay/risk gate → 显式人工 apply |
 
@@ -172,6 +174,22 @@ SSE
 ProfileRevision 记录 purpose、stack、dependency declared/resolved version evidence、runtime/protocol/provider、critical modules、evidence 与 unknowns。显式用户 Preference 使用 Critical / Important / Normal / Low / Ignore 五档，可作用于 dependency/provider/runtime/protocol/module/ecosystem/source/category/topic；自动 profile 刷新不会覆盖这些显式偏好。REST 与 Golden Demo 的快速按钮/自然语言输入写入同一个 Preference model，之后的 ranking 与 Agent Context 会立即使用新的 effective Profile。
 
 浏览器目录连接只上传白名单 manifest/lockfile 内容与相对路径列表，不上传源代码、`.env` 或任意其他本机文件。
+
+### Product Intelligence V1：CLI-first 统一产品读模型
+
+P5 第一条 vertical slice 新增 `ProductIntelligenceService`。它直接从 frozen Scan + Change Ledger 构建同一份产品 projection：Overall Report、Top Changes、All Relevant Changes 与 Change Detail。Top 只决定阅读优先级，不影响 `all_count`；Overall 的统计与主题来自完整 Scan，而不是只看进入深度分析预算的 shortlist。
+
+Shell-capable Coding Agent 优先使用 CLI，不要求先接 MCP：
+
+```bash
+uv run signal-harness scan --fixture examples/signal_harness/sample_events.json --mode mock-agent --json
+uv run signal-harness report --scan <scan_id> --json
+uv run signal-harness changes --scan <scan_id> --json --limit 20
+uv run signal-harness change <change_id> --scan <scan_id> --json
+uv run signal-harness export --scan <scan_id> --mode report --out report.md
+```
+
+JSON 模式将 requested data 保持在 stdout；机器可读错误走 stderr 并返回非零 exit code。REST 与 Golden Demo 调用同一个 `ProductIntelligenceService`，不是重新计算另一份业务判断。All Relevant Changes 支持 frozen pagination、search、analysis/decision/source/category filter 与 rank/impact/newest sorting；Detail 再展开 what/why/modules/actions/Before-After/evidence/audit。
 
 ### Candidate Funnel V2：先判断相关性，再做 Top-K
 
@@ -418,7 +436,10 @@ POST /runs
 GET  /runs/{run_id}
 GET  /runs/{run_id}/trace
 GET  /runs/{run_id}/assessments
+GET  /runs/{run_id}/product
+GET  /runs/{run_id}/report
 GET  /runs/{run_id}/changes
+GET  /runs/{run_id}/changes/{change_id}
 GET  /runs/{run_id}/coverage
 GET  /signals?run_id=...
 POST /feedback
@@ -538,6 +559,7 @@ src/signal_harness/providers/           mock + OpenAI-compatible provider
 src/signal_harness/mcp_server.py        只读 MCP interface
 src/signal_harness/service.py           FastAPI REST/SSE + MCP HTTP
 src/signal_harness/service_streaming.py stream-run / SSE replay manager
+src/signal_harness/product_intelligence.py shared Overall / Top / All / Detail projection + Markdown renderer
 src/signal_harness/resources.py         repo-first / packaged-resource fallback
 src/signal_harness/ui/demo.py           Golden Demo HTML loader
 src/signal_harness/tools/web_snapshot.py safe public snapshot / visible-text diff

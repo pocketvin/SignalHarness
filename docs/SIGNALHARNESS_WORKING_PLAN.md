@@ -237,6 +237,8 @@ Relevance recall, false positives/negatives, impact/module correctness, citation
 
 ## P5 — Product Intelligence Experience
 
+**Status: FIRST VERTICAL SLICE IMPLEMENTED / AGENT ACCEPTANCE PASS — thin MCP product adapter remains**
+
 ### Target
 
 Turn durable intelligence into the actual user product: overall report first, compact Top changes second, complete relevant history behind it, and the same result contract through all interfaces.
@@ -267,6 +269,19 @@ MCP may add a truthful fresh-scan tool plus status/result/list/detail tools wher
 - MCP can trigger a fresh Scan when no prior result exists and later retrieve it;
 - CLI/Web/REST/MCP projections agree on the same scan_id and product data when those interfaces expose the operation;
 - core CLI JSON paths are usable without scraping human-formatted terminal tables.
+
+### P5 first-slice implementation evidence
+
+- Added `ProductIntelligenceService` as the shared read-model over frozen `Scan` / `ScanChange` ledger state; no new persistence schema was required for this slice.
+- One product contract now exposes Overall Report → Top Changes → All Relevant Changes → Change Detail. Top count is presentation-only and cannot change All membership/count.
+- Overall report statistics/themes are computed from the full frozen Scan projection. Unanalyzed Changes are represented truthfully rather than being silently dropped or given fabricated deep-impact conclusions.
+- All Relevant Changes supports stable offset pagination, search, analysis status filters, decision/source/category filters, and rank/impact/newest sorting. Detail exposes what changed, project relevance, affected modules, actions, evidence, real Before/After when present, and bounded audit metadata.
+- Shared Markdown rendering supports report, Top, and single-Change export without default Trace engineering noise.
+- CLI-first paths are implemented: `scan --json`, `report --json`, `changes --json`, `change --json`, and `export`. JSON requested data stays on stdout; machine-readable failures use stderr and non-zero exit codes.
+- REST delegates to the same product service through `GET /runs/{run_id}/product`, `/report`, `/changes`, and `/changes/{change_id}`. Focused acceptance proves CLI and REST return the same scan id, report stats, and Top IDs under the same Top budget.
+- Golden Demo now consumes the Product Intelligence contract after a run and presents Profile → Overall Report → Top → All → Detail → Agent Audit. Legacy `signals` / `assessments` remain a compatibility fallback/audit source, not the primary product view.
+- Fresh local acceptance: 274 tests PASS; `git diff --check` PASS; JavaScript syntax PASS; Ruff PASS; strict mypy PASS (104 source files); CLI mock-agent JSON/read/export + trace/calibrate smoke PASS; REST/Web product smoke PASS; `uv build` PASS.
+- Remaining P5 acceptance item: keep MCP optional and thin, but let MCP clients truthfully start a persistent fresh Scan and retrieve status/product/list/detail by delegating to the same application services. A full visual/human browser polish pass can remain owner acceptance after the objective Web contract is complete.
 ## P6 — Source Intelligence Expansion
 
 ### Target
@@ -399,9 +414,9 @@ These are intentionally deferred until the relevant phase because they do not bl
 
 ## NEXT ACTION
 
-**Proceed to P5 — Product Intelligence Experience.**
+**Continue P5 with the thin MCP product adapter, without changing CLI-first priority.**
 
-P4 agent-verifiable construction is complete enough to choose an offline Analyzer V2 candidate: `selective-evidence-impact-action`. Keep the five-Agent real-provider default protected until an explicitly authorized live-provider/manual comparison is run, and keep the paid Generic LLM Monitor baseline pending the same cost boundary. Proceed with P5 product-intelligence work using the existing core Scan service and CLI-first interface direction; do not make P5 depend on MCP becoming the primary Agent interface.
+The shared Product Intelligence core, CLI, REST, and Golden Demo vertical slice is agent-accepted. Next, make MCP delegate to the same persistent Scan/product services for fresh-scan start, status, product/list/detail retrieval, with truthful side-effect/idempotency annotations. Do not rebuild business logic inside MCP. After that adapter is verified, close P5 and proceed to P6 source expansion.
 
 ## RETROSPECTIVE TEMPLATE
 
