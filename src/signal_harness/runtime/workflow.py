@@ -12,6 +12,11 @@ from typing import Any, Literal, cast
 from uuid import uuid4
 
 from signal_harness.utils.fs import atomic_write_text
+from signal_harness.agent_integration.harness import (
+    HarnessVariant,
+    analysis_input_fingerprint,
+    version_metadata,
+)
 from signal_harness.agent_integration.mode import RunMode
 from signal_harness.agent_integration.runner import AgentLoopLimits, LLMAgentTeamRunner
 from signal_harness.agent_integration.schemas import LearningPolicyOutput
@@ -111,6 +116,7 @@ class SignalHarnessWorkflow:
         agent_loop_limits: AgentLoopLimits | None = None,
         trace_listener: TraceListener | None = None,
         project_id: str | None = None,
+        harness_variant: HarnessVariant | str = HarnessVariant.FIVE_AGENT,
     ) -> None:
         self.cwd = Path(cwd).expanduser().resolve()
         self.config_dir = resolve_config_dir(self.cwd, config_dir or "configs")
@@ -125,6 +131,7 @@ class SignalHarnessWorkflow:
         self.mode = RunMode(mode)
         self.provider = provider
         self.agent_loop_limits = agent_loop_limits
+        self.harness_variant = HarnessVariant(harness_variant)
         self.source_cache = SourceFetchCache(self.state_dir / "cache")
         self.trace = TraceRecorder(trace_listener)
         self.executor = SignalToolExecutor(
@@ -357,6 +364,7 @@ class SignalHarnessWorkflow:
                 trace=self.trace,
                 tool_executor=self.executor,
                 loop_limits=self.agent_loop_limits,
+                harness_variant=self.harness_variant,
             )
             self.trace.steps.append(
                 TraceStep(
@@ -382,6 +390,36 @@ class SignalHarnessWorkflow:
                         f"{runner.loop_limits.max_repair_rounds_per_run}; "
                         f"max_repair_events_per_run="
                         f"{runner.loop_limits.max_repair_events_per_run}"
+                    ),
+                )
+            )
+            input_fingerprint = analysis_input_fingerprint(
+                events=events,
+                project_profile=profile,
+                policy=policy,
+                noise_assessments=noise_assessments,
+                clusters=clusters,
+            )
+            self.trace.steps.append(
+                TraceStep(
+                    step="harness_input_snapshot",
+                    status="success",
+                    agent="HarnessInputContract",
+                    input_count=len(events),
+                    output_count=len(events),
+                    duration_ms=0,
+                    metadata={
+                        **version_metadata(variant=self.harness_variant, policy=policy),
+                        "input_fingerprint": input_fingerprint,
+                        "event_ids": [event.event_id for event in events],
+                        "profile_revision_id": profile_revision["profile_revision_id"],
+                        "provider": str(getattr(provider, "provider", provider.name)),
+                        "model": provider.model,
+                        "model_profile": str(getattr(provider, "model_profile", "") or ""),
+                    },
+                    detail=(
+                        "Frozen analyzer input metadata recorded before Harness execution; "
+                        "run-volatile metadata is excluded from input_fingerprint."
                     ),
                 )
             )

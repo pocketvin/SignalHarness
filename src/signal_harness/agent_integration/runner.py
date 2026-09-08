@@ -8,6 +8,7 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
+from signal_harness.agent_integration.harness import HarnessVariant
 from signal_harness.agent_integration.invoker import AgentInvoker, _output_count
 from signal_harness.agent_integration.mode import RunMode
 from signal_harness.agent_integration.repair import (
@@ -47,6 +48,7 @@ from signal_harness.providers.adapter import AgentCall, AgentProvider
 from signal_harness.runtime.tool_executor import SignalToolExecutor
 from signal_harness.runtime.tracing import TraceRecorder
 from signal_harness.signal.source_authority import clamp_source_quality
+from signal_harness.signal.text_semantics import any_affirmed_term
 from signal_harness.signal.schemas import (
     FeedbackRecord,
     NoiseAssessment,
@@ -138,6 +140,7 @@ class LLMAgentTeamRunner:
         tool_executor: SignalToolExecutor | None = None,
         tool_limits: AgentLoopLimits | None = None,
         loop_limits: AgentLoopLimits | None = None,
+        harness_variant: HarnessVariant | str = HarnessVariant.FIVE_AGENT,
     ) -> None:
         if not mode.uses_llm_agent_path:
             raise ValueError("LLMAgentTeamRunner requires mock-agent or agent mode")
@@ -147,6 +150,7 @@ class LLMAgentTeamRunner:
         self.tool_executor = tool_executor
         self.loop_limits = loop_limits or tool_limits or AgentLoopLimits()
         self.tool_limits = self.loop_limits
+        self.harness_variant = HarnessVariant(harness_variant)
         self.invoker = AgentInvoker(
             provider=self.provider,
             mode=self.mode,
@@ -256,42 +260,192 @@ class LLMAgentTeamRunner:
             "model": self.provider.model,
             "failed_sources": failed_sources or [],
         }
-        supervisor_call = self.supervisor.build_call(
-            events,
-            project_profile,
-            policy=policy,
-            noise_assessments=active_noise,
-            clusters=active_clusters,
-            volatile_metadata=volatile,
-        )
-        routes, route_trace = await self._invoke(
-            supervisor_call,
-            SupervisorOutput,
-            lambda: self.supervisor.fallback(
+        def route_fallback() -> SupervisorOutput:
+            return self.supervisor.fallback(
                 events,
                 project_profile,
                 active_noise,
                 active_clusters,
-            ),
-            event_ids=event_ids,
-        )
-        routes = self._ensure_coverage(
-            routes,
-            expected_ids=expected_ids,
-            fallback=lambda: self.supervisor.fallback(
+            )
+        if self.harness_variant in {
+            HarnessVariant.DETERMINISTIC_SUPERVISOR,
+            HarnessVariant.DETERMINISTIC_SUPERVISOR_DEFERRED_LEARNING,
+            HarnessVariant.DETERMINISTIC_EVIDENCE_RESOLVER,
+            HarnessVariant.SELECTIVE_EVIDENCE_RESEARCHER,
+        }:
+            routes = route_fallback()
+            self.trace.steps.append(
+                TraceStep(
+                    step="harness_deterministic_supervisor",
+                    status="success",
+                    agent="DeterministicSupervisor",
+                    input_count=len(events),
+                    output_count=len(routes.routes),
+                    duration_ms=0,
+                    detail=(
+                        "Harness ablation bypassed the Supervisor LLM call while keeping "
+                        "the same downstream Evidence/Impact/Action path."
+                    ),
+                    metadata={"harness_variant": self.harness_variant.value},
+                )
+            )
+        else:
+            supervisor_call = self.supervisor.build_call(
                 events,
                 project_profile,
-                active_noise,
-                active_clusters,
-            ),
-            trace_index=route_trace,
-        )
+                policy=policy,
+                noise_assessments=active_noise,
+                clusters=active_clusters,
+                volatile_metadata=volatile,
+            )
+            routes, route_trace = await self._invoke(
+                supervisor_call,
+                SupervisorOutput,
+                route_fallback,
+                event_ids=event_ids,
+            )
+            routes = self._ensure_coverage(
+                routes,
+                expected_ids=expected_ids,
+                fallback=route_fallback,
+                trace_index=route_trace,
+            )
         routes = self._calibrate_route_categories(events, routes, project_profile)
         route_by_id = {route.event_id: route for route in routes.routes}
 
         evidence_events = self._events_for(events, route_by_id, "context_evidence")
         evidence_ids = {event.event_id for event in evidence_events}
-        if evidence_events:
+        if (
+            evidence_events
+            and self.harness_variant
+            in {
+                HarnessVariant.DETERMINISTIC_EVIDENCE_RESOLVER,
+                HarnessVariant.SELECTIVE_EVIDENCE_RESEARCHER,
+            }
+        ):
+            plan = self.evidence.fallback_plan(evidence_events)
+            plan, source_blocked = self._source_aware_tool_plan(evidence_events, plan)
+            observations, tool_trace = await self._execute_tool_requests(
+                plan,
+                policy,
+                event_count=len(evidence_events),
+            )
+            evidence = self.evidence.fallback(
+                evidence_events,
+                plan=plan,
+                observations=observations,
+            )
+            evidence = self._cap_evidence_after_tool_failures(evidence, observations)
+            evidence = self._clamp_evidence_source_authority(evidence, evidence_events)
+            self.trace.steps.append(
+                TraceStep(
+                    step="harness_deterministic_evidence",
+                    status="success",
+                    agent="DeterministicEvidenceResolver",
+                    input_count=len(evidence_events),
+                    output_count=len(evidence.results),
+                    duration_ms=0,
+                    tools_requested=[item.tool_name for item in plan.tool_requests],
+                    tools_executed=tool_trace["executed"],
+                    tool_errors=tool_trace["errors"],
+                    blocked_tools=[*tool_trace["blocked"], *source_blocked],
+                    permission_checks=[
+                        *tool_trace["permission_checks"],
+                        *[f"{item}:blocked:source_mismatch" for item in source_blocked],
+                    ],
+                    cache_events=tool_trace["cache_events"],
+                    tools_requested_count=len(plan.tool_requests),
+                    tools_executed_count=len(tool_trace["executed"]),
+                    budget_blocked_count=len(tool_trace["budget_blocked"]),
+                    exit_condition=self._evidence_exit_condition(plan, observations),
+                    metadata={"harness_variant": self.harness_variant.value},
+                    detail=(
+                        "Harness ablation used deterministic source-aware evidence resolution "
+                        "with the same guarded source tools and authority clamps, without "
+                        "Evidence planning/final LLM calls."
+                    ),
+                )
+            )
+            if self.harness_variant is HarnessVariant.SELECTIVE_EVIDENCE_RESEARCHER:
+                selected_ids = self._selective_evidence_event_ids(
+                    evidence_events,
+                    evidence,
+                    project_profile,
+                )
+                if selected_ids:
+                    selected_events = [
+                        event for event in evidence_events if event.event_id in selected_ids
+                    ]
+                    selected_plan = self.evidence.fallback_plan(selected_events)
+                    self.trace.steps.append(
+                        TraceStep(
+                            step="selective_evidence_escalation",
+                            status="success",
+                            agent="SelectiveEvidenceGate",
+                            input_count=len(evidence_events),
+                            output_count=len(selected_events),
+                            duration_ms=0,
+                            metadata={
+                                "harness_variant": self.harness_variant.value,
+                                "event_ids": sorted(selected_ids),
+                                "reason": "official_direct_dependency_high_risk",
+                            },
+                            detail=(
+                                "Only official direct-dependency changes with explicit high-risk "
+                                "semantics were escalated to one Evidence synthesis call."
+                            ),
+                        )
+                    )
+                    research_call = self.evidence.build_final_call(
+                        selected_events,
+                        routes,
+                        selected_plan,
+                        observations,
+                        project_profile=project_profile,
+                        policy=policy,
+                        clusters=active_clusters,
+                        memory=memory_snapshot,
+                        volatile_metadata={
+                            **volatile,
+                            "selective_evidence_research": True,
+                        },
+                    )
+                    researched, research_trace = await self._invoke(
+                        research_call,
+                        ContextEvidenceOutput,
+                        lambda: self.evidence.fallback(
+                            selected_events,
+                            plan=selected_plan,
+                            observations=observations,
+                        ),
+                        event_ids=[event.event_id for event in selected_events],
+                    )
+                    researched = self._ensure_coverage(
+                        researched,
+                        expected_ids=selected_ids,
+                        fallback=lambda: self.evidence.fallback(
+                            selected_events,
+                            plan=selected_plan,
+                            observations=observations,
+                        ),
+                        trace_index=research_trace,
+                    )
+                    researched = self._cap_evidence_after_tool_failures(
+                        researched, observations
+                    )
+                    researched = self._clamp_evidence_source_authority(
+                        researched, selected_events
+                    )
+                    researched_by_id = {item.event_id: item for item in researched.results}
+                    evidence = evidence.model_copy(
+                        update={
+                            "results": [
+                                researched_by_id.get(item.event_id, item)
+                                for item in evidence.results
+                            ]
+                        }
+                    )
+        elif evidence_events:
             plan_call = self.evidence.build_tool_plan_call(
                 evidence_events,
                 routes,
@@ -588,7 +742,16 @@ class LLMAgentTeamRunner:
             assessments,
             feedback_history=feedback_history,
         )
-        if needs_learning and defer_learning:
+        effective_defer_learning = (
+            defer_learning
+            or self.harness_variant
+            in {
+                HarnessVariant.DETERMINISTIC_SUPERVISOR_DEFERRED_LEARNING,
+                HarnessVariant.DETERMINISTIC_EVIDENCE_RESOLVER,
+                HarnessVariant.SELECTIVE_EVIDENCE_RESEARCHER,
+            }
+        )
+        if needs_learning and effective_defer_learning:
             learning = None
             self.trace.steps.append(
                 TraceStep(
@@ -599,9 +762,9 @@ class LLMAgentTeamRunner:
                     output_count=0,
                     duration_ms=0,
                     detail=(
-                        "Interactive real-provider scan deferred the LearningPolicyAgent "
-                        "LLM call so guarded decisions are not blocked by reflection. "
-                        "Use calibrate/learning-stage for explicit review-only learning."
+                        "LearningPolicyAgent reflection was deferred from the Scan hot path; "
+                        "guarded decisions do not depend on this review-only learning call. "
+                        "Use calibrate/learning-stage for explicit policy calibration."
                     ),
                 )
             )
@@ -779,6 +942,51 @@ class LLMAgentTeamRunner:
             else:
                 calibrated.append(route)
         return routes.model_copy(update={"routes": calibrated})
+
+    @staticmethod
+    def _selective_evidence_event_ids(
+        events: list[SignalEvent],
+        evidence: ContextEvidenceOutput,
+        project_profile: dict[str, Any],
+    ) -> set[str]:
+        dependency_names: set[str] = set()
+        for item in project_profile.get("dependencies", []):
+            if isinstance(item, dict):
+                name = str(item.get("name") or "").strip().lower()
+            else:
+                name = str(item).strip().lower()
+            if name:
+                dependency_names.add(name)
+        evidence_by_id = {item.event_id: item for item in evidence.results}
+        risk_terms = (
+            "breaking",
+            "security",
+            "vulnerability",
+            "cve",
+            "migration",
+            "schema",
+            "compatibility",
+            "supply chain",
+            "permission",
+        )
+        selected: set[str] = set()
+        for event in events:
+            item = evidence_by_id.get(event.event_id)
+            if item is None or item.source_quality.value != "official":
+                continue
+            source = event.source_name.lower()
+            direct_dependency = any(
+                dependency == source
+                or dependency in source.split("/")
+                or dependency in f"{event.title} {event.content}".lower()
+                for dependency in dependency_names
+            )
+            if not direct_dependency:
+                continue
+            text = f"{event.title} {event.content}"
+            if any_affirmed_term(text, risk_terms):
+                selected.add(event.event_id)
+        return selected
 
     @staticmethod
     def _evidence_exit_condition(

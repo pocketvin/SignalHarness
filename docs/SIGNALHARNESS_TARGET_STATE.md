@@ -1,7 +1,7 @@
 # SignalHarness Target State
 
 > Status: Confirmed strategic baseline
-> Updated: 2026-09-07
+> Updated: 2026-09-09
 > Scope: Product target, durable architecture principles, and decision boundaries
 
 This document records the latest confirmed direction for SignalHarness. It is intentionally more stable than implementation plans. When older architecture documents describe the current five-Agent implementation, they remain valid as **current-state facts**; when they conflict with the future product direction below, this document governs the target state.
@@ -272,9 +272,11 @@ All Relevant Changes is a frozen Scan projection and supports stable pagination,
 
 Copy/export should share one Markdown renderer with at least three useful modes: single change, overall report, and highlighted/Top changes.
 
-Web, CLI, REST API, and MCP must expose the same core Scan service rather than reimplementing business logic. MCP must eventually be able to start a real fresh scan, retrieve long-running scan status/results, list project changes, and fetch change details.
+Web, CLI, REST API, and MCP must expose the same core Scan service rather than reimplementing business logic. The current interface priority is **CLI-first for developers and shell-capable coding Agents**, Web for human intelligence reading/control, REST for programmatic integration, and MCP as a thin optional Agent adapter when tool discovery or a no-Shell client makes it useful.
 
-A scan-starting MCP tool is not read-only: it may create persistent state, perform network requests, and incur model cost. Side-effect and idempotency semantics must be truthful.
+The CLI should be deliberately Agent-friendly: stable commands, machine-readable JSON output for core project/scan/change/report operations, stdout reserved for requested data, and diagnostics/logging separated from structured output. Coding Agents that already have Shell access should not require MCP merely to consume SignalHarness.
+
+MCP remains supported rather than becoming the product core. It must eventually be able to start a real fresh scan, retrieve long-running scan status/results, list project changes, and fetch change details by delegating to the same application services used by CLI/REST/Web. A scan-starting MCP tool is not read-only: it may create persistent state, perform network requests, and incur model cost. Side-effect and idempotency semantics must be truthful.
 
 ## 15. Scheduling and notifications
 
@@ -320,7 +322,7 @@ A mature first product release should let a user:
 5. process hundreds of real source observations without losing relevant Changes to Top-K budgets;
 6. first read a natural Chinese overall environment report, then Top changes, then All Relevant Changes;
 7. open a Change to see supported impact/actions/evidence and copy it cleanly;
-8. trigger the same capability through Web/CLI/REST/MCP;
+8. trigger the same capability through a first-class CLI and the same core service through Web/REST/MCP where appropriate;
 9. schedule scans and receive important results in Inbox plus one real delivery channel;
 10. accumulate feedback/outcomes so later Calibration can be tested rather than simulated.
 

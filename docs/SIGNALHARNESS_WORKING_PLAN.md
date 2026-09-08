@@ -1,7 +1,7 @@
 # SignalHarness Working Plan
 
 > Status: Rolling construction plan
-> Updated: 2026-09-08
+> Updated: 2026-09-09
 > Governing target: `docs/SIGNALHARNESS_TARGET_STATE.md`
 
 This document records where construction should go next and how each phase should be verified. It is intentionally mutable. After every completed phase, update Current State, Retrospective, Acceptance evidence, and the next phase before continuing.
@@ -179,6 +179,8 @@ Start with the first real project's needs rather than generic support for every 
 
 ## P4 — Analyzer/Harness V2 + Eval System
 
+**Status: IN PROGRESS — first Harness ablation slice AGENT ACCEPTANCE PASS**
+
 ### Target
 
 Determine which Agent/Harness components actually improve SignalHarness quality, instead of preserving the current five-Agent layout by habit.
@@ -191,14 +193,17 @@ Suggested variants:
 
 - current five-Agent runner;
 - deterministic Supervisor/router + current downstream Agents;
-- on-demand Evidence + separate Impact/Action;
+- deterministic evidence resolution with no Evidence LLM call;
+- selective EvidenceResearcher only for high-risk/direct-project cases;
 - on-demand Evidence + merged ImpactActionAnalyzer;
 - previous variant + SelectiveVerifier;
 - optional episodic example retrieval when enough real examples exist.
 
+Also compare SignalHarness against a **Generic LLM Monitor baseline**: give a strong model the same bounded external changes plus only a compact project description/preferences, without Change Ledger revision state, structured Project Profile facts, coverage/checkpoints, or historical ProjectImpact state. This baseline answers the product question “why not just schedule GPT to watch these sites?” rather than only comparing internal Agent layouts. Mock-provider results cannot prove this external baseline; use a modest frozen real-world corpus and a live-provider/manual quality run when credentials are explicitly available.
+
 ### Measure
 
-Relevance recall, false positives/negatives, impact/module correctness, citation support, action usefulness, Top usefulness, latency, tokens, and cost.
+Relevance recall, false positives/negatives, impact/module correctness, citation support, action usefulness, Top usefulness, latency, tokens, and cost. For the Generic LLM Monitor comparison also measure duplicate suppression, revision awareness, historical consistency, coverage truthfulness, and setup/context overhead.
 
 ### Acceptance
 
@@ -206,7 +211,23 @@ Relevance recall, false positives/negatives, impact/module correctness, citation
 - analyzer/model/prompt/context/policy versions are recorded;
 - a simpler variant is preferred when quality is equivalent or better;
 - no component is kept solely because it looks more agentic;
-- the final real-time Agent count remains an evidence-based result, not a precondition.
+- the final real-time Agent count remains an evidence-based result, not a precondition;
+- the Generic LLM Monitor baseline is explicitly reported, and SignalHarness-specific complexity is retained only where it shows measurable project-intelligence value or durable-state/integration value the baseline does not provide.
+
+### P4 first-slice implementation evidence
+
+- Added versioned Harness variants and analyzer input fingerprints so compared runs record harness/analyzer/prompt/context/policy/provider/model versions on frozen semantic inputs.
+- Compared five-Agent, deterministic Supervisor, deferred Learning, deterministic Evidence Resolver, and Selective EvidenceResearcher variants through `signal-harness harness-eval`.
+- Frozen 40-case offline corpus result: five-Agent 6 LLM calls / 1.000 decision; deterministic Supervisor 5 / 1.000; deferred Learning 4 / 1.000; deterministic Evidence 2 / 0.975; selective EvidenceResearcher 3 / 1.000. Precision and recall remain 1.000 for all five variants on this corpus.
+- Current recommendation is `selective-evidence-researcher`: it preserves baseline regression quality with half the LLM calls on the frozen mock-agent corpus. This is a project-specific ablation result, not a general live-model benchmark.
+- Fixed the ablation non-inferiority gate to require every guarded quality metric to match/beat baseline independently rather than using lexicographic tuple comparison; losing experimental variants no longer invalidate an otherwise sound ablation run.
+- Focused Harness tests PASS; harness-eval `--enforce` PASS; regression-eval PASS at decision/precision/recall 1.0; project-eval PASS 3/3.
+- Fresh full verification after both P4 slices: 260 tests PASS; Ruff PASS; strict mypy PASS (100 source files); harness-eval PASS; regression-eval PASS; project-eval 3/3 PASS; `uv build` PASS.
+- Added `signal-harness generic-monitor-eval` as the external product baseline harness. It gives one live model only a compact project brief plus the frozen event corpus, performs one structured LLM call, and records schema validity, prompt size, tokens, estimated cost, and the same labelled regression metrics.
+- The compact baseline brief intentionally excludes dependency-version evidence, critical-module details, Change Ledger/revision state, coverage/checkpoints, tools, and historical ProjectImpact state; focused tests prove those deeper structured facts do not leak into the baseline context.
+- Generic-monitor plumbing tests PASS and the CLI help path is usable. No live-provider comparison was executed in this slice because that would incur external model cost/credentials; the live measurement remains environment/owner-controlled evidence.
+- A modest real-world frozen corpus remains the next P4 construction slice before production analyzer replacement.
+
 ## P5 — Product Intelligence Experience
 
 ### Target
@@ -223,9 +244,11 @@ Add versioned product projections over Scan data:
 - detail view with what/why/modules/actions/Before-After/evidence/audit;
 - All Relevant Changes with filters, search, stable pagination, and sorting;
 - shared Markdown renderer for overall report, Top set, and single Change;
-- one core Scan application service used by Web/CLI/REST/MCP.
+- one core Scan application service used by Web/CLI/REST/MCP;
+- CLI as the canonical developer + shell-capable coding-Agent interface, with stable machine-readable JSON for project/scan/change/report operations and clean stdout/stderr separation;
+- MCP kept thin and optional, delegating to the same application services rather than duplicating business logic.
 
-MCP must add a truthful fresh-scan tool plus status/result/list/detail tools. Long scans return a persistent handle rather than depending on one request staying open.
+MCP may add a truthful fresh-scan tool plus status/result/list/detail tools where MCP clients benefit from schema/tool discovery. Long scans return a persistent handle rather than depending on one request staying open. Shell-capable Agents must not need MCP merely to access the same intelligence.
 
 ### Acceptance
 
@@ -235,7 +258,8 @@ MCP must add a truthful fresh-scan tool plus status/result/list/detail tools. Lo
 - pagination remains stable while new scans occur;
 - three copy/export modes produce clean Markdown without default engineering Trace noise;
 - MCP can trigger a fresh Scan when no prior result exists and later retrieve it;
-- Web/CLI/REST/MCP projections agree on the same scan_id and product data.
+- CLI/Web/REST/MCP projections agree on the same scan_id and product data when those interfaces expose the operation;
+- core CLI JSON paths are usable without scraping human-formatted terminal tables.
 ## P6 — Source Intelligence Expansion
 
 ### Target
@@ -333,6 +357,7 @@ The following are not open implementation debates unless the user changes produc
 ## CURRENT ARCHITECTURE DIRECTIONS
 
 - modular monolith rather than microservices;
+- CLI-first for developers and Shell-capable coding Agents; MCP remains a thin optional adapter rather than the product core;
 - relational durable state as product needs justify it; SQLite is the first local/single-owner candidate;
 - Brain / Session / Hands separation;
 - bounded ContextPacketBuilder;
@@ -367,9 +392,9 @@ These are intentionally deferred until the relevant phase because they do not bl
 
 ## NEXT ACTION
 
-**Next construction phase: P4 — Analyzer/Harness V2 + Eval System.**
+**Continue P4 — Analyzer/Harness V2 + Eval System.**
 
-Use the P1–P3 durable Change/Scan/Profile/Preference contracts as frozen inputs. Build a modest reproducible harness-ablation corpus first, keep the current five-Agent route as the baseline, and compare simpler analyzer variants before changing the production critical path.
+The first local ablation slice and the Generic LLM Monitor comparison harness are implemented. Commit them with fresh verification, then build a modest real-world frozen corpus and use it to test whether selective EvidenceResearcher, merged Impact+Action, and optional verification still earn their complexity. A live Generic Monitor run can be added when explicit provider-cost authorization is available. Keep CLI-first product-interface work scoped to P5 except for contracts/eval hooks needed to measure interface/context overhead.
 
 ## RETROSPECTIVE TEMPLATE
 

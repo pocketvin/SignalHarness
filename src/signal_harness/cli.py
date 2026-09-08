@@ -18,6 +18,11 @@ from signal_harness.agent_integration.mode import RunMode
 from signal_harness.agent_integration.runner import LLMAgentTeamRunner
 from signal_harness.agent_integration.schemas import LearningPolicyOutput, ReplayEvaluation
 from signal_harness.agent_team.learning_policy import LearningPolicyAgent
+from signal_harness.harness_eval import run_harness_ablation, write_harness_ablation_summary
+from signal_harness.generic_monitor_eval import (
+    run_generic_monitor_eval,
+    write_generic_monitor_eval_summary,
+)
 from signal_harness.evals import (
     build_model_eval_summary,
     evaluate_regression_suite,
@@ -774,6 +779,136 @@ def regression_eval(
     typer.echo(f"Regression eval JSON: {paths['json']}")
     typer.echo(f"Regression eval Markdown: {paths['markdown']}")
     if enforce and not summary.passed:
+        raise typer.Exit(code=1)
+
+
+@app.command("harness-eval")
+def harness_eval(
+    fixture: Path = typer.Option(
+        Path("examples/signal_harness/regression_events.json"),
+        "--fixture",
+        help="Frozen event corpus shared by every Harness variant",
+    ),
+    expectations: Path = typer.Option(
+        Path("examples/signal_harness/regression_expectations.json"),
+        "--expectations",
+        help="Product-level expectations shared by every Harness variant",
+    ),
+    enforce: bool = typer.Option(False, "--enforce", help="Exit non-zero when comparability or quality gates fail"),
+    cwd: Path = typer.Option(Path.cwd(), "--cwd", hidden=True),
+    config_dir: Path = typer.Option(Path("configs"), "--config-dir"),
+    output_dir: Path = typer.Option(Path("outputs/harness-eval"), "--output-dir"),
+) -> None:
+    """Ablate Harness components on identical frozen offline inputs."""
+
+    root = cwd.expanduser().resolve()
+    summary = asyncio.run(
+        run_harness_ablation(
+            root=root,
+            config_dir=resolve_config_dir(root, config_dir),
+            fixture=resolve_example_path(root, fixture),
+            expectations=resolve_example_path(root, expectations),
+        )
+    )
+    paths = write_harness_ablation_summary(_resolve(root, output_dir), summary)
+    typer.echo(
+        f"Harness eval: {'PASS' if summary.passed else 'FAIL'}; "
+        f"frozen={summary.inputs_frozen}; recommendation={summary.recommendation.value}"
+    )
+    for item in summary.variants:
+        typer.echo(
+            f"- {item.variant.value}: decision={item.regression.decision_accuracy:.4f}; "
+            f"precision={item.regression.priority_precision:.4f}; "
+            f"recall={item.regression.priority_recall:.4f}; llm_calls={item.llm_call_count}"
+        )
+    typer.echo(f"Harness eval JSON: {paths['json']}")
+    typer.echo(f"Harness eval Markdown: {paths['markdown']}")
+    if enforce and not summary.passed:
+        raise typer.Exit(code=1)
+
+
+@app.command("generic-monitor-eval")
+def generic_monitor_eval(
+    fixture: Path = typer.Option(
+        Path("examples/signal_harness/regression_events.json"),
+        "--fixture",
+        help="Frozen external-change corpus",
+    ),
+    expectations: Path = typer.Option(
+        Path("examples/signal_harness/regression_expectations.json"),
+        "--expectations",
+        help="Shared labelled expectations",
+    ),
+    project_profile: Path = typer.Option(
+        Path("configs/project_profile.yaml"),
+        "--project-profile",
+        help="Profile used only to derive a compact generic-monitor brief",
+    ),
+    provider_id: str | None = typer.Option(
+        None, "--provider", help="Configured real-model provider id"
+    ),
+    max_events: int = typer.Option(80, "--max-events", min=1),
+    enforce: bool = typer.Option(
+        False,
+        "--enforce",
+        help="Exit non-zero if the live provider comparison is invalid",
+    ),
+    cwd: Path = typer.Option(Path.cwd(), "--cwd", hidden=True),
+    config_dir: Path = typer.Option(Path("configs"), "--config-dir"),
+    output_dir: Path = typer.Option(Path("outputs/generic-monitor-eval"), "--output-dir"),
+) -> None:
+    """Compare a one-pass generic LLM monitor against the shared labelled corpus."""
+
+    root = cwd.expanduser().resolve()
+    config = resolve_config_dir(root, config_dir)
+    provider: AgentProvider
+    if provider_id is not None:
+        try:
+            provider = provider_from_selection(provider_id, config_dir=config)
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+    else:
+        selected_provider = default_provider_id(config)
+        if selected_provider is None:
+            _require_agent_key(RunMode.AGENT)
+            provider = provider_from_env(RunMode.AGENT, config_dir=config)
+        else:
+            provider = provider_from_selection(selected_provider, config_dir=config)
+
+    resolved_profile = project_profile.expanduser()
+    if not resolved_profile.is_absolute():
+        parts = resolved_profile.parts
+        resolved_profile = (
+            config.joinpath(*parts[1:])
+            if parts and parts[0] == "configs"
+            else _resolve(root, resolved_profile)
+        )
+
+    async def run_eval() -> Any:
+        try:
+            return await run_generic_monitor_eval(
+                provider=provider,
+                mode=RunMode.AGENT,
+                fixture=resolve_example_path(root, fixture),
+                expectations=resolve_example_path(root, expectations),
+                project_profile=resolved_profile,
+                max_events=max_events,
+            )
+        finally:
+            await provider.close()
+
+    summary = asyncio.run(run_eval())
+    paths = write_generic_monitor_eval_summary(_resolve(root, output_dir), summary)
+    regression = summary.regression
+    typer.echo(
+        f"Generic monitor: valid={summary.comparison_valid}; "
+        f"decision={regression.decision_accuracy:.4f}; "
+        f"precision={regression.priority_precision:.4f}; "
+        f"recall={regression.priority_recall:.4f}; tokens={summary.total_tokens}"
+    )
+    typer.echo(f"Generic monitor JSON: {paths['json']}")
+    typer.echo(f"Generic monitor Markdown: {paths['markdown']}")
+    if enforce and not summary.comparison_valid:
         raise typer.Exit(code=1)
 
 
