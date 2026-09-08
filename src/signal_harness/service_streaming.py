@@ -129,6 +129,9 @@ class StreamRunSession:
             "event_count": len(self.events),
             "events_url": f"/stream-runs/{self.run_id}/events",
             "result_url": f"/runs/{self.run_id}",
+            "product_url": f"/runs/{self.run_id}/product",
+            "report_url": f"/runs/{self.run_id}/report",
+            "changes_url": f"/runs/{self.run_id}/changes",
         }
 
 
@@ -369,6 +372,8 @@ class StreamRunManager:
                 "signals_url": f"/signals?run_id={session.run_id}",
                 "assessments_url": f"/runs/{session.run_id}/assessments",
                 "changes_url": f"/runs/{session.run_id}/changes",
+                "product_url": f"/runs/{session.run_id}/product",
+                "report_url": f"/runs/{session.run_id}/report",
                 "coverage_url": f"/runs/{session.run_id}/coverage",
                 "events_url": f"/stream-runs/{session.run_id}/events",
                 "streaming": True,

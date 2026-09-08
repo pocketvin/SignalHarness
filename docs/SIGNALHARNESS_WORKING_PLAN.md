@@ -237,7 +237,7 @@ Relevance recall, false positives/negatives, impact/module correctness, citation
 
 ## P5 — Product Intelligence Experience
 
-**Status: FIRST VERTICAL SLICE IMPLEMENTED / AGENT ACCEPTANCE PASS — thin MCP product adapter remains**
+**Status: IMPLEMENTED / AGENT ACCEPTANCE PASS**
 
 ### Target
 
@@ -281,7 +281,9 @@ MCP may add a truthful fresh-scan tool plus status/result/list/detail tools wher
 - REST delegates to the same product service through `GET /runs/{run_id}/product`, `/report`, `/changes`, and `/changes/{change_id}`. Focused acceptance proves CLI and REST return the same scan id, report stats, and Top IDs under the same Top budget.
 - Golden Demo now consumes the Product Intelligence contract after a run and presents Profile → Overall Report → Top → All → Detail → Agent Audit. Legacy `signals` / `assessments` remain a compatibility fallback/audit source, not the primary product view.
 - Fresh local acceptance: 274 tests PASS; `git diff --check` PASS; JavaScript syntax PASS; Ruff PASS; strict mypy PASS (104 source files); CLI mock-agent JSON/read/export + trace/calibrate smoke PASS; REST/Web product smoke PASS; `uv build` PASS.
-- Remaining P5 acceptance item: keep MCP optional and thin, but let MCP clients truthfully start a persistent fresh Scan and retrieve status/product/list/detail by delegating to the same application services. A full visual/human browser polish pass can remain owner acceptance after the objective Web contract is complete.
+- Thin MCP adapter is complete: 10 tools total, with 9 read-only retrieval/context tools plus non-idempotent `signalharness_start_scan`. MCP fresh scans reuse the same persistent `StreamRunManager`; status/product/list/detail delegate to the same product/run state rather than duplicating business logic.
+- MCP acceptance covers persistent fixture scan start → status → product/list/detail, rejected out-of-scope fixture paths, truthful tool annotations, and completed-run reads after rebuilding the MCP server object. FastAPI and MCP share one manager in service mode.
+- Final fresh P5 local acceptance: 277 tests PASS; Ruff PASS; strict mypy PASS (104 source files); JavaScript syntax PASS; `uv build` PASS; regression-eval decision/precision/recall 1.000/1.000/1.000; project-eval 3/3 PASS. A full visual/human browser polish pass remains optional owner acceptance, not a blocker for objective P5 completion.
 ## P6 — Source Intelligence Expansion
 
 ### Target
@@ -414,9 +416,9 @@ These are intentionally deferred until the relevant phase because they do not bl
 
 ## NEXT ACTION
 
-**Continue P5 with the thin MCP product adapter, without changing CLI-first priority.**
+**Proceed to P6 — Source Intelligence Expansion.**
 
-The shared Product Intelligence core, CLI, REST, and Golden Demo vertical slice is agent-accepted. Next, make MCP delegate to the same persistent Scan/product services for fresh-scan start, status, product/list/detail retrieval, with truthful side-effect/idempotency annotations. Do not rebuild business logic inside MCP. After that adapter is verified, close P5 and proceed to P6 source expansion.
+P5 is agent-accepted across the shared Product Intelligence core, CLI-first JSON interface, REST, Golden Demo, and thin MCP adapter. Preserve CLI as the primary developer/shell-capable Agent surface and keep MCP thin. Next, expand sources in evidence order: own-project Git facts where incomplete, then the first high-value package-registry connector, followed by OSV/security version matching. Do not add a connector unless identity, revision, pagination/history limits, provenance, failure semantics, and project-version applicability are testable.
 
 ## RETROSPECTIVE TEMPLATE
 

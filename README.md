@@ -32,7 +32,7 @@ SignalHarness 的核心答案是：**稳定的环境事实与 Scan 状态由 Pyt
 | Memory / State | Project-scoped Signal / Feedback / Learning 兼容状态；新业务历史逐步迁移到结构化 Ledger |
 | Agent Eval | 40 条项目级 Regression Suite + 3 条 Cross-project Context Gate + Provider Contract Eval |
 | Observability | Agent、Schema、Retry、Fallback、Tools、Latency、Tokens、Estimated Cost Trace |
-| MCP | 5 个只读 structured tools |
+| MCP | 10 个 structured tools：9 个只读读取工具 + 1 个持久化 fresh-scan 启动工具；CLI 仍是开发者/Coding Agent 首选接口 |
 | Product Intelligence | 同一 frozen Scan 的 Overall Report → Top Changes → All Relevant Changes → Change Detail，共用一份 core projection |
 | CLI | CLI-first developer / Coding Agent surface：`scan/report/changes/change --json` + shared Markdown export |
 | Service | FastAPI REST + SSE Streaming Run + Product Intelligence REST + MCP Streamable HTTP |
@@ -398,7 +398,7 @@ uv run signal-harness model-eval \
 
 ## MCP
 
-SignalHarness 暴露 5 个只读 Structured MCP Tools：
+SignalHarness 暴露 10 个 Structured MCP Tools。MCP 是 CLI-first 架构上的薄适配层：9 个工具只读，`signalharness_start_scan` 负责启动一个持久化 Scan handle。
 
 ```text
 signalharness_get_project_context
@@ -406,17 +406,22 @@ signalharness_search_signal_history
 signalharness_get_latest_assessments
 signalharness_get_run_trace
 signalharness_get_feedback_memory
+signalharness_start_scan
+signalharness_get_scan_status
+signalharness_get_product
+signalharness_list_changes
+signalharness_get_change_detail
 ```
 
 特点：
 
-- read-only
-- idempotent
-- closed-world
-- service run ID 校验
-- 仍经过 SignalHarness permission policy
+- 9 个读取工具标记为 read-only / idempotent / closed-world；
+- `signalharness_start_scan` 明确标记为非只读、非幂等，并返回持久 run handle，而不是占住一次长请求；
+- fresh scan 复用与 REST/SSE 相同的 `StreamRunManager`，status/product/list/detail 复用同一 `ProductIntelligenceService`；
+- fixture 路径继续受 package/workspace allowlist 限制，真实 Agent provider readiness 仍由现有 provider catalog 校验；
+- service run ID 继续校验，MCP 不能绕过 Harness Guardrail。
 
-MCP 是第二个读取入口，不是绕过 Harness Guardrail 的后门。
+CLI 仍是开发者和具备 Shell 的 Coding Agent 的首选接口；MCP 只为需要 tool discovery / typed schema 的客户端提供等价能力。
 
 ## REST + SSE + MCP HTTP
 

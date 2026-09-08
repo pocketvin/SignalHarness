@@ -17,7 +17,12 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from signal_harness.agent_integration.mode import RunMode
-from signal_harness.mcp_server import MCP_TOOL_NAMES, build_mcp_server, validate_run_id
+from signal_harness.mcp_server import (
+    MCP_TOOL_NAMES,
+    MCP_WRITE_TOOL_NAMES,
+    build_mcp_server,
+    validate_run_id,
+)
 from signal_harness.memory import FeedbackMemory
 from signal_harness.persistence import ChangeLedger
 from signal_harness.product_intelligence import ProductIntelligenceService
@@ -207,18 +212,18 @@ def create_app(
         output_dir=output_dir,
         state_dir=state_dir,
     )
-    mcp = build_mcp_server(
-        cwd=paths.cwd,
-        config_dir=paths.config_dir,
-        output_dir=paths.output_dir,
-        state_dir=paths.state_dir,
-    )
-
     streams = StreamRunManager(
         cwd=paths.cwd,
         config_dir=paths.config_dir,
         output_dir=paths.output_dir,
         state_dir=paths.state_dir,
+    )
+    mcp = build_mcp_server(
+        cwd=paths.cwd,
+        config_dir=paths.config_dir,
+        output_dir=paths.output_dir,
+        state_dir=paths.state_dir,
+        stream_manager=streams,
     )
 
     @asynccontextmanager
@@ -268,7 +273,12 @@ def create_app(
                 "false_positive_rate": float(evidence.get("false_positive_rate", 0.0)),
                 "false_negative_rate": float(evidence.get("false_negative_rate", 0.0)),
             },
-            "mcp": {"tool_count": len(MCP_TOOL_NAMES), "tools": list(MCP_TOOL_NAMES)},
+            "mcp": {
+                "tool_count": len(MCP_TOOL_NAMES),
+                "read_only_tool_count": len(MCP_TOOL_NAMES) - len(MCP_WRITE_TOOL_NAMES),
+                "write_tool_count": len(MCP_WRITE_TOOL_NAMES),
+                "tools": list(MCP_TOOL_NAMES),
+            },
             "streaming": {
                 "transport": "sse",
                 "durability": "persistent-run-retry",

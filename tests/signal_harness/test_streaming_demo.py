@@ -119,7 +119,9 @@ def test_demo_page_and_metadata(
         assert payload["regression"]["suite"] == "resume-v1"
         assert payload["regression"]["cases"] == 40
         assert payload["regression"]["passed"] is True
-        assert payload["mcp"]["tool_count"] == 5
+        assert payload["mcp"]["tool_count"] == 10
+        assert payload["mcp"]["read_only_tool_count"] == 9
+        assert payload["mcp"]["write_tool_count"] == 1
         assert payload["streaming"] == {
             "transport": "sse",
             "durability": "persistent-run-retry",

@@ -19,7 +19,7 @@ SignalHarness watches GitHub, RSS, and configured public-page snapshots, decides
 | Memory / state | Existing project-scoped signal/feedback/learning compatibility state remains separated from per-run output/trace |
 | Eval | 40-case Agent regression + 3-case cross-project context gate + provider contract eval |
 | Observability | Local trace for Agent calls, schema/retry/fallback, tools, latency, provider-reported tokens, and estimated cost |
-| MCP | Five read-only structured tools for project context, signal history, assessments, trace, and feedback |
+| MCP | Ten structured tools: nine read-only product/context tools plus one persistent fresh-scan starter; CLI remains the primary developer/coding-agent interface |
 | Product intelligence | One frozen Scan projection for Overall Report → Top Changes → All Relevant Changes → Change Detail |
 | CLI | CLI-first developer / coding-Agent surface with stable JSON reads and shared Markdown export |
 | Service | FastAPI REST API + replayable SSE streaming runs + Product Intelligence REST + MCP Streamable HTTP |
@@ -231,7 +231,7 @@ Real-provider results are local snapshots, not a universal leaderboard. See `doc
 
 ## MCP
 
-SignalHarness exposes a narrow **read-only** MCP surface; MCP does not bypass the existing runtime guardrails.
+SignalHarness exposes a narrow **thin MCP adapter** over the same Scan/Product services; MCP does not bypass the existing runtime guardrails.
 
 ```bash
 uv run signal-harness mcp
@@ -244,8 +244,13 @@ Available tools:
 - `signalharness_get_latest_assessments`
 - `signalharness_get_run_trace`
 - `signalharness_get_feedback_memory`
+- `signalharness_start_scan`
+- `signalharness_get_scan_status`
+- `signalharness_get_product`
+- `signalharness_list_changes`
+- `signalharness_get_change_detail`
 
-Each tool returns structured content, is annotated read-only/idempotent/closed-world, validates service run IDs, and passes through SignalHarness permission policy.
+Nine retrieval tools are annotated read-only/idempotent/closed-world. `signalharness_start_scan` is explicitly non-read-only and non-idempotent, starts the same persistent `StreamRunManager` used by REST/SSE, and returns a run handle for later status/product/list/detail reads. Product reads delegate to the same `ProductIntelligenceService`; fixture paths remain allowlisted and real-provider readiness uses the existing provider catalog. CLI remains the preferred interface for developers and shell-capable coding agents; MCP exists for clients that benefit from tool discovery and typed schemas.
 
 ## Golden Demo UI + SSE
 
@@ -259,7 +264,7 @@ The Golden Demo is dependency-free HTML/CSS/JS served by FastAPI. It opens in **
 
 Clicking **Run Golden Demo** creates and immediately starts a stream run. Queued/running input and status are persisted for bounded restart recovery; the browser may attach to SSE at any time to consume live `TraceRecorder` append/update events. The replay buffer itself remains in-process, reconnects can resume with `Last-Event-ID`, and disconnecting the browser does not cancel the workflow.
 
-The UI shows the selected project, its Watchlist, source-native change deltas, Agent stages, Python tool guard, schema/fallback/retry state, tool requests/execution/permission checks, final decisions, runtime health, the committed 40-case regression evidence, and the five read-only MCP tools. `signal-harness serve` automatically loads an optional project-root `.env` without overriding variables already exported by the caller. Real `agent` mode can select separately configured OpenAI, Qwen, Kimi, or DeepSeek OpenAI-compatible providers per run. Model profiles carry freshness metadata: known retired model aliases resolve to the current profile with a visible warning, while unknown overrides receive conservative capabilities instead of inheriting another model's JSON/context/pricing claims. `/demo/meta` exposes only non-secret project/provider metadata; it never returns API keys, base URLs, or local config paths, and readiness does not claim network connectivity before a run. `.env` is excluded from Git and the Docker build context. The execution metadata is locally recoverable, but the SSE replay buffer is intentionally in-process; SignalHarness does not claim a distributed durable queue or worker system.
+The UI shows the selected project, its Watchlist, source-native change deltas, Agent stages, Python tool guard, schema/fallback/retry state, tool requests/execution/permission checks, final decisions, runtime health, the committed 40-case regression evidence, and the ten-tool MCP surface (nine read-only plus one scan starter). `signal-harness serve` automatically loads an optional project-root `.env` without overriding variables already exported by the caller. Real `agent` mode can select separately configured OpenAI, Qwen, Kimi, or DeepSeek OpenAI-compatible providers per run. Model profiles carry freshness metadata: known retired model aliases resolve to the current profile with a visible warning, while unknown overrides receive conservative capabilities instead of inheriting another model's JSON/context/pricing claims. `/demo/meta` exposes only non-secret project/provider metadata; it never returns API keys, base URLs, or local config paths, and readiness does not claim network connectivity before a run. `.env` is excluded from Git and the Docker build context. The execution metadata is locally recoverable, but the SSE replay buffer is intentionally in-process; SignalHarness does not claim a distributed durable queue or worker system.
 
 ## REST API + MCP HTTP
 
@@ -387,7 +392,7 @@ src/signal_harness/providers/           mock + OpenAI-compatible providers/model
 src/signal_harness/resources.py          workspace-first packaged-resource fallback
 src/signal_harness/tools/web_snapshot.py safe public snapshot / visible-text diff
 src/signal_harness/ui/static/            Golden Demo HTML / CSS / JS
-src/signal_harness/mcp_server.py        read-only MCP interface
+src/signal_harness/mcp_server.py        thin MCP adapter over shared Scan/Product services
 src/signal_harness/service.py           FastAPI REST/SSE + MCP HTTP service
 src/signal_harness/service_streaming.py in-process stream-run/SSE replay manager
 src/signal_harness/evals.py             model and regression evaluation
