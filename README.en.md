@@ -15,12 +15,13 @@ SignalHarness watches GitHub, RSS, and configured public-page snapshots, decides
 | Reliability | Pydantic structured outputs, schema retry, deterministic fallback, bounded repair, run timeout limits |
 | Guarded decisions | LLM contributes semantics; Python owns final scoring and a primary-source high-risk alert floor |
 | Change ledger | Project-scoped SQLite EventRevision → Change → ProjectImpact → ScanChange; Top-K no longer controls durable existence |
+| Project profile / preference | Versioned ProfileRevision plus Critical / Important / Normal / Low / Ignore preferences that affect ranking and Agent context |
 | Memory / state | Existing project-scoped signal/feedback/learning compatibility state remains separated from per-run output/trace |
 | Eval | 40-case Agent regression + 3-case cross-project context gate + provider contract eval |
 | Observability | Local trace for Agent calls, schema/retry/fallback, tools, latency, provider-reported tokens, and estimated cost |
 | MCP | Five read-only structured tools for project context, signal history, assessments, trace, and feedback |
 | Service | FastAPI REST API + replayable SSE streaming runs + MCP Streamable HTTP |
-| Golden Demo | Chinese by default with an in-page English switch; provider readiness and review-only project onboarding are shown without exposing secrets |
+| Golden Demo | Chinese by default with an in-page English switch; local project connection, Profile inspection, fast importance controls, and live Trace are available without exposing secrets |
 | Deployment | Docker image with health check; package/CLI remains usable without a server |
 | Learning | Review-only proposals → risk classification → replay gate → explicit human apply |
 
@@ -103,11 +104,13 @@ Memory is infrastructure, not a sixth Agent.
 
 Per-run output/trace remains isolated under `service-runs/<run_id>`, while persistent signal, feedback, alert and learning state is stored under `.signal-harness/projects/<project_id>/`. Subsequent runs for the same project reuse that state; different projects are isolated. Shared project-state writes are serialized to prevent concurrent runs from overwriting the same JSON files.
 
-### Project Onboarding V1
+### Project Profile + Preference V1
 
-`signal-harness project-draft <repo>` deterministically inspects `pyproject.toml`, `package.json`, `requirements*.txt`, `Cargo.toml`, `go.mod`, plus a bounded directory outline, then produces a review-required Project Profile + Watchlist draft. The default path never registers the project; `--apply` is explicit, existing project config refuses overwrite, and `--force` is required to replace reviewed configuration.
+`signal-harness project-connect <repo>` deterministically inspects allowlisted manifests/lockfiles (`pyproject.toml`, `package.json`, `requirements*.txt`, `Cargo.toml`, `go.mod`, `uv.lock`, `package-lock.json`) plus a bounded directory outline, registers the Project Catalog + Watchlist, and immediately creates the first ProfileRevision. `project-draft` remains as a compatibility preview command instead of a mandatory activation gate.
 
-The Golden Demo can create the same draft from a browser-selected directory without giving the server arbitrary filesystem access. The browser uploads only allowlisted manifest text and relative path names, never source files or `.env`. `POST /project-drafts` is preview-only and bounds each manifest to 256 KB and the aggregate manifest payload to 512 KB.
+ProfileRevision records purpose, stack, declared/resolved dependency-version evidence, runtime/protocol/provider, critical modules, evidence, and unknowns. Explicit user preferences use Critical / Important / Normal / Low / Ignore across dependency/provider/runtime/protocol/module/ecosystem/source/category/topic scopes. Auto profile refresh cannot overwrite explicit preferences; structured REST/UI controls and deterministic natural-language updates write the same preference model, and later ranking/Agent context consumes the resulting effective Profile.
+
+The Golden Demo can connect a browser-selected directory without arbitrary server filesystem access. The browser uploads only allowlisted manifest/lockfile text and relative path names, never source files or `.env`.
 
 ### Candidate Funnel V2
 

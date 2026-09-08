@@ -99,9 +99,13 @@ def test_demo_page_and_metadata(
         assert "['http:','https:']" in javascript.text
         assert 'data-action="audit"' in javascript.text
         assert "data-stage=" in javascript.text
-        assert "project-drafts" in javascript.text
+        assert "projects/connect" in javascript.text
         assert "SAFE_PROJECT_MANIFESTS" in javascript.text
         assert 'id="draftInput"' in page.text
+        assert 'id="profilePanel"' in page.text
+        assert 'id="preferenceInput"' in page.text
+        assert "preferences/natural-language" in javascript.text
+        assert "data-pref-scope" in javascript.text
 
         meta = client.get("/demo/meta")
         assert meta.status_code == 200

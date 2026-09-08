@@ -147,6 +147,35 @@ def keyword_score(
     return _bounded(score)
 
 
+def _preference_relevance_adjustment(
+    event: SignalEvent, profile: dict[str, Any]
+) -> float:
+    text = _semantic_text(event, include_source=True)
+    preferences = profile.get("importance_preferences", [])
+    if not isinstance(preferences, list):
+        return 0.0
+    weights = {
+        "critical": 35.0,
+        "important": 18.0,
+        "normal": 0.0,
+        "low": -25.0,
+        "ignore": -100.0,
+    }
+    adjustment = 0.0
+    for item in preferences:
+        if not isinstance(item, dict):
+            continue
+        scope_key = str(item.get("scope_key") or "").strip().lower()
+        if not scope_key or not contains_affirmed_term(text, scope_key):
+            continue
+        importance = str(item.get("importance") or "normal").lower()
+        value = weights.get(importance, 0.0)
+        if importance == "ignore":
+            return value
+        adjustment += value
+    return max(-100.0, min(45.0, adjustment))
+
+
 def relevance_score(
     event: SignalEvent,
     profile: dict[str, Any],
@@ -183,6 +212,7 @@ def relevance_score(
         ],
     )
     score -= min(60.0, len(ignore_hits) * 40.0)
+    score += _preference_relevance_adjustment(event, profile)
     return _bounded(score)
 
 

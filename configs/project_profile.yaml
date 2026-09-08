@@ -65,3 +65,65 @@ ignore_keywords:
   - cryptocurrency price
   - gaming promotion
   - consumer giveaway
+
+purpose: Project Environment Intelligence for software engineering changes
+runtimes:
+  - Python
+  - ASGI
+protocols:
+  - Model Context Protocol
+providers: []
+dependency_evidence:
+  - name: fastapi
+    declared: fastapi>=0.116,<1
+    resolved_version: 0.141.1
+    source_files: [pyproject.toml, uv.lock]
+    confidence: verified
+  - name: httpx
+    declared: httpx>=0.27.0
+    resolved_version: 0.28.1
+    source_files: [pyproject.toml, uv.lock]
+    confidence: verified
+  - name: mcp
+    declared: mcp>=2,<3
+    resolved_version: 2.1.1
+    source_files: [pyproject.toml, uv.lock]
+    confidence: verified
+  - name: pydantic
+    declared: pydantic>=2.0.0
+    resolved_version: 2.13.4
+    source_files: [pyproject.toml, uv.lock]
+    confidence: verified
+  - name: python-dotenv
+    declared: python-dotenv>=1,<2
+    resolved_version: 1.2.3
+    source_files: [pyproject.toml, uv.lock]
+    confidence: verified
+  - name: pyyaml
+    declared: pyyaml>=6.0
+    resolved_version: 6.0.3
+    source_files: [pyproject.toml, uv.lock]
+    confidence: verified
+  - name: rich
+    declared: rich>=13.0.0
+    resolved_version: 15.0.0
+    source_files: [pyproject.toml, uv.lock]
+    confidence: verified
+  - name: typer
+    declared: typer>=0.12.0
+    resolved_version: 0.26.7
+    source_files: [pyproject.toml, uv.lock]
+    confidence: verified
+  - name: uvicorn
+    declared: uvicorn>=0.35,<1
+    resolved_version: 0.52.4
+    source_files: [pyproject.toml, uv.lock]
+    confidence: verified
+evidence:
+  manifest_files: [pyproject.toml, uv.lock]
+unknowns:
+  - external providers/APIs are configured outside supported project manifests
+onboarding:
+  review_required: false
+  auto_active: true
+  evidence_files: [pyproject.toml, uv.lock]

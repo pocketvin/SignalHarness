@@ -177,8 +177,16 @@ class SignalHarnessWorkflow:
         )
         self.executor.context.metadata["scan_id"] = active_scan_id
         with self.trace.step("load_config", input_count=3) as state:
-            profile, policy, watchlist = await self._load_config()
+            auto_profile, policy, watchlist = await self._load_config()
+            profile_revision = self.ledger.ensure_profile_revision(
+                project_id=self.project_id, auto_profile=auto_profile
+            )
+            profile = profile_revision["effective_profile"]
             state["output_count"] = 3
+            state["metadata"] = {
+                "profile_revision_id": profile_revision["profile_revision_id"],
+                "active_preferences": len(profile_revision["preferences"]),
+            }
         guard = SignalPermissionGuard(policy)
         learning_observation: LearningPolicyOutput | None = None
 
@@ -272,6 +280,7 @@ class SignalHarnessWorkflow:
             window_end=window.upper,
             first_use=window.first_use,
             checkpoint_eligible=window.checkpoint_eligible,
+            profile_revision_id=str(profile_revision["profile_revision_id"]),
         )
         self.ledger.record_source_tasks(
             scan_id=active_scan_id, source_tasks=collection.source_tasks
@@ -382,6 +391,10 @@ class SignalHarnessWorkflow:
                 project_profile_path=self.project_profile_path,
                 watchlist_path=self.watchlist_path,
             ).snapshot()
+            project_memory = memory_snapshot.get("project_memory")
+            if isinstance(project_memory, dict):
+                project_memory["project_profile"] = profile
+                project_memory["profile_revision_id"] = profile_revision["profile_revision_id"]
             try:
                 with self.trace.step(
                     "agent_team_guardrail",

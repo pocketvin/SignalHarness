@@ -1,6 +1,6 @@
 # SignalHarness Architecture
 
-SignalHarness 的目标产品是 Project Environment Intelligence；当前仍保留五-Agent routed analyzer 作为可验证 baseline。P1 已引入 SQLite Change Ledger，使 pre-funnel 变化、EventRevision、Change、ProjectImpact 与 ScanChange 拥有独立于旧 JSON 输出的持久业务状态。CLI/REST/SSE Golden Demo 与当前只读 MCP 仍复用同一 runtime；未来 Analyzer 数量不再是产品约束。
+SignalHarness 的目标产品是 Project Environment Intelligence；当前仍保留五-Agent routed analyzer 作为可验证 baseline。P1/P2 已建立 SQLite Change Ledger、冻结 Scan Window、Coverage 与可恢复本地 Run；P3 在同一 Ledger 上增加 versioned ProfileRevision 与显式 Preference Engine，使每个 Scan 固定引用实际使用的 effective project context。CLI/REST/SSE Golden Demo 与当前只读 MCP 仍复用同一 runtime；未来 Analyzer 数量不再是产品约束。
 
 ## Workflow flowchart
 
@@ -93,7 +93,7 @@ sequenceDiagram
   Project Catalog：为每个可选项目绑定显示名、Project Profile 与项目级 Watchlist；新增项目不需要修改 Runtime 代码。
 
 - `configs/project_profile.yaml` / `configs/project_profiles/*.yaml`
-  项目上下文：技术栈、真实 dependencies、monitored ecosystem、critical modules、focus keywords。
+  自动/显式项目事实的兼容输入：purpose、技术栈、dependencies 与 lockfile evidence、runtime/protocol/provider、critical modules、monitored ecosystem、focus keywords。运行时实际使用的 effective Profile 会版本化进入 project Ledger。
 
 - `configs/watchlist.yaml` / `configs/watchlists/*.yaml`
   project-scoped source watchlist：实时 GitHub/RSS + 配置化 public HTTP(S) snapshot/diff。官方 RSS / Web page 可显式声明 provenance authority。
@@ -160,11 +160,19 @@ sequenceDiagram
 - **GitHub pagination**：release/issues collector 跟随分页；达到 bounded page cap 时标记 `partial/history_limited`，不会因 HTTP 200 错误推进 `since_last`。
 - **Recoverable local runs**：stream run 在 POST 后立即执行，输入/queued/running 状态先落盘；服务启动会对未完成任务做有界恢复。SSE replay history 仍是内存态，因此这不是 Redis/Celery/Temporal 一类分布式 durable queue。
 
+## P3 profile / preference boundary
+
+- **ProfileRevision**：每个 project 的 Auto Profile Facts 在 SQLite 中版本化；Scan 创建时解析 active Preferences 得到 effective Profile，并把 `profile_revision_id` 固定进 `scans`。后续 profile/preference 变化不会改写历史 Scan。
+- **Preference authority**：Critical / Important / Normal / Low / Ignore 是显式用户状态，scope 可落到 dependency/provider/runtime/protocol/module/ecosystem/source/category/topic；active preference 高于自动发现和模型推断，并且可审计、撤销。
+- **Ranking + Context**：Preference 不只是 UI 设置；匹配项会进入 deterministic relevance adjustment，同时 effective Profile 中保留结构化 preference，供 Analyzer context 使用。
+- **Safe onboarding evidence**：`uv.lock` / `package-lock.json` 等 allowlisted lockfile 只读解析 declared constraint、resolved version、source file、confidence；不执行 repository scripts、不安装依赖、不读取 secret 文件。
+- **Fast product controls**：REST/Golden Demo 支持结构化五档重要性和确定性 natural-language preference 更新，两条路径写入同一个 project preference model。
+
 ## Project state / candidate / provenance boundaries
 
 - **Run state**：trace、run metadata 与本次输出按 run 隔离。
 - **Project state**：seen signal fingerprints、feedback、alert state 与 learning artifacts 按 `project_id` 持久化；同项目并发写入受 project lock 保护。
-- **Project onboarding**：本地 CLI 通过 manifest + bounded path inspection 生成 review-only profile/watchlist draft；浏览器 onboarding 只上传 allowlisted manifest text 与相对路径，`POST /project-drafts` 不执行 Catalog 写入。
+- **Project onboarding / connection**：`project-connect` 与 `POST /projects/connect` 通过 allowlisted manifest/lockfile + bounded path inspection 自动生成并立即激活 Project Profile/Watchlist，同时创建首个 ProfileRevision；`project-draft` / `POST /project-drafts` 仅保留为兼容 preview。浏览器只上传 allowlisted manifest/lockfile text 与相对路径，不上传源码或 `.env`。
 - **Web snapshot boundary**：`web_change.fetch_snapshot` 只接受当前 Project Watchlist 已批准的 public HTTP(S) URL；公网/端口/redirect/content-type/body-size 都受 Python 校验。首次 observation 只建立 project-scoped baseline，unchanged 页面不产生 Signal。
 - **Candidate funnel**：live events 在 normalize/deduplicate 后才做 project-aware Top-K，避免“先按时间截断再判断相关性”造成系统性漏报。
 - **Source authority**：GitHub repo 本身是否官方与 Issue 作者 authority 分开；community / maintainer / official 进入不同 evidence confidence 上限。官方 RSS 与 official Web snapshot 由 Watchlist 显式声明，非官方网页保持 secondary。

@@ -165,6 +165,18 @@ Start with the first real project's needs rather than generic support for every 
 - auto-refresh never overwrites explicit user overrides;
 - historical Scan continues to reference its original ProfileRevision;
 - project-local/private facts stay isolated by authorization scope.
+
+### P3 implementation evidence
+
+- SQLite Ledger schema v4 adds immutable `profile_revisions`, auditable/revocable `project_preferences`, and `scans.profile_revision_id`; P2 databases migrate in place and historical scans remain pinned to the revision they used.
+- Effective Profile is computed as Auto Profile Facts + explicit active Preferences/Overrides. Auto refresh never deletes or overwrites the explicit preference rows.
+- Five user importance levels are implemented: Critical / Important / Normal / Low / Ignore, scoped to dependency/provider/runtime/protocol/module/ecosystem/source/category/topic. Matching preferences affect deterministic relevance ranking and are also included in the effective Agent context.
+- REST exposes project profile retrieval plus structured preference set/revoke and deterministic natural-language preference updates; the natural-language path maps into the same persisted preference model and does not call a paid model.
+- `project-connect` CLI and `POST /projects/connect` perform safe manifest/lockfile inspection, register Project Catalog + Watchlist, create the first ProfileRevision, and make the project usable immediately. `project-draft` remains a compatibility preview path rather than a mandatory activation gate.
+- Onboarding now accepts `uv.lock` / `package-lock.json` and records declared constraints, resolved versions, source files and confidence. The default SignalHarness profile carries verified dependency evidence from its own `pyproject.toml` + `uv.lock`.
+- Golden Demo now shows the effective project profile and lets the user change entity importance directly or with natural-language input; browser directory connection sends only allowlisted manifests/lockfiles and relative paths, never source code or `.env`.
+- Fresh local verification: 256 tests PASS; Ruff PASS; strict mypy PASS (97 source files); regression-eval PASS at decision/precision/recall 1.0; project-eval 3/3 PASS; `uv build` PASS.
+
 ## P4 — Analyzer/Harness V2 + Eval System
 
 ### Target
@@ -355,9 +367,9 @@ These are intentionally deferred until the relevant phase because they do not bl
 
 ## NEXT ACTION
 
-**Next construction phase: P3 — Project Profile + Preference Engine.**
+**Next construction phase: P4 — Analyzer/Harness V2 + Eval System.**
 
-Use the P1/P2 Ledger and Scan contracts as the stable persistence base. Prioritize auto-active versioned Project Profiles, explicit high-authority user Preferences/Overrides, lockfile/version evidence, and a fast Critical / Important / Normal / Low / Ignore control path before natural-language preference editing.
+Use the P1–P3 durable Change/Scan/Profile/Preference contracts as frozen inputs. Build a modest reproducible harness-ablation corpus first, keep the current five-Agent route as the baseline, and compare simpler analyzer variants before changing the production critical path.
 
 ## RETROSPECTIVE TEMPLATE
 

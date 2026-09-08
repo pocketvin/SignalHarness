@@ -199,3 +199,49 @@ def test_p1_database_migrates_to_p2_window_and_coverage_schema(tmp_path: Path) -
     }.issubset(columns)
     assert version == (str(SCHEMA_VERSION),)
     assert {"scan_sources", "query_checkpoints"}.issubset(tables)
+
+def test_p2_database_migrates_to_p3_profile_preference_schema(tmp_path: Path) -> None:
+    database = tmp_path / "ledger-v3.sqlite3"
+    with sqlite3.connect(database) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE schema_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            INSERT INTO schema_meta(key, value) VALUES('schema_version', '3');
+            CREATE TABLE scans(
+                scan_id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                completed_at TEXT,
+                status TEXT NOT NULL,
+                collected_count INTEGER NOT NULL DEFAULT 0,
+                deduped_count INTEGER NOT NULL DEFAULT 0,
+                analyzed_count INTEGER NOT NULL DEFAULT 0,
+                relevant_count INTEGER NOT NULL DEFAULT 0,
+                error TEXT,
+                window_mode TEXT NOT NULL DEFAULT 'unbounded',
+                window_start TEXT,
+                window_end TEXT,
+                first_use INTEGER NOT NULL DEFAULT 0,
+                checkpoint_eligible INTEGER NOT NULL DEFAULT 0,
+                coverage_status TEXT NOT NULL DEFAULT 'unknown'
+            );
+            """
+        )
+
+    ChangeLedger(database)
+
+    with sqlite3.connect(database) as connection:
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(scans)")}
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        version = connection.execute(
+            "SELECT value FROM schema_meta WHERE key='schema_version'"
+        ).fetchone()
+
+    assert "profile_revision_id" in columns
+    assert {"profile_revisions", "project_preferences"}.issubset(tables)
+    assert version == (str(SCHEMA_VERSION),)

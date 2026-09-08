@@ -359,6 +359,9 @@ class StreamRunManager:
                 "all_changes": result.all_change_count,
                 "window": result.window.public_payload(),
                 "coverage_status": result.coverage_status,
+                "profile_revision_id": workflow.ledger.scan_profile_revision_id(
+                    scan_id=session.run_id
+                ),
                 "assessments": len(result.assessments),
                 "failed_sources": len(result.failed_sources),
                 "source_summary": source_summary,

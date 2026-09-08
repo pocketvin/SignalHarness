@@ -28,12 +28,13 @@ SignalHarness 的核心答案是：**稳定的环境事实与 Scan 状态由 Pyt
 | 结构化输出 | Pydantic Schema、一次 schema retry、确定性 fallback |
 | Guarded Scoring | LLM 提供语义判断；Python 持有 authoritative final score |
 | Change Ledger | Project-scoped SQLite：EventRevision → Change → ProjectImpact → ScanChange；Top-K 不再决定事实是否存在 |
+| Project Profile / Preference | versioned ProfileRevision + Critical / Important / Normal / Low / Ignore；显式偏好直接影响排序和 Agent Context |
 | Memory / State | Project-scoped Signal / Feedback / Learning 兼容状态；新业务历史逐步迁移到结构化 Ledger |
 | Agent Eval | 40 条项目级 Regression Suite + 3 条 Cross-project Context Gate + Provider Contract Eval |
 | Observability | Agent、Schema、Retry、Fallback、Tools、Latency、Tokens、Estimated Cost Trace |
 | MCP | 5 个只读 structured tools |
 | Service | FastAPI REST + SSE Streaming Run + MCP Streamable HTTP |
-| Golden Demo | 默认中文，可切换 English，实时消费同一份 Trace |
+| Golden Demo | 默认中文，可切换 English；可连接本地项目、查看 Profile、快速修改重要性，并实时消费同一份 Trace |
 | Deployment | Docker + `/health` healthcheck |
 | Learning | Review-only proposal → replay/risk gate → 显式人工 apply |
 
@@ -83,7 +84,7 @@ uv run signal-harness serve \
 http://127.0.0.1:8001/demo
 ```
 
-页面默认是**中文**，右上角可切换 `EN`。运行前先选择**关联项目**，再选择数据来源、分析方式和真实模型。项目不是写死在 UI 中：`configs/projects/*.yaml` 是 Project Catalog，每个项目分别绑定自己的 Project Profile 与 Watchlist。公开仓库默认提供 `SignalHarness` 与 `Example · Agent API Service` 两个 profile，用来证明同一套 Workflow 可以按项目切换判断上下文。页面还可以选择本地项目目录生成 review-only onboarding draft：浏览器只读取白名单 manifest 与相对路径，不上传源码或 `.env`，也不会自动修改 Catalog。
+页面默认是**中文**，右上角可切换 `EN`。运行前先选择**关联项目**，再选择数据来源、分析方式和真实模型。项目不是写死在 UI 中：`configs/projects/*.yaml` 是 Project Catalog，每个项目分别绑定自己的 Project Profile 与 Watchlist。公开仓库默认提供 `SignalHarness` 与 `Example · Agent API Service` 两个 profile。页面可直接选择本地项目目录完成连接并自动激活 ProfileRevision；浏览器只读取白名单 manifest/lockfile 与相对路径，不上传源码或 `.env`。连接后可以查看 effective Profile，并用五档重要性或自然语言快速修改显式 Preference。
 
 默认组合是：
 
@@ -164,11 +165,13 @@ SSE
 
 同一项目的后续扫描会读取之前的 seen signals 与 feedback；不同项目彼此隔离。同项目并发 Run 在共享状态写入处串行化，避免覆盖同一个 JSON state。
 
-### Project Onboarding V1：从真实项目生成待审核配置
+### Project Profile + Preference V1：连接后立即可用
 
-`signal-harness project-draft <repo>` 会确定性读取 `pyproject.toml`、`package.json`、`requirements*.txt`、`Cargo.toml`、`go.mod` 和有限目录结构，生成 Project Profile + Watchlist 草案。默认只写 draft；只有显式 `--apply` 才注册到 Project Catalog，已存在目标时拒绝覆盖，除非明确 `--force`。
+`signal-harness project-connect <repo>` 会确定性读取 allowlisted manifest/lockfile（包括 `pyproject.toml`、`package.json`、`requirements*.txt`、`Cargo.toml`、`go.mod`、`uv.lock`、`package-lock.json`）与有限目录结构，注册 Project Catalog + Watchlist 并立即创建首个 ProfileRevision。`project-draft` 继续保留为兼容预览入口，但不再是 mandatory review gate。
 
-Golden Demo 的“导入本地项目草案”使用浏览器目录选择器，但只上传白名单 manifest 内容与相对路径列表；不会上传源代码、`.env` 或任意本机文件。`POST /project-drafts` 只返回 review-required 草案，不执行 apply，并限制单 manifest 256 KB、聚合 manifest 512 KB。
+ProfileRevision 记录 purpose、stack、dependency declared/resolved version evidence、runtime/protocol/provider、critical modules、evidence 与 unknowns。显式用户 Preference 使用 Critical / Important / Normal / Low / Ignore 五档，可作用于 dependency/provider/runtime/protocol/module/ecosystem/source/category/topic；自动 profile 刷新不会覆盖这些显式偏好。REST 与 Golden Demo 的快速按钮/自然语言输入写入同一个 Preference model，之后的 ranking 与 Agent Context 会立即使用新的 effective Profile。
+
+浏览器目录连接只上传白名单 manifest/lockfile 内容与相对路径列表，不上传源代码、`.env` 或任意其他本机文件。
 
 ### Candidate Funnel V2：先判断相关性，再做 Top-K
 

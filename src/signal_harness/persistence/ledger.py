@@ -9,11 +9,13 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
+from uuid import uuid4
 
+from signal_harness.projects.preferences import PreferenceInput, apply_preferences
 from signal_harness.signal.candidates import candidate_score
 from signal_harness.signal.schemas import SignalAssessment, SignalEvent, SourceTask
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 @dataclass(frozen=True)
@@ -104,10 +106,172 @@ class ChangeLedger:
             "first_use": "INTEGER NOT NULL DEFAULT 0",
             "checkpoint_eligible": "INTEGER NOT NULL DEFAULT 0",
             "coverage_status": "TEXT NOT NULL DEFAULT 'unknown'",
+            "profile_revision_id": "TEXT",
         }
         for name, definition in additions.items():
             if name not in columns:
                 connection.execute(f"ALTER TABLE scans ADD COLUMN {name} {definition}")
+
+    def active_preferences(self, *, project_id: str) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT preference_id, project_id, scope_type, scope_key, importance, source,
+                       instruction, note, created_at, revoked_at, active
+                FROM project_preferences
+                WHERE project_id=? AND active=1
+                ORDER BY created_at ASC, preference_id ASC
+                """,
+                (project_id,),
+            ).fetchall()
+        return [self._preference_payload(row) for row in rows]
+
+    def set_preference(
+        self, *, project_id: str, preference: PreferenceInput
+    ) -> dict[str, Any]:
+        preference_id = f"pref-{uuid4().hex[:12]}"
+        created_at = _utc_now()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE project_preferences
+                SET active=0, revoked_at=?
+                WHERE project_id=? AND scope_type=? AND lower(scope_key)=lower(?) AND active=1
+                """,
+                (created_at, project_id, preference.scope_type.value, preference.scope_key),
+            )
+            connection.execute(
+                """
+                INSERT INTO project_preferences(
+                    preference_id, project_id, scope_type, scope_key, importance, source,
+                    instruction, note, created_at, active
+                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                """,
+                (
+                    preference_id, project_id, preference.scope_type.value,
+                    preference.scope_key, preference.importance.value, preference.source,
+                    preference.instruction, preference.note, created_at,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM project_preferences WHERE preference_id=?",
+                (preference_id,),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("preference insert could not be resolved")
+        return self._preference_payload(row)
+
+    def revoke_preference(self, *, project_id: str, preference_id: str) -> bool:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE project_preferences SET active=0, revoked_at=?
+                WHERE project_id=? AND preference_id=? AND active=1
+                """,
+                (_utc_now(), project_id, preference_id),
+            )
+        return cursor.rowcount > 0
+
+    def ensure_profile_revision(
+        self,
+        *,
+        project_id: str,
+        auto_profile: dict[str, Any],
+    ) -> dict[str, Any]:
+        preferences = self.active_preferences(project_id=project_id)
+        effective_profile = apply_preferences(auto_profile, preferences)
+        canonical = json.dumps(
+            effective_profile, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        )
+        profile_hash = _hash_text(canonical)
+        with self._connect() as connection:
+            existing = connection.execute(
+                """
+                SELECT * FROM profile_revisions
+                WHERE project_id=? AND profile_hash=?
+                """,
+                (project_id, profile_hash),
+            ).fetchone()
+            if existing is None:
+                revision_id = f"profile-{uuid4().hex[:12]}"
+                connection.execute(
+                    """
+                    INSERT INTO profile_revisions(
+                        profile_revision_id, project_id, profile_hash, auto_profile_json,
+                        effective_profile_json, evidence_json, unknowns_json, created_at
+                    ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        revision_id, project_id, profile_hash,
+                        json.dumps(auto_profile, ensure_ascii=False), canonical,
+                        json.dumps(auto_profile.get("evidence", {}), ensure_ascii=False),
+                        json.dumps(auto_profile.get("unknowns", []), ensure_ascii=False),
+                        _utc_now(),
+                    ),
+                )
+                existing = connection.execute(
+                    "SELECT * FROM profile_revisions WHERE profile_revision_id=?",
+                    (revision_id,),
+                ).fetchone()
+        if existing is None:
+            raise RuntimeError("profile revision could not be resolved")
+        return self._profile_payload(existing, preferences=preferences)
+
+    def latest_profile_revision(self, *, project_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM profile_revisions WHERE project_id=?
+                ORDER BY rowid DESC LIMIT 1
+                """,
+                (project_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._profile_payload(
+            row, preferences=self.active_preferences(project_id=project_id)
+        )
+
+    def scan_profile_revision_id(self, *, scan_id: str) -> str | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT profile_revision_id FROM scans WHERE scan_id=?", (scan_id,)
+            ).fetchone()
+        if row is None or row["profile_revision_id"] is None:
+            return None
+        return str(row["profile_revision_id"])
+
+    @staticmethod
+    def _preference_payload(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "preference_id": str(row["preference_id"]),
+            "project_id": str(row["project_id"]),
+            "scope_type": str(row["scope_type"]),
+            "scope_key": str(row["scope_key"]),
+            "importance": str(row["importance"]),
+            "source": str(row["source"]),
+            "instruction": str(row["instruction"] or ""),
+            "note": str(row["note"] or ""),
+            "created_at": str(row["created_at"]),
+            "revoked_at": row["revoked_at"],
+            "active": bool(row["active"]),
+        }
+
+    @staticmethod
+    def _profile_payload(
+        row: sqlite3.Row, *, preferences: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        return {
+            "profile_revision_id": str(row["profile_revision_id"]),
+            "project_id": str(row["project_id"]),
+            "profile_hash": str(row["profile_hash"]),
+            "auto_profile": json.loads(str(row["auto_profile_json"])),
+            "effective_profile": json.loads(str(row["effective_profile_json"])),
+            "evidence": json.loads(str(row["evidence_json"])),
+            "unknowns": json.loads(str(row["unknowns_json"])),
+            "created_at": str(row["created_at"]),
+            "preferences": preferences,
+        }
 
     def begin_scan(
         self,
@@ -121,14 +285,16 @@ class ChangeLedger:
         window_end: datetime | None = None,
         first_use: bool = False,
         checkpoint_eligible: bool = False,
+        profile_revision_id: str | None = None,
     ) -> None:
         with self._connect() as connection:
             connection.execute(
                 """
                 INSERT INTO scans(
                     scan_id, project_id, created_at, status, collected_count, deduped_count,
-                    window_mode, window_start, window_end, first_use, checkpoint_eligible
-                ) VALUES(?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?)
+                    window_mode, window_start, window_end, first_use, checkpoint_eligible,
+                    profile_revision_id
+                ) VALUES(?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(scan_id) DO UPDATE SET
                     project_id=excluded.project_id,
                     status='running',
@@ -139,13 +305,14 @@ class ChangeLedger:
                     window_end=excluded.window_end,
                     first_use=excluded.first_use,
                     checkpoint_eligible=excluded.checkpoint_eligible,
+                    profile_revision_id=excluded.profile_revision_id,
                     error=NULL
                 """,
                 (
                     scan_id, project_id, _utc_now(), collected_count, deduped_count, window_mode,
                     window_start.isoformat() if window_start else None,
                     window_end.isoformat() if window_end else None,
-                    int(first_use), int(checkpoint_eligible),
+                    int(first_use), int(checkpoint_eligible), profile_revision_id,
                 ),
             )
 
@@ -593,4 +760,36 @@ CREATE TABLE IF NOT EXISTS project_impacts(
     updated_at TEXT NOT NULL,
     PRIMARY KEY(project_id, change_id, scan_id)
 );
+
+CREATE TABLE IF NOT EXISTS profile_revisions(
+    profile_revision_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    profile_hash TEXT NOT NULL,
+    auto_profile_json TEXT NOT NULL,
+    effective_profile_json TEXT NOT NULL,
+    evidence_json TEXT NOT NULL DEFAULT '{}',
+    unknowns_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL,
+    UNIQUE(project_id, profile_hash)
+);
+
+CREATE INDEX IF NOT EXISTS idx_profile_revisions_project
+ON profile_revisions(project_id, created_at);
+
+CREATE TABLE IF NOT EXISTS project_preferences(
+    preference_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    scope_type TEXT NOT NULL,
+    scope_key TEXT NOT NULL,
+    importance TEXT NOT NULL,
+    source TEXT NOT NULL,
+    instruction TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    revoked_at TEXT,
+    active INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_project_preferences_active
+ON project_preferences(project_id, active, scope_type, scope_key);
 """

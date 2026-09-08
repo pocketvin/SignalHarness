@@ -32,7 +32,17 @@ from signal_harness.projects.catalog import (
     project_option,
 )
 from signal_harness.projects.state import prepare_project_state
-from signal_harness.projects.onboarding import ProjectManifest, draft_project
+from signal_harness.projects.onboarding import (
+    ProjectManifest,
+    apply_project_draft,
+    draft_project,
+)
+from signal_harness.projects.preferences import (
+    Importance,
+    PreferenceInput,
+    PreferenceScope,
+    parse_preference_instruction,
+)
 from signal_harness.resources import (
     is_allowed_fixture_path,
     resolve_config_dir,
@@ -47,7 +57,7 @@ from signal_harness.signal.feedback import (
     generate_policy_proposal,
     save_policy_proposal,
 )
-from signal_harness.signal.policy import load_signal_policy
+from signal_harness.signal.policy import load_signal_policy, load_yaml_mapping
 from signal_harness.signal.schemas import FeedbackLabel
 from signal_harness.ui.demo import demo_asset_dir, render_demo_page
 from signal_harness.utils.fs import atomic_write_text
@@ -110,6 +120,21 @@ class FeedbackRequest(BaseModel):
     note: str = ""
 
 
+class PreferenceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scope_type: PreferenceScope
+    scope_key: str = Field(min_length=1, max_length=160)
+    importance: Importance
+    note: str = Field(default="", max_length=1000)
+
+
+class NaturalLanguagePreferenceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    instruction: str = Field(min_length=1, max_length=1000)
+
+
 class ProjectDraftRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -122,6 +147,10 @@ class ProjectDraftRequest(BaseModel):
         if sum(len(item.content.encode("utf-8")) for item in self.manifests) > 512_000:
             raise ValueError("project draft manifests exceed aggregate size limit")
         return self
+
+
+class ProjectConnectRequest(ProjectDraftRequest):
+    replace_existing: bool = False
 
 
 @dataclass(frozen=True)
@@ -250,9 +279,78 @@ def create_app(
             "default_project_id": default_project_id(paths.config_dir),
         }
 
+    def project_profile_snapshot(project_id: str) -> tuple[dict[str, Any], ChangeLedger]:
+        try:
+            option = project_option(project_id, paths.config_dir)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="Project not found") from exc
+        auto_profile = load_yaml_mapping(option.project_profile_path)
+        ledger = ChangeLedger(paths.project_state(project_id) / "change_ledger.sqlite3")
+        return ledger.ensure_profile_revision(
+            project_id=project_id, auto_profile=auto_profile
+        ), ledger
+
+    def require_profile_write_permission() -> None:
+        policy = load_signal_policy(paths.config_dir / "signal_policy.yaml")
+        guard = SignalPermissionGuard(policy)
+        guard.require("modify_project_profile", confirmed=True)
+
+    @app.get("/projects/{project_id}/profile")
+    async def get_project_profile(project_id: str) -> dict[str, Any]:
+        snapshot, _ = project_profile_snapshot(project_id)
+        return snapshot
+
+    @app.post("/projects/{project_id}/preferences")
+    async def set_project_preference(
+        project_id: str, request: PreferenceRequest
+    ) -> dict[str, Any]:
+        snapshot, ledger = project_profile_snapshot(project_id)
+        require_profile_write_permission()
+        ledger.set_preference(
+            project_id=project_id,
+            preference=PreferenceInput(
+                scope_type=request.scope_type,
+                scope_key=request.scope_key,
+                importance=request.importance,
+                source="ui",
+                note=request.note,
+            ),
+        )
+        return ledger.ensure_profile_revision(
+            project_id=project_id, auto_profile=snapshot["auto_profile"]
+        )
+
+    @app.post("/projects/{project_id}/preferences/natural-language")
+    async def set_project_preference_natural_language(
+        project_id: str, request: NaturalLanguagePreferenceRequest
+    ) -> dict[str, Any]:
+        snapshot, ledger = project_profile_snapshot(project_id)
+        require_profile_write_permission()
+        preference = parse_preference_instruction(
+            request.instruction, snapshot["effective_profile"]
+        )
+        ledger.set_preference(project_id=project_id, preference=preference)
+        return ledger.ensure_profile_revision(
+            project_id=project_id, auto_profile=snapshot["auto_profile"]
+        )
+
+    @app.delete("/projects/{project_id}/preferences/{preference_id}")
+    async def revoke_project_preference(
+        project_id: str, preference_id: str
+    ) -> dict[str, Any]:
+        snapshot, ledger = project_profile_snapshot(project_id)
+        require_profile_write_permission()
+        if not ledger.revoke_preference(
+            project_id=project_id, preference_id=preference_id
+        ):
+            raise HTTPException(status_code=404, detail="Active preference not found")
+        return ledger.ensure_profile_revision(
+            project_id=project_id, auto_profile=snapshot["auto_profile"]
+        )
+
     @app.post("/project-drafts")
     async def create_project_draft(request: ProjectDraftRequest) -> dict[str, Any]:
-        """Build a review-only project draft from browser-supplied safe manifests."""
+        """Build a safe auto-active-capable project preview from browser manifests."""
 
         draft = draft_project(
             manifests=request.manifests,
@@ -260,6 +358,32 @@ def create_app(
             name_hint=request.name_hint,
         )
         return draft.model_dump(mode="json")
+
+    @app.post("/projects/connect", status_code=status.HTTP_201_CREATED)
+    async def connect_project(request: ProjectConnectRequest) -> dict[str, Any]:
+        draft = draft_project(
+            manifests=request.manifests,
+            paths=request.paths,
+            name_hint=request.name_hint,
+        )
+        policy = load_signal_policy(paths.config_dir / "signal_policy.yaml")
+        guard = SignalPermissionGuard(policy)
+        guard.require("modify_project_profile", confirmed=True)
+        guard.require("add_watchlist_source", confirmed=True)
+        try:
+            applied = apply_project_draft(
+                draft, paths.config_dir, overwrite=request.replace_existing
+            )
+        except FileExistsError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        snapshot, _ = project_profile_snapshot(draft.id)
+        option = project_option(draft.id, paths.config_dir)
+        return {
+            "auto_active": True,
+            "project": option.public_payload(),
+            "profile": snapshot,
+            "applied_files": {key: str(value) for key, value in applied.items()},
+        }
 
     @app.post("/stream-runs", status_code=status.HTTP_202_ACCEPTED)
     async def create_stream_run(request: StreamRunRequest) -> dict[str, Any]:
@@ -445,6 +569,7 @@ def create_app(
         payload["all_changes"] = result.all_change_count
         payload["window"] = result.window.public_payload()
         payload["coverage_status"] = result.coverage_status
+        payload["profile_revision_id"] = workflow.ledger.scan_profile_revision_id(scan_id=run_id)
         payload["changes_url"] = f"/runs/{run_id}/changes"
         payload["coverage_url"] = f"/runs/{run_id}/coverage"
         payload.update(

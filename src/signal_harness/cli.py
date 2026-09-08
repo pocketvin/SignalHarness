@@ -26,6 +26,7 @@ from signal_harness.evals import (
     write_regression_eval_summary,
 )
 from signal_harness.memory import FeedbackMemory, MemoryBundle
+from signal_harness.persistence import ChangeLedger
 from signal_harness.memory.replay import evaluate_policy_replay
 from signal_harness.learning import (
     apply_staged_learning,
@@ -295,7 +296,7 @@ def project_draft(
     output_dir: Path = typer.Option(Path("outputs/project-drafts"), "--output-dir"),
     config_dir: Path = typer.Option(Path("configs"), "--config-dir"),
     apply: bool = typer.Option(
-        False, "--apply", help="Register the reviewed draft in Project Catalog"
+        False, "--apply", help="Register and activate this preview in Project Catalog"
     ),
     force: bool = typer.Option(
         False, "--force", help="Allow --apply to replace an existing project id"
@@ -303,7 +304,7 @@ def project_draft(
     json_output: bool = typer.Option(False, "--json", help="Emit the draft as JSON"),
     cwd: Path = typer.Option(Path.cwd(), "--cwd", hidden=True),
 ) -> None:
-    """Inspect safe project manifests and generate a review-required Project Profile draft."""
+    """Inspect safe project manifests and generate a Project Profile preview."""
 
     root = cwd.expanduser().resolve()
     try:
@@ -335,9 +336,66 @@ def project_draft(
     typer.echo(f"Project draft: {draft.name} ({draft.id})")
     typer.echo(f"Detected dependencies: {len(draft.project_profile.get('dependencies', []))}")
     typer.echo(f"Draft directory: {next(iter(draft_paths.values())).parent}")
-    typer.echo("Review required: yes")
+    typer.echo("Review required: no")
     if applied_paths:
         typer.echo(f"Project Catalog registered: {applied_paths['project']}")
+
+
+@app.command("project-connect")
+def project_connect(
+    project_path: Path = typer.Argument(..., help="Local project directory to connect"),
+    config_dir: Path = typer.Option(Path("configs"), "--config-dir"),
+    state_dir: Path = typer.Option(Path(".signal-harness"), "--state-dir"),
+    force: bool = typer.Option(
+        False, "--force", help="Replace an existing project id after explicit command invocation"
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit the active profile as JSON"),
+    cwd: Path = typer.Option(Path.cwd(), "--cwd", hidden=True),
+) -> None:
+    """Connect a local project and activate its auto-generated profile immediately."""
+
+    root = cwd.expanduser().resolve()
+    try:
+        draft = inspect_project_directory(project_path)
+    except (ValueError, OSError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    config = resolve_config_dir(root, config_dir)
+    if not (config / "signal_policy.yaml").is_file():
+        raise typer.BadParameter(
+            "project-connect requires a writable SignalHarness config directory"
+        )
+    policy = load_signal_policy(config / "signal_policy.yaml")
+    guard = SignalPermissionGuard(policy)
+    guard.require("modify_project_profile", confirmed=True)
+    guard.require("add_watchlist_source", confirmed=True)
+    try:
+        applied = apply_project_draft(draft, config, overwrite=force)
+    except FileExistsError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    project_state = prepare_project_state(_resolve(root, state_dir), draft.id)
+    ledger = ChangeLedger(project_state / "change_ledger.sqlite3")
+    snapshot = ledger.ensure_profile_revision(
+        project_id=draft.id, auto_profile=draft.project_profile
+    )
+    if json_output:
+        typer.echo(
+            json.dumps(
+                {
+                    "project_id": draft.id,
+                    "project_name": draft.name,
+                    "auto_active": True,
+                    "profile": snapshot,
+                    "applied_files": {key: str(value) for key, value in applied.items()},
+                },
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
+        return
+    typer.echo(f"Project connected: {draft.name} ({draft.id})")
+    typer.echo(f"Profile revision: {snapshot['profile_revision_id']}")
+    typer.echo(f"Detected dependencies: {len(draft.project_profile.get('dependencies', []))}")
+    typer.echo("Auto active: yes")
 
 
 @app.command()

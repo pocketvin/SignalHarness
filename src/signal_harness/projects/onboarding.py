@@ -18,7 +18,7 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
 
 from signal_harness.utils.fs import atomic_write_text
 
-_MAX_MANIFEST_BYTES = 256_000
+_MAX_MANIFEST_BYTES = 1_000_000
 _ALLOWED_MANIFESTS = {
     "pyproject.toml",
     "package.json",
@@ -27,6 +27,8 @@ _ALLOWED_MANIFESTS = {
     "requirements.in",
     "cargo.toml",
     "go.mod",
+    "uv.lock",
+    "package-lock.json",
 }
 _IGNORED_DIRS = {
     ".git",
@@ -67,7 +69,7 @@ class ProjectDraft(BaseModel):
     watchlist: dict[str, Any]
     evidence_files: list[str]
     detected_paths: list[str]
-    review_required: bool = True
+    review_required: bool = False
     generated_at: datetime
 
 
@@ -180,7 +182,10 @@ def inspect_project_directory(project_root: str | Path) -> ProjectDraft:
         raise ValueError("Project path must be an existing directory")
     manifests: list[ProjectManifest] = []
     candidates = list(root.glob("requirements*.txt"))
-    for name in ("pyproject.toml", "package.json", "requirements.in", "Cargo.toml", "go.mod"):
+    for name in (
+        "pyproject.toml", "package.json", "requirements.in", "Cargo.toml", "go.mod",
+        "uv.lock", "package-lock.json",
+    ):
         candidates.append(root / name)
     seen: set[Path] = set()
     for path in candidates:
@@ -297,22 +302,44 @@ def draft_project(
             )
 
     name = detected_name or (name_hint or "").strip() or "Imported Project"
+    purpose = _project_description(manifest_map)
+    dependency_evidence = _dependency_evidence(manifest_map, ordered_deps)
+    providers = _detected_providers(ordered_deps)
+    protocols = _detected_protocols(ordered_deps)
+    runtimes = _detected_runtimes(tech_stack, ordered_deps)
+    evidence_files = [item.path for item in manifests]
+    unknowns = []
+    if not purpose:
+        unknowns.append("project purpose was not declared in a supported manifest")
+    if not providers:
+        unknowns.append("external providers/APIs were not deterministically detected")
     project_id = _slugify(name)
     if not project_id:
         project_id = "imported-project"
     profile = {
         "project_name": name,
-        "goal": f"Monitor external changes that can affect {name}. Generated as an onboarding draft and requires review before activation.",
+        "purpose": purpose or f"Software project {name}; purpose not declared in a supported manifest.",
+        "goal": purpose or f"Monitor external changes that can affect {name}.",
         "tech_stack": _unique(tech_stack),
+        "runtimes": runtimes,
+        "protocols": protocols,
+        "providers": providers,
         "critical_modules": critical_modules or ["project-wide"],
         "dependencies": ordered_deps,
+        "dependency_evidence": dependency_evidence,
         "monitored_ecosystem": ecosystems,
         "competitors": [],
         "focus_keywords": focus_keywords,
         "ignore_keywords": ["consumer giveaway", "cryptocurrency price"],
+        "evidence": {
+            "manifest_files": evidence_files,
+            "detected_paths": paths[:500],
+        },
+        "unknowns": unknowns,
         "onboarding": {
-            "review_required": True,
-            "evidence_files": [item.path for item in manifests],
+            "review_required": False,
+            "auto_active": True,
+            "evidence_files": evidence_files,
         },
     }
     watchlist: dict[str, Any] = {}
@@ -408,6 +435,151 @@ def apply_project_draft(
         targets["project"], yaml.safe_dump(catalog, allow_unicode=True, sort_keys=False)
     )
     return targets
+
+
+def _project_description(manifests: dict[str, str]) -> str:
+    pyproject = _manifest_by_name(manifests, "pyproject.toml")
+    if pyproject is not None:
+        parsed = _parse_toml(pyproject)
+        project = parsed.get("project", {}) if isinstance(parsed, dict) else {}
+        if isinstance(project, dict):
+            value = str(project.get("description") or "").strip()
+            if value:
+                return value
+    package_json = _manifest_by_name(manifests, "package.json")
+    if package_json is not None:
+        try:
+            payload = json.loads(package_json)
+        except json.JSONDecodeError:
+            payload = {}
+        if isinstance(payload, dict):
+            value = str(payload.get("description") or "").strip()
+            if value:
+                return value
+    return ""
+
+
+def _dependency_evidence(
+    manifests: dict[str, str], dependencies: list[str]
+) -> list[dict[str, Any]]:
+    declared = _declared_dependency_specs(manifests)
+    resolved = _resolved_dependency_versions(manifests)
+    result: list[dict[str, Any]] = []
+    for name in dependencies:
+        declaration = declared.get(name, {})
+        resolution = resolved.get(name, {})
+        files = _unique([
+            *[str(value) for value in declaration.get("source_files", [])],
+            *[str(value) for value in resolution.get("source_files", [])],
+        ])
+        result.append(
+            {
+                "name": name,
+                "declared": str(declaration.get("declared") or ""),
+                "resolved_version": str(resolution.get("version") or ""),
+                "source_files": files,
+                "confidence": "verified" if resolution.get("version") else "declared",
+            }
+        )
+    return result
+
+
+def _declared_dependency_specs(manifests: dict[str, str]) -> dict[str, dict[str, Any]]:
+    result: dict[str, dict[str, Any]] = {}
+    pyproject = _manifest_by_name(manifests, "pyproject.toml")
+    if pyproject is not None:
+        parsed = _parse_toml(pyproject)
+        project = parsed.get("project", {}) if isinstance(parsed, dict) else {}
+        values = project.get("dependencies", []) if isinstance(project, dict) else []
+        if isinstance(values, list):
+            for raw in values:
+                text = str(raw).strip()
+                name = _normalize_python_dependency(text)
+                if name:
+                    result[name] = {"declared": text, "source_files": ["pyproject.toml"]}
+    package_json = _manifest_by_name(manifests, "package.json")
+    if package_json is not None:
+        try:
+            payload = json.loads(package_json)
+        except json.JSONDecodeError:
+            payload = {}
+        if isinstance(payload, dict):
+            for key in ("dependencies", "devDependencies"):
+                values = payload.get(key)
+                if not isinstance(values, dict):
+                    continue
+                for raw_name, spec in values.items():
+                    name = _normalize_package_name(str(raw_name))
+                    result[name] = {
+                        "declared": str(spec),
+                        "source_files": ["package.json"],
+                    }
+    for path, content in manifests.items():
+        if not Path(path).name.startswith("requirements"):
+            continue
+        for line in content.splitlines():
+            raw = line.split("#", 1)[0].strip()
+            if not raw or raw.startswith(("-", "git+", "http://", "https://")):
+                continue
+            name = _normalize_python_dependency(raw)
+            if name and name not in result:
+                result[name] = {"declared": raw, "source_files": [Path(path).name]}
+    return result
+
+
+def _resolved_dependency_versions(manifests: dict[str, str]) -> dict[str, dict[str, Any]]:
+    result: dict[str, dict[str, Any]] = {}
+    uv_lock = _manifest_by_name(manifests, "uv.lock")
+    if uv_lock is not None:
+        parsed = _parse_toml(uv_lock)
+        packages = parsed.get("package", []) if isinstance(parsed, dict) else []
+        if isinstance(packages, list):
+            for item in packages:
+                if not isinstance(item, dict):
+                    continue
+                name = _normalize_package_name(str(item.get("name") or ""))
+                version = str(item.get("version") or "").strip()
+                if name and version:
+                    result[name] = {"version": version, "source_files": ["uv.lock"]}
+    package_lock = _manifest_by_name(manifests, "package-lock.json")
+    if package_lock is not None:
+        try:
+            payload = json.loads(package_lock)
+        except json.JSONDecodeError:
+            payload = {}
+        packages = payload.get("packages", {}) if isinstance(payload, dict) else {}
+        if isinstance(packages, dict):
+            for path, item in packages.items():
+                if not str(path).startswith("node_modules/") or not isinstance(item, dict):
+                    continue
+                name = _normalize_package_name(str(path)[len("node_modules/"):])
+                version = str(item.get("version") or "").strip()
+                if name and version:
+                    result[name] = {"version": version, "source_files": ["package-lock.json"]}
+    return result
+
+
+def _detected_providers(dependencies: list[str]) -> list[str]:
+    values: list[str] = []
+    if "openai" in dependencies:
+        values.append("OpenAI-compatible provider API")
+    return values
+
+
+def _detected_protocols(dependencies: list[str]) -> list[str]:
+    values: list[str] = []
+    if "mcp" in dependencies or "@modelcontextprotocol/sdk" in dependencies:
+        values.append("Model Context Protocol")
+    return values
+
+
+def _detected_runtimes(tech_stack: list[str], dependencies: list[str]) -> list[str]:
+    values = list(tech_stack)
+    if "fastapi" in dependencies or "uvicorn" in dependencies:
+        values.append("ASGI")
+    if any(name in dependencies for name in ("fastify", "express", "next")):
+        values.append("Node.js")
+    return _unique(values)
 
 
 def _collect_paths(root: Path) -> list[str]:
