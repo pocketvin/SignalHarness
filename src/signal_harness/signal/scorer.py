@@ -75,7 +75,7 @@ def source_score(event: SignalEvent, policy: dict[str, Any]) -> float:
 
     source_weights = policy.get("source_weights", {})
     quality = event_source_quality(event)
-    if event.source_type == "github_release":
+    if event.source_type in {"github_release", "package_registry"}:
         key = "official_release" if quality.value == "official" else "community_discussion"
     elif event.source_type == "github_issue":
         if quality.value == "official":

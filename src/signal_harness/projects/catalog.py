@@ -122,6 +122,17 @@ def _watchlist_metadata(path: Path) -> dict[str, Any]:
             for item in repos:
                 if isinstance(item, dict) and item.get("repo"):
                     sources.append({"type": "github", "name": str(item["repo"])})
+    package_registries = payload.get("package_registries")
+    if isinstance(package_registries, dict):
+        pypi = package_registries.get("pypi")
+        if isinstance(pypi, dict):
+            packages = pypi.get("packages")
+            if isinstance(packages, list):
+                for item in packages:
+                    if isinstance(item, dict) and item.get("name"):
+                        sources.append({"type": "pypi", "name": str(item["name"])})
+                    elif isinstance(item, str) and item.strip():
+                        sources.append({"type": "pypi", "name": item.strip()})
     rss = payload.get("rss")
     if isinstance(rss, dict):
         feeds = rss.get("feeds")

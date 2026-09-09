@@ -37,6 +37,8 @@ def event_source_quality(event: SignalEvent) -> SourceQuality:
     raw = event.raw_payload
     if event.source_type == "github_release":
         return SourceQuality.OFFICIAL if raw.get("official", True) else SourceQuality.COMMUNITY
+    if event.source_type == "package_registry":
+        return SourceQuality.OFFICIAL
     if event.source_type == "github_issue":
         authority = github_issue_authority(raw)
         if authority == "official":

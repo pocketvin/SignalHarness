@@ -218,7 +218,7 @@ Relevance recall, false positives/negatives, impact/module correctness, citation
 
 - Added versioned Harness variants and analyzer input fingerprints so compared runs record harness/analyzer/prompt/context/policy/provider/model versions on frozen semantic inputs.
 - Compared five-Agent, deterministic Supervisor, deferred Learning, deterministic Evidence Resolver, and Selective EvidenceResearcher variants through `signal-harness harness-eval`.
-- Frozen 40-case offline corpus result: five-Agent 6 LLM calls / 1.000 decision; deterministic Supervisor 5 / 1.000; deferred Learning 4 / 1.000; deterministic Evidence 2 / 0.975; selective EvidenceResearcher 3 / 1.000. Precision and recall remain 1.000 for all five variants on this corpus.
+- Historical first 40-case offline run: five-Agent 6 LLM calls / 1.000 decision; deterministic Supervisor 5 / 1.000; deferred Learning 4 / 1.000; deterministic Evidence 2 / 0.975; selective EvidenceResearcher 3 / 1.000. That 0.975 result was evidence at the time, not a permanent contract that the simpler variant must remain worse.
 - Current recommendation is `selective-evidence-researcher`: it preserves baseline regression quality with half the LLM calls on the frozen mock-agent corpus. This is a project-specific ablation result, not a general live-model benchmark.
 - Fixed the ablation non-inferiority gate to require every guarded quality metric to match/beat baseline independently rather than using lexicographic tuple comparison; losing experimental variants no longer invalidate an otherwise sound ablation run.
 - Focused Harness tests PASS; harness-eval `--enforce` PASS; regression-eval PASS at decision/precision/recall 1.0; project-eval PASS 3/3.
@@ -231,7 +231,7 @@ Relevance recall, false positives/negatives, impact/module correctness, citation
 - After that repair, the same real-world corpus reaches decision/precision/recall 1.000 across all compared Harness variants while the original 40-case corpus remains regression-clean. Direct dependencies are now resolved from source/package identity rather than body mentions, and installed/superseded/fixed-on-current-major changes can be conservatively ignored.
 - Added `selective-evidence-impact-action`: deterministic Supervisor + deterministic evidence resolution + selective EvidenceResearcher + one merged ImpactActionAnalyzer call. On the original 40-case corpus it matches five-Agent decision/precision/recall 1.000 with 2 LLM calls instead of 6; the 15-case real-world corpus is also 1.000/1.000/1.000 with 2 calls.
 - Added `selective-evidence-impact-action-verifier` as an explicit SelectiveVerifier ablation. It also preserves quality but requires 3 LLM calls and provides no measured gain on either frozen corpus, so SelectiveVerifier is not recommended for the Scan hot path at this stage. Verifier outputs are constrained so Python can only apply conservative confidence/relevance/risk/action reductions.
-- Pure deterministic Evidence also uses 2 calls and passes the real-world corpus, but remains 0.975 decision accuracy on the original corpus. Across both corpora, the robust offline candidate is therefore `selective-evidence-impact-action`, not fully deterministic Evidence.
+- P6 release-lineage work later exposed that the old deterministic-Evidence loss came from a shared source-lineage behavior rather than from missing EvidenceResearcher reasoning: source-provided `previous_version` is now preserved instead of being re-derived and overwritten. Fresh re-evaluation on both frozen corpora gives `deterministic-evidence-resolver` decision/precision/recall 1.000/1.000/1.000 with 2 LLM calls; `selective-evidence-impact-action` also remains 1.000/1.000/1.000 with 2 calls. The current offline candidate therefore shifts to `deterministic-evidence-resolver`, because equal measured quality/call count does not justify an extra optional evidence-research component. This does not authorize switching the real-provider default without live-model evidence.
 - The existing five-Agent default remains protected for real-provider runs until a live-provider/manual quality smoke is explicitly authorized; changing that default without live-model evidence would overstate what the offline scripted provider proves.
 - Generic Monitor live comparison remains environment/owner-controlled because it invokes a paid external model. Its harness is implemented and ready, but no external model cost was incurred automatically.
 
@@ -307,6 +307,17 @@ Do not treat “added a tool name” as connector completion. Every source needs
 - provider/spec changes point to actual project usage when evidence exists and weaken claims when usage is uncertain;
 - each connector has deterministic failure tests plus at least one real-source smoke;
 - untrusted source content cannot gain additional tool or permission authority.
+
+### P6 Slice 1 implementation evidence — PyPI registry + release identity
+
+- Added the official read-only PyPI JSON Simple/Index connector with bounded retries, API-version validation, PEP 440 release grouping, yanked metadata, ETag/last-serial diagnostics, explicit history caps, and truthful `complete/partial` coverage.
+- Project onboarding/watchlists now attach source-owned `package_name + package_registry` identity to known dependency GitHub releases and can monitor configured PyPI packages directly.
+- Change identity for releases is now `(registry, canonical package, normalized version)` when the source actually owns that package fact. GitHub + PyPI observations for the same package/version aggregate into one Change while retaining separate EventRevisions/evidence; unrelated packages do not merge.
+- Project-state applicability uses lockfile/profile resolved versions plus source identity instead of body mentions. Release lineage now preserves source-provided `previous_version`; this also removed the historical deterministic-Evidence ablation loss without adding an Agent call.
+- Connector failure semantics are regression-covered: permanent HTTP failure is explicit; a failed Registry source plus another successful source yields a partial Scan and does not advance the interactive checkpoint.
+- Real-source smoke on 2026-09-09: official PyPI `pydantic` returned coverage=complete, 205 releases, latest `2.13.5`, previous `2.13.4`. No credentials or paid model calls were used.
+- Fresh local gate for this slice: 291 tests PASS; Ruff PASS; strict mypy PASS (106 source files); regression-eval PASS at decision/precision/recall 1.000/1.000/1.000; project-eval 3/3 PASS; harness-eval PASS with `deterministic-evidence-resolver` recommended on frozen offline inputs; `uv build` PASS.
+- **P6 remains open**: own-project Git facts and OSV/security version matching are not yet complete.
 ## P7 — Continuous Monitoring
 
 ### Target
@@ -416,9 +427,9 @@ These are intentionally deferred until the relevant phase because they do not bl
 
 ## NEXT ACTION
 
-**Proceed to P6 — Source Intelligence Expansion.**
+**Continue P6 — Source Intelligence Expansion.**
 
-P5 is agent-accepted across the shared Product Intelligence core, CLI-first JSON interface, REST, Golden Demo, and thin MCP adapter. Preserve CLI as the primary developer/shell-capable Agent surface and keep MCP thin. Next, expand sources in evidence order: own-project Git facts where incomplete, then the first high-value package-registry connector, followed by OSV/security version matching. Do not add a connector unless identity, revision, pagination/history limits, provenance, failure semantics, and project-version applicability are testable.
+P6 Slice 1 (PyPI registry + cross-source release identity) is agent-accepted locally but the phase is not complete. Preserve the new source-owned identity contract. Next complete own-project Git facts where incomplete, then add OSV/security matching against actual resolved dependency versions. Keep every connector gated on testable identity, revision, coverage/history limits, provenance, failure semantics, and project-version applicability.
 
 ## RETROSPECTIVE TEMPLATE
 

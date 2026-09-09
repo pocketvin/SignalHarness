@@ -11,7 +11,7 @@ from signal_harness.agent_integration.mode import RunMode
 from signal_harness.persistence import ChangeLedger
 from signal_harness.persistence.ledger import SCHEMA_VERSION
 from signal_harness.runtime.workflow import SignalHarnessWorkflow
-from signal_harness.signal.normalizer import normalize_event
+from signal_harness.signal.normalizer import normalize_event, normalize_github_event
 from signal_harness.signal.policy import load_signal_policy, load_yaml_mapping
 
 
@@ -40,6 +40,112 @@ def test_event_revision_preserves_history_under_one_change(tmp_path: Path) -> No
 
     assert first_map[first.event_id][0] == second_map[second.event_id][0]
     assert ledger.revision_count(event_id=first.event_id) == 2
+
+
+def test_same_dependency_release_from_github_and_pypi_shares_one_change(
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    ledger = ChangeLedger(tmp_path / "ledger.sqlite3")
+    profile = load_yaml_mapping(project_root / "configs/project_profile.yaml")
+    policy = load_signal_policy(project_root / "configs/signal_policy.yaml")
+    github = normalize_github_event(
+        {
+            "id": 2135,
+            "tag_name": "v2.13.5",
+            "name": "v2.13.5",
+            "body": "Pydantic maintenance release.",
+            "html_url": "https://github.com/pydantic/pydantic/releases/tag/v2.13.5",
+            "published_at": "2026-08-28T14:00:00Z",
+            "package_name": "pydantic",
+            "package_registry": "pypi",
+        },
+        repo="pydantic/pydantic",
+        event_kind="github_release",
+    )
+    registry = normalize_event(
+        {
+            "event_id": "pypi-pydantic-2.13.5",
+            "source_type": "package_registry",
+            "source_name": "pydantic",
+            "title": "pydantic 2.13.5",
+            "content": "Official PyPI release metadata.",
+            "url": "https://pypi.org/project/pydantic/2.13.5/",
+            "published_at": "2026-08-28T14:03:59Z",
+            "current_version": "2.13.5",
+            "previous_version": "2.13.4",
+            "raw_payload": {
+                "package_name": "pydantic",
+                "registry": "pypi",
+                "official": True,
+            },
+            "collected_at": "2026-09-09T00:00:00Z",
+        }
+    )
+
+    refs = ledger.persist_observations([github, registry])
+    assert refs[github.event_id][0] == refs[registry.event_id][0]
+    assert refs[github.event_id][1] != refs[registry.event_id][1]
+    change_id = refs[github.event_id][0]
+    with sqlite3.connect(ledger.path) as connection:
+        count = connection.execute(
+            "SELECT COUNT(*) FROM change_events WHERE change_id=?", (change_id,)
+        ).fetchone()[0]
+    assert count == 2
+
+    ledger.begin_scan(
+        scan_id="cross-source",
+        project_id="signalharness",
+        collected_count=2,
+        deduped_count=2,
+    )
+    ledger.freeze_scan_changes(
+        scan_id="cross-source",
+        project_id="signalharness",
+        events=[github, registry],
+        event_change_ids=refs,
+        project_profile=profile,
+        policy=policy,
+        analyzed_event_ids=set(),
+    )
+    page = ledger.list_scan_changes("cross-source", limit=10)
+    assert page.count == 1
+    assert page.items[0]["change_id"] == change_id
+
+
+def test_cross_source_release_does_not_merge_from_project_profile_heuristics(
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    ledger = ChangeLedger(tmp_path / "ledger.sqlite3")
+    github = normalize_github_event(
+        {
+            "id": 99,
+            "tag_name": "v2.13.5",
+            "name": "v2.13.5",
+            "body": "Pydantic maintenance release.",
+            "html_url": "https://github.com/pydantic/pydantic/releases/tag/v2.13.5",
+            "published_at": "2026-08-28T14:00:00Z",
+        },
+        repo="pydantic/pydantic",
+        event_kind="github_release",
+    )
+    registry = normalize_event(
+        {
+            "event_id": "pypi-pydantic-2.13.5-profile-independent",
+            "source_type": "package_registry",
+            "source_name": "pydantic",
+            "title": "pydantic 2.13.5",
+            "url": "https://pypi.org/project/pydantic/2.13.5/",
+            "published_at": "2026-08-28T14:03:59Z",
+            "current_version": "2.13.5",
+            "raw_payload": {"package_name": "pydantic", "registry": "pypi"},
+            "collected_at": "2026-09-09T00:00:00Z",
+        }
+    )
+
+    refs = ledger.persist_observations([github, registry])
+    assert refs[github.event_id][0] != refs[registry.event_id][0]
 
 
 def test_scan_projection_stays_on_original_event_revision(

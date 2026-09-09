@@ -156,6 +156,35 @@ def normalize_github_event(
     return normalize_event(mapped, collected_at=collected_at)
 
 
+def normalize_package_registry_event(
+    raw: dict[str, Any],
+    *,
+    package_name: str | None = None,
+    collected_at: datetime | None = None,
+) -> SignalEvent:
+    """Normalize one package-registry release record."""
+
+    package = package_name or _text(raw.get("package_name") or raw.get("source_name"))
+    mapped = {
+        **raw,
+        "source_type": "package_registry",
+        "source_name": package or "unknown-package",
+        "title": raw.get("title") or f"{package} {raw.get('current_version') or ''}".strip(),
+        "content": raw.get("content") or "",
+        "url": raw.get("url") or "",
+        "published_at": raw.get("published_at") or raw.get("upload_time"),
+        "source_created_at": raw.get("published_at") or raw.get("upload_time"),
+        "source_updated_at": raw.get("published_at") or raw.get("upload_time"),
+        "change_kind": "released",
+        "current_version": raw.get("current_version") or raw.get("version"),
+        "previous_version": raw.get("previous_version"),
+        "official": True,
+        "source_authority": "official",
+        "package_name": package,
+    }
+    return normalize_event(mapped, collected_at=collected_at)
+
+
 def normalize_rss_item(
     raw: dict[str, Any],
     *,

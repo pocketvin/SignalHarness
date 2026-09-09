@@ -18,7 +18,7 @@ from signal_harness.signal.schemas import (
 )
 
 DEFAULT_SOURCE_TYPES = frozenset(
-    {"github_release", "github_issue", "rss", "web_change", "team_update"}
+    {"github_release", "github_issue", "package_registry", "rss", "web_change", "team_update"}
 )
 LOW_INFORMATION_TERMS = (
     "footer",

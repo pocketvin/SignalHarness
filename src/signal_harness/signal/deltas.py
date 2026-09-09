@@ -12,7 +12,11 @@ def annotate_release_lineage(events: list[SignalEvent]) -> list[SignalEvent]:
 
     by_source: dict[str, list[SignalEvent]] = defaultdict(list)
     for event in events:
-        if event.source_type == "github_release" and event.current_version:
+        if (
+            event.source_type == "github_release"
+            and event.current_version
+            and event.previous_version is None
+        ):
             by_source[event.source_name].append(event)
 
     previous_by_id: dict[str, str] = {}

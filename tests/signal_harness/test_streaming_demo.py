@@ -132,7 +132,7 @@ def test_demo_page_and_metadata(
         assert payload["default_project_id"] == "signalharness"
         projects = {item["id"]: item for item in payload["projects"]}
         assert projects["signalharness"]["name"] == "SignalHarness"
-        assert projects["signalharness"]["watchlist"]["source_count"] == 9
+        assert projects["signalharness"]["watchlist"]["source_count"] == 12
         assert projects["example-agent-service"]["watchlist"]["source_count"] == 7
         assert payload["default_provider_id"] is None
         assert all(option["ready"] is False for option in payload["providers"])

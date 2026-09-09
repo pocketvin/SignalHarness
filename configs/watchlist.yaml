@@ -1,17 +1,30 @@
 github:
   repositories:
     - repo: langchain-ai/langgraph
+      package_name: langgraph
+      package_registry: pypi
       events:
         - releases
         - issues
     - repo: openai/openai-python
+      package_name: openai
+      package_registry: pypi
       events:
         - releases
         - issues
     - repo: pydantic/pydantic
+      package_name: pydantic
+      package_registry: pypi
       events:
         - releases
         - issues
+package_registries:
+  pypi:
+    packages:
+      - name: mcp
+      - name: fastapi
+      - name: pydantic
+
 rss:
   feeds:
     - name: OpenAI News

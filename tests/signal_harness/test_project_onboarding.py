@@ -28,8 +28,10 @@ def test_inspect_python_project_builds_reviewable_profile_and_watchlist(tmp_path
     assert draft.review_required is False
     assert {"fastapi", "pydantic", "mcp", "httpx"} <= set(draft.project_profile["dependencies"])
     assert "API service" in draft.project_profile["critical_modules"]
-    repos = {item["repo"] for item in draft.watchlist["github"]["repositories"]}
-    assert {"fastapi/fastapi", "pydantic/pydantic", "modelcontextprotocol/python-sdk"} <= repos
+    repo_items = {item["repo"]: item for item in draft.watchlist["github"]["repositories"]}
+    assert {"fastapi/fastapi", "pydantic/pydantic", "modelcontextprotocol/python-sdk"} <= set(repo_items)
+    assert repo_items["pydantic/pydantic"]["package_name"] == "pydantic"
+    assert repo_items["pydantic/pydantic"]["package_registry"] == "pypi"
     web_urls = {item["url"] for item in draft.watchlist["web_changes"]["sources"]}
     assert "https://modelcontextprotocol.io/specification/latest" in web_urls
 
@@ -48,9 +50,10 @@ def test_browser_manifest_bundle_detects_node_stack_without_local_path_access() 
     assert draft.id == "front-agent"
     assert "TypeScript / JavaScript" in draft.project_profile["tech_stack"]
     assert "MCP integration" in draft.project_profile["critical_modules"]
-    repos = {item["repo"] for item in draft.watchlist["github"]["repositories"]}
-    assert "facebook/react" in repos
-    assert "modelcontextprotocol/typescript-sdk" in repos
+    repo_items = {item["repo"]: item for item in draft.watchlist["github"]["repositories"]}
+    assert "facebook/react" in repo_items
+    assert "modelcontextprotocol/typescript-sdk" in repo_items
+    assert repo_items["facebook/react"]["package_registry"] == "npm"
 
 
 def test_manifest_rejects_path_traversal() -> None:

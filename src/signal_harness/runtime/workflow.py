@@ -47,6 +47,7 @@ from signal_harness.signal.noise import NoiseFilter
 from signal_harness.signal.normalizer import (
     normalize_event,
     normalize_github_event,
+    normalize_package_registry_event,
     normalize_rss_item,
 )
 from signal_harness.tools.web_snapshot import (
@@ -97,6 +98,8 @@ class SourceJob:
     source_type: str
     ttl_seconds: int
     official: bool | None = None
+    package_name: str | None = None
+    package_registry: str | None = None
 
 
 class SignalHarnessWorkflow:
@@ -293,6 +296,7 @@ class SignalHarnessWorkflow:
             scan_id=active_scan_id, source_tasks=collection.source_tasks
         )
         event_change_ids = self.ledger.persist_observations(all_events)
+        all_change_count = len({change_id for change_id, _ in event_change_ids.values()})
 
         signal_memory_path = self.state_dir / "signal_memory.json"
         feedback_path = self.state_dir / "feedback_memory.json"
@@ -537,8 +541,8 @@ class SignalHarnessWorkflow:
             )
             self.ledger.complete_scan(
                 scan_id=active_scan_id,
-                analyzed_count=len(events),
-                relevant_count=len(all_events),
+                analyzed_count=len({event_change_ids[event.event_id][0] for event in events}),
+                relevant_count=all_change_count,
                 coverage_status=coverage_status,
             )
             if (
@@ -561,7 +565,7 @@ class SignalHarnessWorkflow:
             active_scan_id,
             window,
             coverage_status,
-            len(all_events),
+            all_change_count,
             events,
             assessments,
             self.output_dir,
@@ -647,6 +651,8 @@ class SignalHarnessWorkflow:
         jobs: list[SourceJob] = []
         for entry in watchlist.get("github", {}).get("repositories", []):
             repo = str(entry.get("repo", ""))
+            package_name = str(entry.get("package_name") or "").strip() or None
+            package_registry = str(entry.get("package_registry") or "").strip().lower() or None
             for event_kind in entry.get("events", []):
                 if event_kind == "releases":
                     guard.require("read_github_release")
@@ -661,6 +667,8 @@ class SignalHarnessWorkflow:
                             source_name=repo,
                             source_type="github_release",
                             ttl_seconds=600,
+                            package_name=package_name,
+                            package_registry=package_registry,
                         )
                     )
                 elif event_kind == "issues":
@@ -676,8 +684,30 @@ class SignalHarnessWorkflow:
                             source_name=repo,
                             source_type="github_issue",
                             ttl_seconds=600,
+                            package_name=package_name,
+                            package_registry=package_registry,
                         )
                     )
+        pypi = watchlist.get("package_registries", {}).get("pypi", {})
+        for package in pypi.get("packages", []):
+            package_name = str(package.get("name") if isinstance(package, dict) else package).strip()
+            if not package_name:
+                continue
+            guard.require("read_package_registry")
+            jobs.append(
+                SourceJob(
+                    tool_name="package_registry",
+                    arguments={
+                        "action": "fetch_pypi_releases",
+                        "package": package_name,
+                        "since": since,
+                    },
+                    source_name=package_name,
+                    source_type="package_registry",
+                    ttl_seconds=900,
+                    official=True,
+                )
+            )
         for feed in watchlist.get("rss", {}).get("feeds", []):
             guard.require("read_rss")
             jobs.append(
@@ -747,6 +777,10 @@ class SignalHarnessWorkflow:
                     collected.append(item)
                 else:
                     raw_item = dict(item)
+                    if job.source_type.startswith("github_") and job.package_name:
+                        raw_item.setdefault("package_name", job.package_name)
+                        if job.package_registry:
+                            raw_item.setdefault("package_registry", job.package_registry)
                     if job.source_type == "rss":
                         raw_item.setdefault("feed_url", str(job.arguments.get("url", "")))
                         raw_item.setdefault(
@@ -896,9 +930,10 @@ class SignalHarnessWorkflow:
     def _source_type_round_robin_rank(source_type: str) -> int:
         return {
             "github_release": 0,
-            "rss": 1,
-            "github_issue": 2,
-            "web_change": 3,
+            "package_registry": 1,
+            "rss": 2,
+            "github_issue": 3,
+            "web_change": 4,
         }.get(source_type, 9)
 
     @classmethod
@@ -1107,6 +1142,8 @@ class SignalHarnessWorkflow:
                 repo=source_name,
                 event_kind=source_type,
             )
+        if source_type == "package_registry":
+            return normalize_package_registry_event(raw, package_name=source_name)
         return normalize_rss_item(raw, feed_name=source_name)
 
     async def _write_outputs(

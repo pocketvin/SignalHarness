@@ -113,6 +113,21 @@ def _metrics_non_inferior(
     return all(current >= reference for current, reference in zip(candidate, baseline, strict=True))
 
 
+def _selection_key(item: HarnessVariantEval) -> tuple[int, int, int, int, str]:
+    """Prefer fewer calls, then fewer optional research/verification components."""
+
+    verifier_calls = item.llm_calls_by_agent.get("SelectiveVerifierAgent", 0)
+    evidence_research_calls = item.llm_calls_by_agent.get("ContextEvidenceAgent", 0)
+    distinct_agents = len(item.llm_calls_by_agent)
+    return (
+        item.llm_call_count,
+        verifier_calls,
+        evidence_research_calls,
+        distinct_agents,
+        item.variant.value,
+    )
+
+
 async def run_harness_ablation(
     *,
     root: Path,
@@ -158,15 +173,13 @@ async def run_harness_ablation(
         if item.regression.passed
         and _metrics_non_inferior(_quality_tuple(item), baseline_quality)
     ]
-    best = min(
-        eligible or [baseline],
-        key=lambda item: (item.llm_call_count, item.llm_latency_ms, item.variant.value),
-    )
+    best = min(eligible or [baseline], key=_selection_key)
     recommendation = best.variant if inputs_frozen else baseline.variant
     if inputs_frozen and best.variant is not baseline.variant:
         reason = (
             f"{best.variant.value} matched or exceeded the baseline regression metrics on "
-            "identical frozen inputs while using the fewest LLM calls among eligible variants."
+            "identical frozen inputs while minimizing LLM calls and optional "
+            "research/verification components."
         )
     else:
         reason = (

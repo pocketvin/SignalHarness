@@ -4,7 +4,7 @@
 
 > 一个面向持续开发软件项目的 Project Environment Intelligence 系统：连接项目后持续收集、聚合和分析周围的工程环境变化，回答“发生了什么、哪些值得关注、会影响什么、应该做什么”。Multi-Agent、规则、Search 与 Scoring 都只是可替换的实现技术。
 
-SignalHarness 会实时监听 GitHub / RSS / 配置化网页快照等外部工程信号；它判断这些变化是否真正影响当前选择的项目，并把结果转成**可解释、可审计、可回归验证**的决策，而不是再做一个信息聚合器或聊天机器人。
+SignalHarness 会实时监听 GitHub / PyPI package registry / RSS / 配置化网页快照等外部工程信号；它判断这些变化是否真正影响当前选择的项目，并把结果转成**可解释、可审计、可回归验证**的决策，而不是再做一个信息聚合器或聊天机器人。
 
 ## 30 秒看懂这个项目
 
@@ -29,6 +29,7 @@ SignalHarness 的核心答案是：**稳定的环境事实与 Scan 状态由 Pyt
 | Guarded Scoring | LLM 提供语义判断；Python 持有 authoritative final score |
 | Change Ledger | Project-scoped SQLite：EventRevision → Change → ProjectImpact → ScanChange；Top-K 不再决定事实是否存在 |
 | Project Profile / Preference | versioned ProfileRevision + Critical / Important / Normal / Low / Ignore；显式偏好直接影响排序和 Agent Context |
+| Sources | GitHub releases/issues、PyPI release registry、RSS、配置化 Web snapshot；同一 package/version 的 GitHub + Registry observation 聚合为一个 Change |
 | Memory / State | Project-scoped Signal / Feedback / Learning 兼容状态；新业务历史逐步迁移到结构化 Ledger |
 | Agent Eval | 40 条项目级 Regression Suite + 3 条 Cross-project Context Gate + Provider Contract Eval |
 | Observability | Agent、Schema、Retry、Fallback、Tools、Latency、Tokens、Estimated Cost Trace |
@@ -44,7 +45,7 @@ SignalHarness 的核心答案是：**稳定的环境事实与 Scan 状态由 Pyt
 
 ```mermaid
 flowchart LR
-    Sources[GitHub / RSS / Web change / fixture]
+    Sources[GitHub / PyPI / RSS / Web change / fixture]
     Collect[Collect / Normalize / Deduplicate]
     Funnel[Project-aware Candidate Funnel]
     Noise[Noise Filter]

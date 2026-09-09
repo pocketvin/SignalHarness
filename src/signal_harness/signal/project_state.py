@@ -49,9 +49,9 @@ def resolve_project_change_state(
 
     resolved = _resolved_dependency_version(dependency, project_profile)
     relation: VersionRelation = "not_applicable"
-    if event.source_type == "github_release" and event.current_version and resolved:
+    if event.source_type in {"github_release", "package_registry"} and event.current_version and resolved:
         relation = _compare_stable_versions(event.current_version, resolved)
-    elif event.source_type == "github_release":
+    elif event.source_type in {"github_release", "package_registry"}:
         relation = "unknown"
 
     fixed = False

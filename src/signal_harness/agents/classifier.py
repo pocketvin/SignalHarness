@@ -170,7 +170,7 @@ class ClassifierAgent:
         ) and any(value in content_text for value in ("typo", "wording", "copy", "example")):
             category = SignalCategory.DOCS_CHANGE_SIGNAL
             reason = "The signal is a documentation-only change without runtime impact."
-        elif direct_dependency and event.source_type == "github_release":
+        elif direct_dependency and event.source_type in {"github_release", "package_registry"}:
             category = SignalCategory.ECOSYSTEM_ISSUE
             reason = (
                 "The signal is a tracked direct dependency release without confirmed "
@@ -182,7 +182,7 @@ class ClassifierAgent:
         elif any(word in text for word in ("policy", "regulation", "license", "compliance")):
             category = SignalCategory.POLICY_SIGNAL
             reason = "The content contains policy or compliance language."
-        elif event.source_type == "github_release":
+        elif event.source_type in {"github_release", "package_registry"}:
             category = SignalCategory.ECOSYSTEM_ISSUE
             reason = (
                 "The signal is an ecosystem release without confirmed breaking/security impact."

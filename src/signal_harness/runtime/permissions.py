@@ -20,6 +20,7 @@ class SignalPermissionGuard:
         {
             "read_github_release",
             "read_github_issue",
+            "read_package_registry",
             "read_rss",
             "read_mock_web_change",
             "read_web_change",

@@ -1,12 +1,12 @@
 # SignalHarness Architecture
 
-SignalHarness 的目标产品是 Project Environment Intelligence；当前仍保留五-Agent routed analyzer 作为可验证 baseline。P1/P2 已建立 SQLite Change Ledger、冻结 Scan Window、Coverage 与可恢复本地 Run；P3 在同一 Ledger 上增加 versioned ProfileRevision 与显式 Preference Engine，使每个 Scan 固定引用实际使用的 effective project context。CLI/REST/SSE Golden Demo 与当前只读 MCP 仍复用同一 runtime；未来 Analyzer 数量不再是产品约束。
+SignalHarness 的目标产品是 Project Environment Intelligence。P1/P2 建立 SQLite Change Ledger、冻结 Scan Window、Coverage 与可恢复本地 Run；P3 增加 versioned ProfileRevision 与显式 Preference Engine；P4 用 frozen Harness ablation 评估 Analyzer 组件；P5 将 frozen Scan 投影成 Overall → Top → All → Detail，并让 CLI/REST/Web/MCP 共用同一产品状态。当前五-Agent routed analyzer 仍是受保护 baseline，未来 Analyzer 数量不是产品约束。
 
 ## Workflow flowchart
 
 ```mermaid
 flowchart TD
-    A["External Sources<br/>GitHub / RSS / Web change / fixture"] --> B["Source Collection"]
+    A["External Sources<br/>GitHub / PyPI / RSS / Web change / fixture"] --> B["Source Collection"]
     B --> C["Normalization"]
     C --> TW["Unified Time-window Filter"]
     TW --> D["Deduplication + Change Delta"]
@@ -96,7 +96,7 @@ sequenceDiagram
   自动/显式项目事实的兼容输入：purpose、技术栈、dependencies 与 lockfile evidence、runtime/protocol/provider、critical modules、monitored ecosystem、focus keywords。运行时实际使用的 effective Profile 会版本化进入 project Ledger。
 
 - `configs/watchlist.yaml` / `configs/watchlists/*.yaml`
-  project-scoped source watchlist：实时 GitHub/RSS + 配置化 public HTTP(S) snapshot/diff。官方 RSS / Web page 可显式声明 provenance authority。
+  project-scoped source watchlist：实时 GitHub、PyPI package registry、RSS + 配置化 public HTTP(S) snapshot/diff。GitHub release 可携带 package identity，用于与 Registry release 聚合同一 Change；官方 Registry/RSS/Web page 的 provenance 由 Python/runtime 持有。
 
 - `configs/signal_policy.yaml`
   deterministic scoring weights、category weights、thresholds、tool allowlist、permission policy。
@@ -105,7 +105,7 @@ sequenceDiagram
   主 workflow：source collection、normalization、统一时间窗口、deduplication/change delta、project-aware candidate funnel、noise filter、Agent run、report writing。
 
 - `src/signal_harness/signal/deltas.py`
-  Source-native Change Delta：GitHub Release 的版本前后关系、Issue/RSS 的 created/updated 变化语义。
+  Source-native Change Delta：GitHub / package-registry Release 的版本前后关系、Issue/RSS 的 created/updated 变化语义。
 
 - `src/signal_harness/agent_integration/runner.py`
   五 Agent runner：controlled tool-use loop、schema retry、repair boundary、audit completion、LearningPolicy handling。
@@ -117,7 +117,7 @@ sequenceDiagram
   三类 eval：40-case 产品 regression gate、cross-project context gate 与 provider contract/model eval。
 
 - `src/signal_harness/mcp_server.py`
-  五个结构化只读 MCP tools；读取 project context、signal history、assessment、trace 和 feedback，且不能绕过 permission policy。
+  当前 10 个 structured MCP tools：9 个只读 product/context 查询 + 1 个复用 persistent StreamRunManager 的 fresh-scan starter；不能绕过 Project scope、fixture allowlist 或 permission policy。
 
 - `src/signal_harness/service.py`
   FastAPI REST + SSE + MCP Streamable HTTP 服务层；每次 run 隔离 output/trace，同时按 `project_id` 连接共享的持久 Project State，并携带 source mode 与 provider selection。
@@ -167,6 +167,15 @@ sequenceDiagram
 - **Ranking + Context**：Preference 不只是 UI 设置；匹配项会进入 deterministic relevance adjustment，同时 effective Profile 中保留结构化 preference，供 Analyzer context 使用。
 - **Safe onboarding evidence**：`uv.lock` / `package-lock.json` 等 allowlisted lockfile 只读解析 declared constraint、resolved version、source file、confidence；不执行 repository scripts、不安装依赖、不读取 secret 文件。
 - **Fast product controls**：REST/Golden Demo 支持结构化五档重要性和确定性 natural-language preference 更新，两条路径写入同一个 project preference model。
+
+## P6 source identity / PyPI registry boundary
+
+- **Official registry source**：`package_registry` 通过 PyPI JSON Simple/Index API 只读获取 distribution metadata，按 PEP 440 版本聚合 wheel/sdist，保留 `previous_version`、yanked 状态、ETag / last-serial、API version、retry 与明确 history cap/coverage。
+- **Source-owned package identity**：GitHub release 只有在 Watchlist/onboarding 明确绑定 `package_name + package_registry` 时才拥有 package identity；Registry release 从官方 registry metadata 获取同一 identity，不从正文关键词猜测。
+- **Cross-source Change aggregation**：同一 `(registry, canonical package, version)` 的 GitHub release 与 Registry release 共享一个 Change，但保留各自 EventRevision/evidence；不同 package/version 不会误合并。
+- **Project applicability**：direct dependency 与 installed/resolved version 来自 Project Profile/lockfile evidence；版本适用性判断基于 source identity，而不是 release body 中恰好提到某个依赖名。
+- **Failure / checkpoint boundary**：单个 Registry source 失败时 SourceTask 明确为 `failed + partial`，只要其他来源成功 Scan 可产出 partial 结果，但不会推进 interactive `since_last` checkpoint。
+- **Real-source evidence**：2026-09-09 对官方 PyPI `pydantic` 的只读 smoke 成功，返回 coverage=complete、205 个版本、latest `2.13.5`、previous `2.13.4`；这只是连接器运行证据，不是版本长期事实。
 
 ## Project state / candidate / provenance boundaries
 

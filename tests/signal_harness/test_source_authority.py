@@ -5,7 +5,7 @@ from pathlib import Path
 from signal_harness.agent_integration.runner import LLMAgentTeamRunner
 from signal_harness.agent_integration.schemas import ContextEvidenceItem, ContextEvidenceOutput
 from signal_harness.agents.evidence import EvidenceAgent
-from signal_harness.signal.normalizer import normalize_github_event
+from signal_harness.signal.normalizer import normalize_github_event, normalize_package_registry_event
 from signal_harness.signal.policy import load_signal_policy
 from signal_harness.signal.schemas import SignalCategory, SourceQuality
 from signal_harness.signal.scorer import source_score
@@ -103,3 +103,17 @@ def test_python_clamps_llm_provenance_and_priority_floor_for_community_issue(
         )
         is None
     )
+
+
+def test_pypi_registry_is_official_release_authority(project_root: Path) -> None:
+    policy = load_signal_policy(project_root / "configs/signal_policy.yaml")
+    event = normalize_package_registry_event(
+        {
+            "package_name": "mcp",
+            "current_version": "2.2.0",
+            "published_at": "2026-09-08T10:00:00Z",
+            "url": "https://pypi.org/project/mcp/2.2.0/",
+        }
+    )
+    assert EvidenceAgent().run(event).source_quality is SourceQuality.OFFICIAL
+    assert source_score(event, policy) == 88

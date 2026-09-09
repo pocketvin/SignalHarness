@@ -14,6 +14,7 @@ from uuid import uuid4
 from signal_harness.projects.preferences import PreferenceInput, apply_preferences
 from signal_harness.signal.candidates import candidate_score
 from signal_harness.signal.schemas import SignalAssessment, SignalEvent, SourceTask
+from signal_harness.signal.source_identity import release_package_identity, release_version_identity
 
 SCHEMA_VERSION = 4
 
@@ -67,8 +68,23 @@ def _revision_key(event: SignalEvent) -> str:
     return _hash_text(json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False))
 
 
-def _change_id(event_key: str) -> str:
-    return f"chg-{event_key[:24]}"
+def _change_key(event: SignalEvent) -> str:
+    package_name = release_package_identity(event)
+    if package_name and event.current_version:
+        canonical = "|".join(
+            (
+                "package_release",
+                package_name.registry,
+                package_name.name,
+                release_version_identity(event.current_version),
+            )
+        )
+        return _hash_text(canonical)
+    return _event_key(event)
+
+
+def _change_id(change_key: str) -> str:
+    return f"chg-{change_key[:24]}"
 
 
 class ChangeLedger:
@@ -413,7 +429,8 @@ class ChangeLedger:
             for event in events:
                 event_key = _event_key(event)
                 revision_key = _revision_key(event)
-                change_id = _change_id(event_key)
+                change_key = _change_key(event)
+                change_id = _change_id(change_key)
                 payload = json.dumps(event.model_dump(mode="json"), ensure_ascii=False)
                 connection.execute(
                     """
@@ -451,7 +468,7 @@ class ChangeLedger:
                         title=excluded.title,
                         updated_at=excluded.updated_at
                     """,
-                    (change_id, event_key, event.title, _utc_now(), _utc_now()),
+                    (change_id, change_key, event.title, _utc_now(), _utc_now()),
                 )
                 connection.execute(
                     """
@@ -477,24 +494,39 @@ class ChangeLedger:
         """Freeze every pre-funnel candidate into one Scan with cheap ranking metadata."""
 
         assessment_by_id = {item.event_id: item for item in assessments}
-        ranked = sorted(
-            (
-                (
-                    candidate_score(event, project_profile, policy),
-                    event,
-                    event_change_ids[event.event_id][0],
-                    event_change_ids[event.event_id][1],
-                )
-                for event in events
-            ),
+        grouped: dict[str, list[tuple[float, SignalEvent, int]]] = {}
+        for event in events:
+            change_id, revision_id = event_change_ids[event.event_id]
+            grouped.setdefault(change_id, []).append(
+                (candidate_score(event, project_profile, policy), event, revision_id)
+            )
+
+        ranked: list[tuple[float, SignalEvent, str, int, int]] = []
+        for change_id, candidates in grouped.items():
+            assessed = [item for item in candidates if item[1].event_id in assessment_by_id]
+            analyzed = [item for item in candidates if item[1].event_id in analyzed_event_ids]
+            pool = assessed or analyzed or candidates
+            basic_score, event, event_revision_id = sorted(
+                pool,
+                key=lambda item: (
+                    -item[0],
+                    -(item[1].published_at.timestamp() if item[1].published_at else 0.0),
+                    item[1].event_id,
+                ),
+            )[0]
+            ranked.append(
+                (basic_score, event, change_id, event_revision_id, 1 if analyzed else 0)
+            )
+        ranked.sort(
             key=lambda item: (
                 -item[0],
                 -(item[1].published_at.timestamp() if item[1].published_at else 0.0),
-                item[1].event_id,
-            ),
+                item[2],
+            )
         )
+
         with self._connect() as connection:
-            for rank, (basic_score, event, change_id, event_revision_id) in enumerate(
+            for rank, (basic_score, event, change_id, event_revision_id, selected) in enumerate(
                 ranked, start=1
             ):
                 assessment = assessment_by_id.get(event.event_id)
@@ -503,7 +535,6 @@ class ChangeLedger:
                     if assessment is not None
                     else None
                 )
-                selected = 1 if event.event_id in analyzed_event_ids else 0
                 connection.execute(
                     """
                     INSERT INTO scan_changes(

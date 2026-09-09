@@ -43,11 +43,64 @@ async def test_harness_ablation_uses_frozen_inputs_and_removes_supervisor_call(
     assert merged.llm_call_count < selective.llm_call_count
     assert verified.llm_calls_by_agent.get("SelectiveVerifierAgent") == 1
     assert verified.llm_call_count > merged.llm_call_count
-    assert evidence.regression.decision_accuracy < baseline.regression.decision_accuracy
+    assert evidence.regression.decision_accuracy >= baseline.regression.decision_accuracy
     assert selective.regression.decision_accuracy >= baseline.regression.decision_accuracy
     assert merged.regression.decision_accuracy >= baseline.regression.decision_accuracy
     assert verified.regression.decision_accuracy >= baseline.regression.decision_accuracy
-    assert summary.recommendation is HarnessVariant.SELECTIVE_EVIDENCE_IMPACT_ACTION
+    assert summary.recommendation is HarnessVariant.DETERMINISTIC_EVIDENCE_RESOLVER
+
+
+def test_selection_prefers_no_optional_evidence_research_when_quality_and_calls_tie() -> None:
+    from signal_harness.harness_eval import HarnessVariantEval, _selection_key
+    from signal_harness.evals import RegressionEvalSummary, RegressionThresholds
+
+    regression = RegressionEvalSummary(
+        suite="tie",
+        case_count=1,
+        assessed_count=1,
+        decision_accuracy=1.0,
+        category_accuracy=1.0,
+        priority_precision=1.0,
+        priority_recall=1.0,
+        false_positive_rate=0.0,
+        false_negative_rate=0.0,
+        true_positive=1,
+        false_positive=0,
+        true_negative=0,
+        false_negative=0,
+        thresholds=RegressionThresholds(),
+        passed=True,
+    )
+    common = dict(
+        input_fingerprint="frozen",
+        event_count=1,
+        analyzer_version="v1",
+        prompt_version="p1",
+        context_packet_version="c1",
+        policy_version="1",
+        provider="mock",
+        model="mock",
+        model_profile="mock",
+        regression=regression,
+        llm_call_count=2,
+        llm_latency_ms=1,
+        total_tokens=0,
+        estimated_cost_usd=0.0,
+        fallback_rate=0.0,
+        wall_clock_ms=1,
+    )
+    deterministic = HarnessVariantEval(
+        variant=HarnessVariant.DETERMINISTIC_EVIDENCE_RESOLVER,
+        llm_calls_by_agent={"ImpactAnalystAgent": 1, "ActionPlannerAgent": 1},
+        **common,
+    )
+    selective = HarnessVariantEval(
+        variant=HarnessVariant.SELECTIVE_EVIDENCE_IMPACT_ACTION,
+        llm_calls_by_agent={"ContextEvidenceAgent": 1, "ImpactActionAnalyzerAgent": 1},
+        **common,
+    )
+
+    assert _selection_key(deterministic) < _selection_key(selective)
 
 
 def test_non_inferior_metrics_require_every_dimension_to_hold() -> None:

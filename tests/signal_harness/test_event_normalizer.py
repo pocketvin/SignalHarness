@@ -3,7 +3,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from signal_harness.signal.deltas import annotate_release_lineage
-from signal_harness.signal.normalizer import normalize_github_event, normalize_rss_item
+from signal_harness.signal.normalizer import (
+    normalize_github_event,
+    normalize_package_registry_event,
+    normalize_rss_item,
+)
 
 
 NOW = datetime(2026, 6, 25, tzinfo=timezone.utc)
@@ -126,3 +130,22 @@ def test_rss_updated_item_preserves_publish_and_update_times() -> None:
     assert event.change_kind == "updated"
     assert event.source_created_at == datetime(2026, 6, 20, 10, 0, tzinfo=timezone.utc)
     assert event.source_updated_at == datetime(2026, 6, 24, 10, 0, tzinfo=timezone.utc)
+
+
+def test_package_registry_release_becomes_signal_event() -> None:
+    event = normalize_package_registry_event(
+        {
+            "package_name": "mcp",
+            "current_version": "2.2.0",
+            "previous_version": "2.1.1",
+            "published_at": "2026-09-08T10:00:00Z",
+            "url": "https://pypi.org/project/mcp/2.2.0/",
+            "content": "PyPI release 2.2.0 for mcp.",
+        },
+        collected_at=NOW,
+    )
+    assert event.source_type == "package_registry"
+    assert event.source_name == "mcp"
+    assert event.current_version == "2.2.0"
+    assert event.previous_version == "2.1.1"
+    assert event.raw_payload["source_authority"] == "official"

@@ -83,7 +83,7 @@ def source_semantic_text(
     prefix = f"{source_name} " if include_source and source_name else ""
     if source_type == "github_issue":
         semantic = title
-    elif source_type == "github_release":
+    elif source_type in {"github_release", "package_registry"}:
         semantic = f"{title} {_runtime_release_content(content)}"
     else:
         semantic = f"{title} {content}"

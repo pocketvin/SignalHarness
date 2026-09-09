@@ -85,3 +85,17 @@ def test_protocol_identity_is_resolved_without_making_it_a_package_release() -> 
     state = resolve_project_change_state(event, _profile())
     assert state.protocol_name == "Model Context Protocol"
     assert state.direct_dependency is False
+
+
+def test_project_state_compares_package_registry_release_to_installed_version() -> None:
+    event = _event(
+        source_type="package_registry",
+        source_name="mcp",
+        current_version="2.2.0",
+        raw_payload={"package_name": "mcp", "registry": "pypi", "official": True},
+    )
+    state = resolve_project_change_state(event, _profile())
+    assert state.dependency_name == "mcp"
+    assert state.resolved_version == "2.1.1"
+    assert state.version_relation == "newer"
+    assert state.newer_direct_release is True

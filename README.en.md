@@ -4,7 +4,7 @@
 
 **Project Environment Intelligence for continuously developed software projects: collect environmental changes, preserve them durably, decide what matters to a project, explain impact, and recommend action.**
 
-SignalHarness watches GitHub, RSS, and configured public-page snapshots, decides whether those changes matter to a project, and turns them into durable, auditable project intelligence instead of another noisy feed. Multi-agent orchestration, single-agent analysis, rules, search, and scoring are implementation techniques rather than the product identity; the current five-Agent path remains an evaluation baseline.
+SignalHarness watches GitHub, the PyPI package registry, RSS, and configured public-page snapshots, decides whether those changes matter to a project, and turns them into durable, auditable project intelligence instead of another noisy feed. Multi-agent orchestration, single-agent analysis, rules, search, and scoring are implementation techniques rather than the product identity; the current five-Agent path remains an evaluation baseline.
 
 ## At a glance
 
@@ -16,6 +16,7 @@ SignalHarness watches GitHub, RSS, and configured public-page snapshots, decides
 | Guarded decisions | LLM contributes semantics; Python owns final scoring and a primary-source high-risk alert floor |
 | Change ledger | Project-scoped SQLite EventRevision → Change → ProjectImpact → ScanChange; Top-K no longer controls durable existence |
 | Project profile / preference | Versioned ProfileRevision plus Critical / Important / Normal / Low / Ignore preferences that affect ranking and Agent context |
+| Sources | GitHub releases/issues, PyPI releases, RSS, and configured Web snapshots; GitHub + registry observations for one package/version aggregate into one Change |
 | Memory / state | Existing project-scoped signal/feedback/learning compatibility state remains separated from per-run output/trace |
 | Eval | 40-case Agent regression + 3-case cross-project context gate + provider contract eval |
 | Observability | Local trace for Agent calls, schema/retry/fallback, tools, latency, provider-reported tokens, and estimated cost |
@@ -68,7 +69,7 @@ SignalHarness treats those questions as an Agent-runtime problem rather than a c
 
 ```mermaid
 flowchart LR
-    Sources[GitHub / RSS / Web change / fixture]
+    Sources[GitHub / PyPI / RSS / Web change / fixture]
     Collect[Collect + Normalize + Deduplicate]
     Funnel[Project-aware Candidate Funnel]
     Noise[Noise Filter]

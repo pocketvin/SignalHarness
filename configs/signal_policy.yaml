@@ -94,6 +94,7 @@ feedback_adjustments:
 
 enabled_tools:
   - github_signal
+  - package_registry
   - rss_signal
   - web_change
   - signal_memory
@@ -119,6 +120,7 @@ permission_policy:
   auto_allow:
     - read_github_release
     - read_github_issue
+    - read_package_registry
     - read_rss
     - read_mock_web_change
     - read_web_change

@@ -73,6 +73,23 @@ class ProjectDraft(BaseModel):
     generated_at: datetime
 
 
+_PYPI_DEPENDENCIES = {
+    "fastapi", "pydantic", "httpx", "uvicorn", "openai", "langgraph", "mcp", "typer",
+}
+_NPM_DEPENDENCIES = {
+    "react", "next", "vite", "typescript", "zod", "fastify", "express",
+    "@modelcontextprotocol/sdk",
+}
+
+
+def _package_registry_for_dependency(name: str) -> str | None:
+    if name in _PYPI_DEPENDENCIES:
+        return "pypi"
+    if name in _NPM_DEPENDENCIES:
+        return "npm"
+    return None
+
+
 _DEPENDENCY_MAP: dict[str, dict[str, Any]] = {
     "fastapi": {
         "label": "FastAPI",
@@ -288,6 +305,15 @@ def draft_project(
         _path_modules(paths) + [module for item in known for module in item.get("modules", [])]
     )
     repos = _unique([str(item["repo"]) for item in known if item.get("repo")])
+    repo_identity: dict[str, tuple[str, str | None]] = {}
+    for dependency in ordered_deps:
+        item = _DEPENDENCY_MAP.get(dependency)
+        if not item or not item.get("repo"):
+            continue
+        repo_identity[str(item["repo"])] = (
+            dependency,
+            _package_registry_for_dependency(dependency),
+        )
     web_sources: list[dict[str, Any]] = []
     for item in known:
         url = item.get("web")
@@ -344,9 +370,17 @@ def draft_project(
     }
     watchlist: dict[str, Any] = {}
     if repos:
-        watchlist["github"] = {
-            "repositories": [{"repo": repo, "events": ["releases", "issues"]} for repo in repos]
-        }
+        repositories: list[dict[str, Any]] = []
+        for repo in repos:
+            entry: dict[str, Any] = {"repo": repo, "events": ["releases", "issues"]}
+            package_identity = repo_identity.get(repo)
+            if package_identity is not None:
+                package_name, package_registry = package_identity
+                entry["package_name"] = package_name
+                if package_registry:
+                    entry["package_registry"] = package_registry
+            repositories.append(entry)
+        watchlist["github"] = {"repositories": repositories}
         watchlist["rss"] = {
             "feeds": [
                 {
