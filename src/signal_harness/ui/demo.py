@@ -12,6 +12,13 @@ def demo_asset_dir() -> Path:
 
 @lru_cache(maxsize=1)
 def render_demo_page() -> str:
-    """Return the dependency-free live change radar, Chinese by default."""
+    """Return the compiled React/Tailwind live change radar, Chinese by default."""
 
     return (demo_asset_dir() / "demo.html").read_text(encoding="utf-8")
+
+
+@lru_cache(maxsize=1)
+def render_narrative_review_page() -> str:
+    """Return the blind Narrative A/B human-review surface."""
+
+    return (demo_asset_dir() / "narrative_review.html").read_text(encoding="utf-8")

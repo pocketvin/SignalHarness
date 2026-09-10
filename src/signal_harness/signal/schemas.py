@@ -191,6 +191,10 @@ class SignalAssessment(BaseModel):
     source_quality: SourceQuality = SourceQuality.UNVERIFIED
     reason: str = ""
     action_items: list[str] = Field(default_factory=list)
+    what_changed_zh: str = ""
+    why_relevant_zh: str = ""
+    action_items_zh: list[str] = Field(default_factory=list)
+    report_summary_zh: str = ""
     decision: SignalDecision
     score_breakdown: ScoreBreakdown | None = None
     agent_score_breakdown: AgentScoreBreakdown | None = None
@@ -241,7 +245,7 @@ class TraceStep(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     step: str = Field(min_length=1)
-    status: str = Field(pattern="^(success|error|skipped)$")
+    status: str = Field(pattern="^(running|success|error|skipped)$")
     agent: str | None = None
     input_count: int | None = Field(default=None, ge=0)
     output_count: int | None = Field(default=None, ge=0)

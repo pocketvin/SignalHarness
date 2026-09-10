@@ -143,6 +143,7 @@ async def run_harness_ablation(
         HarnessVariant.DETERMINISTIC_SUPERVISOR,
         HarnessVariant.DETERMINISTIC_SUPERVISOR_DEFERRED_LEARNING,
         HarnessVariant.DETERMINISTIC_EVIDENCE_RESOLVER,
+        HarnessVariant.DETERMINISTIC_EVIDENCE_IMPACT_ACTION,
         HarnessVariant.SELECTIVE_EVIDENCE_RESEARCHER,
         HarnessVariant.SELECTIVE_EVIDENCE_IMPACT_ACTION,
         HarnessVariant.SELECTIVE_EVIDENCE_IMPACT_ACTION_VERIFIER,
@@ -159,6 +160,7 @@ async def run_harness_ablation(
                 state_dir=temp_root / variant.value / "state",
                 mode=RunMode.MOCK_AGENT,
                 harness_variant=variant,
+                offline_fixture_source_tools=True,
             )
             scan = await workflow.scan(fixture=fixture, interactive=False)
             elapsed_ms = round((time.perf_counter() - start) * 1000)

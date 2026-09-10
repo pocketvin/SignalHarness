@@ -9,6 +9,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from signal_harness.presentation import sanitize_user_facing_actions
 from signal_harness.utils.fs import atomic_write_text
 
 
@@ -738,8 +739,8 @@ def _recommended_actions(
             continue
         event = event_by_id.get(str(assessment.get("event_id")), {})
         title = _display_title(event, assessment)
-        actions = _strings(assessment.get("action_items"))
-        action = actions[0] if actions else f"Review {title}"
+        actions = sanitize_user_facing_actions(assessment.get("action_items_zh") or [])
+        action = actions[0] if actions else f"查看「{title}」的影响与原始证据"
         recommendations.append(f"{title}: {action}")
         if len(recommendations) >= 5:
             break

@@ -1,0 +1,18 @@
+provider: openai_compatible
+model: gpt-5.6-sol
+supports_json_schema: true
+supports_json_mode: true
+supports_native_tool_calling: false
+supports_system_prompt: true
+max_input_tokens: 1050000
+max_output_tokens: 16384
+recommended_temperature: 1.0
+reasoning_effort: medium
+schema_strategy: prompt_json_retry
+tool_strategy: controlled_tool_request
+output_token_parameter: max_completion_tokens
+input_cost_per_million_usd: 4.0
+output_cost_per_million_usd: 20.0
+checked_at: 2026-09-10
+deprecated_models:
+  - gpt-4o-mini

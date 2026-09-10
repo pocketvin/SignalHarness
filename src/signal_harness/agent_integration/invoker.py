@@ -10,11 +10,12 @@ from collections.abc import Callable, Iterable
 from dataclasses import replace
 from typing import Any, Protocol, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from signal_harness.agent_integration.mode import RunMode
+from signal_harness.agent_integration.reasoning_summary import public_reasoning_metadata
 from signal_harness.agent_integration.schemas import LearningPolicyOutput
-from signal_harness.agent_integration.trace import append_llm_trace
+from signal_harness.agent_integration.trace import append_llm_trace_started, finish_llm_trace
 from signal_harness.providers.adapter import AgentCall, AgentProvider, ProviderUsage
 from signal_harness.runtime.tracing import TraceRecorder
 
@@ -55,12 +56,22 @@ class AgentInvoker:
         *,
         event_ids: Iterable[str],
     ) -> tuple[OutputT, int]:
+        event_id_text = ",".join(event_ids) or "memory"
+        trace_index = append_llm_trace_started(
+            self.trace,
+            call=call,
+            provider=self.provider,
+            mode=self.mode,
+            input_event_id=event_id_text,
+            input_count=call.input_count,
+        )
         started = time.perf_counter()
         schema_valid = False
         fallback_used = False
         error: str | None = None
         schema_error: str | None = None
         retry_count = 0
+        failure_kind: str | None = None
         usage_before = _provider_usage_snapshot(self.provider)
 
         def parse_response(response: str) -> OutputT:
@@ -84,14 +95,17 @@ class AgentInvoker:
         except TimeoutError as exc:
             schema_error = _short_error(exc)
             error = schema_error
+            failure_kind = "provider_timeout"
             fallback_used = True
             output = fallback()
         except Exception as exc:
             schema_error = _short_error(exc)
+            initial_failure_kind = _failure_kind(exc)
             if self.limits.max_schema_retries <= 0:
                 fallback_used = True
                 output = fallback()
                 error = schema_error
+                failure_kind = initial_failure_kind
             else:
                 retry_count = 1
                 retry_call = replace(
@@ -110,19 +124,31 @@ class AgentInvoker:
                     schema_valid = True
                 except Exception as retry_exc:
                     retry_error = _short_error(retry_exc)
+                    retry_failure_kind = _failure_kind(retry_exc)
                     schema_error = f"{schema_error}; retry failed: {retry_error}"
                     error = schema_error
+                    failure_kind = (
+                        "schema_validation"
+                        if initial_failure_kind == retry_failure_kind == "schema_validation"
+                        else retry_failure_kind
+                        if retry_failure_kind != "schema_validation"
+                        else initial_failure_kind
+                    )
                     fallback_used = True
                     output = fallback()
         duration_ms = max(0, round((time.perf_counter() - started) * 1000))
         usage = _provider_usage_snapshot(self.provider).delta(usage_before)
         source_types, requested, executed, tool_errors = _trace_tools(output)
-        index = append_llm_trace(
+        reasoning_metadata = public_reasoning_metadata(output)
+        if fallback_used:
+            reasoning_metadata = {**reasoning_metadata, "reasoning_state": "fallback_output"}
+        finish_llm_trace(
             self.trace,
+            trace_index,
             call=call,
             provider=self.provider,
             mode=self.mode,
-            input_event_id=",".join(event_ids) or "memory",
+            input_event_id=event_id_text,
             input_count=call.input_count,
             output_count=_output_count(output),
             duration_ms=duration_ms,
@@ -135,9 +161,11 @@ class AgentInvoker:
             retry_count=retry_count,
             schema_error=schema_error,
             error=error,
+            failure_kind=failure_kind,
+            reasoning_metadata=reasoning_metadata,
             usage=usage,
         )
-        return output, index
+        return output, trace_index
 
 
 def _json_object(text: str) -> dict[str, Any]:
@@ -162,6 +190,18 @@ def _output_count(output: BaseModel) -> int:
     if isinstance(output, LearningPolicyOutput):
         return 3
     return 1
+
+
+def _failure_kind(exc: Exception) -> str:
+    """Separate model-output contract failures from provider/runtime failures."""
+
+    if isinstance(exc, TimeoutError):
+        return "provider_timeout"
+    if isinstance(exc, (json.JSONDecodeError, ValidationError)):
+        return "schema_validation"
+    if isinstance(exc, ValueError) and str(exc).startswith("Agent response"):
+        return "schema_validation"
+    return "provider_error"
 
 
 def _short_error(exc: Exception, *, limit: int = 320) -> str:

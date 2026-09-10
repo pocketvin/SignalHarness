@@ -14,9 +14,14 @@ from uuid import uuid4
 from signal_harness.projects.preferences import PreferenceInput, apply_preferences
 from signal_harness.signal.candidates import candidate_score
 from signal_harness.signal.schemas import SignalAssessment, SignalEvent, SourceTask
-from signal_harness.signal.source_identity import release_package_identity, release_version_identity
+from signal_harness.signal.source_identity import (
+    git_change_identity,
+    release_package_identity,
+    release_version_identity,
+    security_advisory_identity,
+)
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 6
 
 
 @dataclass(frozen=True)
@@ -69,6 +74,16 @@ def _revision_key(event: SignalEvent) -> str:
 
 
 def _change_key(event: SignalEvent) -> str:
+    git_identity = git_change_identity(event)
+    if git_identity:
+        canonical = "|".join(
+            ("git_change", git_identity.repository, git_identity.commit_sha)
+        )
+        return _hash_text(canonical)
+    advisory = security_advisory_identity(event)
+    if advisory:
+        canonical = "|".join(("security_advisory", advisory.advisory_id.lower()))
+        return _hash_text(canonical)
     package_name = release_package_identity(event)
     if package_name and event.current_version:
         canonical = "|".join(
@@ -368,6 +383,633 @@ class ChangeLedger:
                 (project_id, consumer_id, value, scan_id, _utc_now()),
             )
 
+    def create_schedule(
+        self,
+        *,
+        project_id: str,
+        cadence: str,
+        interval_minutes: int | None,
+        local_time: str | None,
+        timezone_name: str,
+        mode: str,
+        provider_id: str | None,
+        max_events: int | None,
+        max_events_per_source: int | None,
+        next_run_at: datetime,
+    ) -> dict[str, Any]:
+        schedule_id = f"schedule-{uuid4().hex[:12]}"
+        now = _utc_now()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO schedules(
+                    schedule_id, project_id, cadence, interval_minutes, local_time,
+                    timezone, mode, provider_id, max_events, max_events_per_source,
+                    enabled, checkpoint_at, next_run_at, last_run_id, last_status,
+                    last_error, created_at, updated_at
+                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, NULL, 'idle', NULL, ?, ?)
+                """,
+                (
+                    schedule_id, project_id, cadence, interval_minutes, local_time,
+                    timezone_name, mode, provider_id, max_events, max_events_per_source,
+                    next_run_at.astimezone(timezone.utc).isoformat(), now, now,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM schedules WHERE schedule_id=?", (schedule_id,)
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("schedule insert could not be resolved")
+        return self._schedule_payload(row)
+
+    def list_schedules(self, *, project_id: str) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM schedules WHERE project_id=? ORDER BY created_at, schedule_id",
+                (project_id,),
+            ).fetchall()
+        return [self._schedule_payload(row) for row in rows]
+
+    def schedule(self, *, project_id: str, schedule_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM schedules WHERE project_id=? AND schedule_id=?",
+                (project_id, schedule_id),
+            ).fetchone()
+        return self._schedule_payload(row) if row is not None else None
+
+    def due_schedules(
+        self, *, project_id: str, now: datetime
+    ) -> list[dict[str, Any]]:
+        upper = now.astimezone(timezone.utc).isoformat()
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM schedules
+                WHERE project_id=? AND enabled=1 AND next_run_at<=? AND last_status!='running'
+                ORDER BY next_run_at, schedule_id
+                """,
+                (project_id, upper),
+            ).fetchall()
+        return [self._schedule_payload(row) for row in rows]
+
+    def claim_schedule_run(
+        self,
+        *,
+        project_id: str,
+        schedule_id: str,
+        run_id: str,
+        now: datetime,
+        next_run_at: datetime,
+    ) -> bool:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE schedules
+                SET last_run_id=?, last_status='running', last_error=NULL,
+                    next_run_at=?, updated_at=?
+                WHERE project_id=? AND schedule_id=? AND enabled=1
+                  AND next_run_at<=? AND last_status!='running'
+                """,
+                (
+                    run_id, next_run_at.astimezone(timezone.utc).isoformat(),
+                    _utc_now(), project_id, schedule_id,
+                    now.astimezone(timezone.utc).isoformat(),
+                ),
+            )
+        return cursor.rowcount == 1
+
+    def complete_schedule_run(
+        self,
+        *,
+        project_id: str,
+        schedule_id: str,
+        run_id: str,
+        status: str,
+        coverage_status: str,
+        checkpoint_at: datetime | None,
+        error: str = "",
+    ) -> None:
+        advance = status == "success" and coverage_status != "partial" and checkpoint_at is not None
+        checkpoint_value = (
+            checkpoint_at.astimezone(timezone.utc).isoformat()
+            if advance and checkpoint_at is not None
+            else None
+        )
+        durable_status = "success" if status == "success" else "error"
+        if status == "success" and coverage_status == "partial":
+            durable_status = "partial"
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE schedules
+                SET last_status=?, last_error=?,
+                    checkpoint_at=CASE
+                        WHEN ? IS NOT NULL AND (checkpoint_at IS NULL OR ? > checkpoint_at)
+                        THEN ? ELSE checkpoint_at END,
+                    updated_at=?
+                WHERE project_id=? AND schedule_id=? AND last_run_id=?
+                """,
+                (
+                    durable_status, error or None, checkpoint_value, checkpoint_value,
+                    checkpoint_value, _utc_now(), project_id, schedule_id, run_id,
+                ),
+            )
+
+    def disable_schedule(self, *, project_id: str, schedule_id: str) -> bool:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE schedules SET enabled=0, updated_at=?
+                WHERE project_id=? AND schedule_id=? AND enabled=1
+                """,
+                (_utc_now(), project_id, schedule_id),
+            )
+        return cursor.rowcount == 1
+
+    @staticmethod
+    def _schedule_payload(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "schedule_id": str(row["schedule_id"]),
+            "project_id": str(row["project_id"]),
+            "cadence": str(row["cadence"]),
+            "interval_minutes": (
+                int(row["interval_minutes"]) if row["interval_minutes"] is not None else None
+            ),
+            "local_time": str(row["local_time"]) if row["local_time"] is not None else None,
+            "timezone": str(row["timezone"]),
+            "mode": str(row["mode"]),
+            "provider_id": (str(row["provider_id"]) if row["provider_id"] is not None else None),
+            "max_events": int(row["max_events"]) if row["max_events"] is not None else None,
+            "max_events_per_source": (
+                int(row["max_events_per_source"])
+                if row["max_events_per_source"] is not None
+                else None
+            ),
+            "enabled": bool(row["enabled"]),
+            "checkpoint_at": (
+                str(row["checkpoint_at"]) if row["checkpoint_at"] is not None else None
+            ),
+            "next_run_at": str(row["next_run_at"]),
+            "last_run_id": str(row["last_run_id"]) if row["last_run_id"] is not None else None,
+            "last_status": str(row["last_status"]),
+            "last_error": str(row["last_error"]) if row["last_error"] is not None else None,
+            "created_at": str(row["created_at"]),
+            "updated_at": str(row["updated_at"]),
+        }
+
+    def create_inbox_item(
+        self,
+        *,
+        project_id: str,
+        scan_id: str,
+        change_id: str,
+        event_revision_id: int,
+        notification_key: str,
+        title: str,
+        decision: str,
+        category: str,
+        impact_score: float,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        inbox_id = f"inbox-{uuid4().hex[:12]}"
+        created_at = _utc_now()
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT OR IGNORE INTO inbox_items(
+                    inbox_id, project_id, scan_id, change_id, event_revision_id,
+                    notification_key, title, decision, category, impact_score,
+                    payload_json, created_at, read_at
+                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                """,
+                (
+                    inbox_id, project_id, scan_id, change_id, event_revision_id,
+                    notification_key, title, decision, category, impact_score,
+                    json.dumps(payload, ensure_ascii=False), created_at,
+                ),
+            )
+            created = cursor.rowcount == 1
+            row = connection.execute(
+                "SELECT * FROM inbox_items WHERE project_id=? AND notification_key=?",
+                (project_id, notification_key),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("inbox item could not be resolved")
+        item = self._inbox_payload(row)
+        item["created"] = created
+        return item
+
+    def inbox_item(self, *, project_id: str, inbox_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM inbox_items WHERE project_id=? AND inbox_id=?",
+                (project_id, inbox_id),
+            ).fetchone()
+        return self._inbox_payload(row) if row is not None else None
+
+    def list_inbox(
+        self,
+        *,
+        project_id: str,
+        unread_only: bool = False,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        clause = " AND read_at IS NULL" if unread_only else ""
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT * FROM inbox_items
+                WHERE project_id=?{clause}
+                ORDER BY created_at DESC, inbox_id DESC
+                LIMIT ?
+                """,
+                (project_id, limit),
+            ).fetchall()
+        return [self._inbox_payload(row) for row in rows]
+
+    def mark_inbox_read(self, *, project_id: str, inbox_id: str) -> bool:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE inbox_items SET read_at=COALESCE(read_at, ?)
+                WHERE project_id=? AND inbox_id=?
+                """,
+                (_utc_now(), project_id, inbox_id),
+            )
+        return cursor.rowcount == 1
+
+    @staticmethod
+    def _inbox_payload(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "inbox_id": str(row["inbox_id"]),
+            "project_id": str(row["project_id"]),
+            "scan_id": str(row["scan_id"]),
+            "change_id": str(row["change_id"]),
+            "event_revision_id": int(row["event_revision_id"]),
+            "notification_key": str(row["notification_key"]),
+            "title": str(row["title"]),
+            "decision": str(row["decision"]),
+            "category": str(row["category"]),
+            "impact_score": float(row["impact_score"]),
+            "payload": json.loads(str(row["payload_json"])),
+            "created_at": str(row["created_at"]),
+            "read_at": str(row["read_at"]) if row["read_at"] is not None else None,
+        }
+
+    def enqueue_outbox(
+        self,
+        *,
+        project_id: str,
+        inbox_id: str,
+        channel: str,
+        destination_key: str,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        outbox_id = f"outbox-{uuid4().hex[:12]}"
+        now = _utc_now()
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT OR IGNORE INTO notification_outbox(
+                    outbox_id, project_id, inbox_id, channel, destination_key,
+                    idempotency_key, status, attempt_count, next_attempt_at,
+                    last_error, created_at, sent_at
+                ) VALUES(?, ?, ?, ?, ?, ?, 'pending', 0, ?, NULL, ?, NULL)
+                """,
+                (
+                    outbox_id, project_id, inbox_id, channel, destination_key,
+                    idempotency_key, now, now,
+                ),
+            )
+            created = cursor.rowcount == 1
+            row = connection.execute(
+                "SELECT * FROM notification_outbox WHERE idempotency_key=?",
+                (idempotency_key,),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("outbox item could not be resolved")
+        item = self._outbox_payload(row)
+        item["created"] = created
+        return item
+
+    def due_outbox(
+        self, *, project_id: str, now: datetime, limit: int = 20
+    ) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM notification_outbox
+                WHERE project_id=? AND status IN ('pending', 'retry') AND next_attempt_at<=?
+                ORDER BY next_attempt_at, created_at, outbox_id
+                LIMIT ?
+                """,
+                (project_id, now.astimezone(timezone.utc).isoformat(), limit),
+            ).fetchall()
+        return [self._outbox_payload(row) for row in rows]
+
+    def finish_delivery_attempt(
+        self,
+        *,
+        project_id: str,
+        outbox_id: str,
+        status: str,
+        http_status: int | None,
+        error: str,
+        next_attempt_at: datetime | None,
+    ) -> dict[str, Any]:
+        if status not in {"sent", "retry", "failed"}:
+            raise ValueError("invalid delivery status")
+        finished_at = _utc_now()
+        next_value = (
+            next_attempt_at.astimezone(timezone.utc).isoformat()
+            if next_attempt_at is not None
+            else finished_at
+        )
+        with self._connect() as connection:
+            current = connection.execute(
+                """
+                SELECT * FROM notification_outbox
+                WHERE project_id=? AND outbox_id=?
+                """,
+                (project_id, outbox_id),
+            ).fetchone()
+            if current is None:
+                raise ValueError("outbox item not found")
+            attempt_number = int(current["attempt_count"]) + 1
+            connection.execute(
+                """
+                INSERT INTO delivery_attempts(
+                    attempt_id, outbox_id, attempt_number, status, http_status,
+                    error, attempted_at
+                ) VALUES(?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    f"attempt-{uuid4().hex[:12]}", outbox_id, attempt_number,
+                    status, http_status, error[:1000] or None, finished_at,
+                ),
+            )
+            connection.execute(
+                """
+                UPDATE notification_outbox
+                SET status=?, attempt_count=?, next_attempt_at=?, last_error=?,
+                    sent_at=CASE WHEN ?='sent' THEN ? ELSE sent_at END
+                WHERE project_id=? AND outbox_id=?
+                """,
+                (
+                    status, attempt_number, next_value, error[:1000] or None,
+                    status, finished_at, project_id, outbox_id,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM notification_outbox WHERE outbox_id=?",
+                (outbox_id,),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("updated outbox item could not be resolved")
+        return self._outbox_payload(row)
+
+    def delivery_attempts(self, *, outbox_id: str) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM delivery_attempts
+                WHERE outbox_id=? ORDER BY attempt_number, attempted_at
+                """,
+                (outbox_id,),
+            ).fetchall()
+        return [
+            {
+                "attempt_id": str(row["attempt_id"]),
+                "outbox_id": str(row["outbox_id"]),
+                "attempt_number": int(row["attempt_number"]),
+                "status": str(row["status"]),
+                "http_status": (
+                    int(row["http_status"]) if row["http_status"] is not None else None
+                ),
+                "error": str(row["error"]) if row["error"] is not None else None,
+                "attempted_at": str(row["attempted_at"]),
+            }
+            for row in rows
+        ]
+
+    @staticmethod
+    def _outbox_payload(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "outbox_id": str(row["outbox_id"]),
+            "project_id": str(row["project_id"]),
+            "inbox_id": str(row["inbox_id"]),
+            "channel": str(row["channel"]),
+            "destination_key": str(row["destination_key"]),
+            "idempotency_key": str(row["idempotency_key"]),
+            "status": str(row["status"]),
+            "attempt_count": int(row["attempt_count"]),
+            "next_attempt_at": str(row["next_attempt_at"]),
+            "last_error": str(row["last_error"]) if row["last_error"] is not None else None,
+            "created_at": str(row["created_at"]),
+            "sent_at": str(row["sent_at"]) if row["sent_at"] is not None else None,
+        }
+
+    def scan_change_for_event(
+        self, *, scan_id: str, event_id: str
+    ) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT sc.change_id, sc.event_revision_id, er.source_event_id, er.payload_json
+                FROM scan_changes sc
+                JOIN event_revisions er ON er.id=sc.event_revision_id
+                WHERE sc.scan_id=? AND er.source_event_id=?
+                LIMIT 1
+                """,
+                (scan_id, event_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "change_id": str(row["change_id"]),
+            "event_revision_id": int(row["event_revision_id"]),
+            "event_id": str(row["source_event_id"]),
+            "event": json.loads(str(row["payload_json"])),
+        }
+
+    def scan_change(
+        self, *, scan_id: str, change_id: str
+    ) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT sc.change_id, sc.event_revision_id, sc.assessment_json,
+                       er.source_event_id, er.payload_json
+                FROM scan_changes sc
+                JOIN event_revisions er ON er.id=sc.event_revision_id
+                WHERE sc.scan_id=? AND sc.change_id=?
+                LIMIT 1
+                """,
+                (scan_id, change_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "change_id": str(row["change_id"]),
+            "event_revision_id": int(row["event_revision_id"]),
+            "event_id": str(row["source_event_id"]),
+            "event": json.loads(str(row["payload_json"])),
+            "assessment": (
+                json.loads(str(row["assessment_json"]))
+                if row["assessment_json"] is not None
+                else None
+            ),
+        }
+
+    def record_calibration_feedback(
+        self,
+        *,
+        project_id: str,
+        event_id: str,
+        label: str,
+        note: str,
+        source: str,
+        scan_id: str | None = None,
+        change_id: str | None = None,
+        event_revision_id: int | None = None,
+        created_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        feedback_id = f"feedback-{uuid4().hex[:12]}"
+        timestamp = (created_at or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO calibration_feedback(
+                    feedback_id, project_id, scan_id, change_id, event_revision_id,
+                    event_id, label, note, source, created_at
+                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    feedback_id, project_id, scan_id, change_id, event_revision_id,
+                    event_id, label, note, source, timestamp,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM calibration_feedback WHERE feedback_id=?",
+                (feedback_id,),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("calibration feedback could not be resolved")
+        return self._calibration_feedback_payload(row)
+
+    def list_calibration_feedback(
+        self, *, project_id: str
+    ) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM calibration_feedback
+                WHERE project_id=? ORDER BY created_at, feedback_id
+                """,
+                (project_id,),
+            ).fetchall()
+        return [self._calibration_feedback_payload(row) for row in rows]
+
+    @staticmethod
+    def _calibration_feedback_payload(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "feedback_id": str(row["feedback_id"]),
+            "project_id": str(row["project_id"]),
+            "scan_id": str(row["scan_id"]) if row["scan_id"] is not None else None,
+            "change_id": str(row["change_id"]) if row["change_id"] is not None else None,
+            "event_revision_id": (
+                int(row["event_revision_id"])
+                if row["event_revision_id"] is not None
+                else None
+            ),
+            "event_id": str(row["event_id"]),
+            "label": str(row["label"]),
+            "note": str(row["note"] or ""),
+            "source": str(row["source"]),
+            "created_at": str(row["created_at"]),
+        }
+
+    def record_outcome(
+        self,
+        *,
+        project_id: str,
+        scan_id: str,
+        change_id: str,
+        event_revision_id: int,
+        impact_observed: bool | None,
+        action_taken: bool | None,
+        action_helpful: bool | None,
+        resolved: bool | None,
+        note: str,
+        source: str = "user",
+        created_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        outcome_id = f"outcome-{uuid4().hex[:12]}"
+        timestamp = (created_at or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO change_outcomes(
+                    outcome_id, project_id, scan_id, change_id, event_revision_id,
+                    impact_observed, action_taken, action_helpful, resolved,
+                    note, source, created_at
+                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    outcome_id, project_id, scan_id, change_id, event_revision_id,
+                    self._optional_bool_int(impact_observed),
+                    self._optional_bool_int(action_taken),
+                    self._optional_bool_int(action_helpful),
+                    self._optional_bool_int(resolved),
+                    note, source, timestamp,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM change_outcomes WHERE outcome_id=?", (outcome_id,)
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("change outcome could not be resolved")
+        return self._outcome_payload(row)
+
+    def list_outcomes(self, *, project_id: str) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM change_outcomes
+                WHERE project_id=? ORDER BY created_at, outcome_id
+                """,
+                (project_id,),
+            ).fetchall()
+        return [self._outcome_payload(row) for row in rows]
+
+    @staticmethod
+    def _optional_bool_int(value: bool | None) -> int | None:
+        return int(value) if value is not None else None
+
+    @staticmethod
+    def _optional_row_bool(value: object) -> bool | None:
+        return bool(value) if value is not None else None
+
+    @classmethod
+    def _outcome_payload(cls, row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "outcome_id": str(row["outcome_id"]),
+            "project_id": str(row["project_id"]),
+            "scan_id": str(row["scan_id"]),
+            "change_id": str(row["change_id"]),
+            "event_revision_id": int(row["event_revision_id"]),
+            "impact_observed": cls._optional_row_bool(row["impact_observed"]),
+            "action_taken": cls._optional_row_bool(row["action_taken"]),
+            "action_helpful": cls._optional_row_bool(row["action_helpful"]),
+            "resolved": cls._optional_row_bool(row["resolved"]),
+            "note": str(row["note"] or ""),
+            "source": str(row["source"]),
+            "created_at": str(row["created_at"]),
+        }
+
     def record_source_tasks(self, *, scan_id: str, source_tasks: Iterable[SourceTask]) -> None:
         with self._connect() as connection:
             for task in source_tasks:
@@ -619,6 +1261,7 @@ class ChangeLedger:
                 """
                 SELECT
                     sc.change_id,
+                    sc.event_revision_id,
                     sc.rank,
                     sc.basic_relevance_score,
                     sc.selected_for_analysis,
@@ -649,6 +1292,7 @@ class ChangeLedger:
                 items.append(
                     {
                         "change_id": str(row["change_id"]),
+                        "event_revision_id": int(row["event_revision_id"]),
                         "rank": int(row["rank"]),
                         "basic_relevance_score": float(row["basic_relevance_score"]),
                         "selected_for_analysis": bool(row["selected_for_analysis"]),
@@ -790,6 +1434,43 @@ CREATE TABLE IF NOT EXISTS scans(
     error TEXT
 );
 
+CREATE TABLE IF NOT EXISTS calibration_feedback(
+    feedback_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    scan_id TEXT,
+    change_id TEXT,
+    event_revision_id INTEGER,
+    event_id TEXT NOT NULL,
+    label TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(scan_id) REFERENCES scans(scan_id) ON DELETE SET NULL,
+    FOREIGN KEY(change_id) REFERENCES changes(change_id) ON DELETE SET NULL,
+    FOREIGN KEY(event_revision_id) REFERENCES event_revisions(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_calibration_feedback_project
+ON calibration_feedback(project_id, created_at);
+
+CREATE TABLE IF NOT EXISTS change_outcomes(
+    outcome_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    scan_id TEXT NOT NULL REFERENCES scans(scan_id) ON DELETE CASCADE,
+    change_id TEXT NOT NULL REFERENCES changes(change_id) ON DELETE CASCADE,
+    event_revision_id INTEGER NOT NULL REFERENCES event_revisions(id) ON DELETE RESTRICT,
+    impact_observed INTEGER,
+    action_taken INTEGER,
+    action_helpful INTEGER,
+    resolved INTEGER,
+    note TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_change_outcomes_project
+ON change_outcomes(project_id, created_at);
+
 CREATE TABLE IF NOT EXISTS scan_sources(
     scan_id TEXT NOT NULL REFERENCES scans(scan_id) ON DELETE CASCADE,
     source_type TEXT NOT NULL,
@@ -811,6 +1492,79 @@ CREATE TABLE IF NOT EXISTS query_checkpoints(
     scan_id TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     PRIMARY KEY(project_id, consumer_id)
+);
+
+CREATE TABLE IF NOT EXISTS schedules(
+    schedule_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    cadence TEXT NOT NULL,
+    interval_minutes INTEGER,
+    local_time TEXT,
+    timezone TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    provider_id TEXT,
+    max_events INTEGER,
+    max_events_per_source INTEGER,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    checkpoint_at TEXT,
+    next_run_at TEXT NOT NULL,
+    last_run_id TEXT,
+    last_status TEXT NOT NULL DEFAULT 'idle',
+    last_error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_schedules_project_due
+ON schedules(project_id, enabled, next_run_at);
+
+CREATE TABLE IF NOT EXISTS inbox_items(
+    inbox_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    scan_id TEXT NOT NULL REFERENCES scans(scan_id) ON DELETE CASCADE,
+    change_id TEXT NOT NULL REFERENCES changes(change_id) ON DELETE CASCADE,
+    event_revision_id INTEGER NOT NULL REFERENCES event_revisions(id) ON DELETE RESTRICT,
+    notification_key TEXT NOT NULL,
+    title TEXT NOT NULL,
+    decision TEXT NOT NULL,
+    category TEXT NOT NULL,
+    impact_score REAL NOT NULL,
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    read_at TEXT,
+    UNIQUE(project_id, notification_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_inbox_project_created
+ON inbox_items(project_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS notification_outbox(
+    outbox_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    inbox_id TEXT NOT NULL REFERENCES inbox_items(inbox_id) ON DELETE CASCADE,
+    channel TEXT NOT NULL,
+    destination_key TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TEXT NOT NULL,
+    last_error TEXT,
+    created_at TEXT NOT NULL,
+    sent_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_outbox_project_due
+ON notification_outbox(project_id, status, next_attempt_at);
+
+CREATE TABLE IF NOT EXISTS delivery_attempts(
+    attempt_id TEXT PRIMARY KEY,
+    outbox_id TEXT NOT NULL REFERENCES notification_outbox(outbox_id) ON DELETE CASCADE,
+    attempt_number INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    http_status INTEGER,
+    error TEXT,
+    attempted_at TEXT NOT NULL,
+    UNIQUE(outbox_id, attempt_number)
 );
 
 CREATE TABLE IF NOT EXISTS scan_changes(

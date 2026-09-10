@@ -49,6 +49,9 @@ class StreamRunSession:
     project: ProjectOption
     max_events: int | None
     max_events_per_source: int | None
+    interactive: bool = True
+    consumer_id: str = "local-owner"
+    schedule_id: str | None = None
     attempt: int = 0
     status: StreamRunStatus = "queued"
     completed_at: str | None = None
@@ -126,6 +129,8 @@ class StreamRunSession:
             "created_at": self.created_at,
             "completed_at": self.completed_at,
             "attempt": self.attempt,
+            "interactive": self.interactive,
+            "schedule_id": self.schedule_id,
             "event_count": len(self.events),
             "events_url": f"/stream-runs/{self.run_id}/events",
             "result_url": f"/runs/{self.run_id}",
@@ -170,18 +175,24 @@ class StreamRunManager:
         project: ProjectOption | None = None,
         max_events: int | None = None,
         max_events_per_source: int | None = None,
+        interactive: bool = True,
+        consumer_id: str = "local-owner",
+        schedule_id: str | None = None,
+        run_id: str | None = None,
     ) -> StreamRunSession:
         self._trim_completed()
         selected_project = project or project_option(
             default_project_id(self.config_dir),
             self.config_dir,
         )
-        run_id = f"run-{uuid4().hex[:12]}"
+        assigned_run_id = run_id or f"run-{uuid4().hex[:12]}"
+        if assigned_run_id in self.sessions:
+            raise ValueError(f"stream run already exists: {assigned_run_id}")
         session = StreamRunSession(
-            run_id=run_id,
+            run_id=assigned_run_id,
             mode=mode,
             source_mode=source_mode,
-            output_dir=self.output_dir / "service-runs" / run_id,
+            output_dir=self.output_dir / "service-runs" / assigned_run_id,
             state_dir=prepare_project_state(
                 self.state_dir,
                 selected_project.id,
@@ -196,8 +207,11 @@ class StreamRunManager:
             project=selected_project,
             max_events=max_events,
             max_events_per_source=max_events_per_source,
+            interactive=interactive,
+            consumer_id=consumer_id,
+            schedule_id=schedule_id,
         )
-        self.sessions[run_id] = session
+        self.sessions[assigned_run_id] = session
         session.publish("run.created", session.public_payload())
         self._persist_session(session)
         return session
@@ -219,6 +233,9 @@ class StreamRunManager:
             "window_mode": session.window_mode,
             "max_events": session.max_events,
             "max_events_per_source": session.max_events_per_source,
+            "interactive": session.interactive,
+            "consumer_id": session.consumer_id,
+            "schedule_id": session.schedule_id,
             "attempt": session.attempt,
             "streaming": True,
             "events_url": f"/stream-runs/{session.run_id}/events",
@@ -260,6 +277,11 @@ class StreamRunManager:
                     max_events_per_source=(
                         int(payload["max_events_per_source"])
                         if payload.get("max_events_per_source") is not None else None
+                    ),
+                    interactive=bool(payload.get("interactive", True)),
+                    consumer_id=str(payload.get("consumer_id") or "local-owner"),
+                    schedule_id=(
+                        str(payload["schedule_id"]) if payload.get("schedule_id") else None
                     ),
                     attempt=int(payload.get("attempt") or 0),
                     status="queued",
@@ -344,6 +366,8 @@ class StreamRunManager:
                     scan_id=session.run_id,
                     window_mode=session.window_mode,
                     until=session.until,
+                    consumer_id=session.consumer_id,
+                    interactive=session.interactive,
                 )
             session.completed_at = datetime.now(timezone.utc).isoformat()
             source_summary = _source_summary(result.source_tasks, result.failed_sources)
@@ -355,6 +379,8 @@ class StreamRunManager:
                 "provider_id": session.provider_id,
                 "project_id": session.project.id,
                 "project_name": session.project.name,
+                "schedule_id": session.schedule_id,
+                "interactive": session.interactive,
                 "model": getattr(provider, "model", None),
                 "created_at": session.created_at,
                 "completed_at": session.completed_at,
@@ -400,6 +426,8 @@ class StreamRunManager:
                 "provider_id": session.provider_id,
                 "project_id": session.project.id,
                 "project_name": session.project.name,
+                "schedule_id": session.schedule_id,
+                "interactive": session.interactive,
                 "created_at": session.created_at,
                 "completed_at": session.completed_at,
                 "error_class": exc.__class__.__name__,

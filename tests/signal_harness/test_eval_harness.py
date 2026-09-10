@@ -653,8 +653,11 @@ def test_real_provider_scan_defers_learning_from_interactive_critical_path(
     )
 
     called_agents = [call.agent_name for call in provider.calls]
-    assert "SignalSupervisorAgent" in called_agents
-    assert "ImpactAnalystAgent" in called_agents
+    assert "ImpactActionAnalyzerAgent" in called_agents
+    assert "ProjectNarrativeAgent" in called_agents
+    assert "SignalSupervisorAgent" not in called_agents
+    assert "ImpactAnalystAgent" not in called_agents
+    assert "ActionPlannerAgent" not in called_agents
     assert "LearningPolicyAgent" not in called_agents
     deferred = [step for step in result.trace.steps if step.step == "learning_deferred"]
     assert len(deferred) == 1

@@ -6,7 +6,11 @@ from pathlib import Path
 import pytest
 
 from signal_harness.runtime.tools_base import ToolExecutionContext
-from signal_harness.tools.github_signal import GitHubSignalTool, _github_authorization_header
+from signal_harness.tools.github_signal import (
+    GitHubSignalTool,
+    _github_authorization_header,
+    _github_cli_authorization_header,
+)
 from signal_harness.tools.rss_signal import RssSignalTool, parse_feed
 from signal_harness.tools.signal_memory import SignalMemoryTool
 from signal_harness.tools.web_change import WebChangeTool
@@ -75,9 +79,35 @@ async def test_github_tool_normalizes_without_network(tmp_path: Path) -> None:
 
 
 def test_github_authorization_header_skips_non_ascii_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    _github_cli_authorization_header.cache_clear()
     monkeypatch.setenv("GITHUB_TOKEN", "本地占位符")
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.setattr(
+        "signal_harness.tools.github_signal.subprocess.run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=1, stdout="", stderr=""),
+    )
 
     assert _github_authorization_header() == ""
+
+
+def test_github_authorization_header_falls_back_from_placeholder_to_gh_cli(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    _github_cli_authorization_header.cache_clear()
+    monkeypatch.setenv("GITHUB_TOKEN", "本地占位符")
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.setattr(
+        "signal_harness.tools.github_signal.subprocess.run",
+        lambda *args, **kwargs: SimpleNamespace(
+            returncode=0, stdout="test-keyring-token\n", stderr=""
+        ),
+    )
+
+    assert _github_authorization_header() == "Bearer test-keyring-token"
 
 
 @pytest.mark.asyncio
@@ -265,3 +295,23 @@ async def test_github_pagination_cap_reports_partial(
     assert metadata["coverage_status"] == "partial"
     assert metadata["history_limited"] is True
     assert metadata["diagnostics"]
+
+
+def test_github_authorization_header_reuses_gh_cli_when_env_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    _github_cli_authorization_header.cache_clear()
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.setattr(
+        "signal_harness.tools.github_signal.subprocess.run",
+        lambda *args, **kwargs: SimpleNamespace(
+            returncode=0,
+            stdout="test-gh-cli-token\n",
+            stderr="",
+        ),
+    )
+
+    assert _github_authorization_header() == "Bearer test-gh-cli-token"

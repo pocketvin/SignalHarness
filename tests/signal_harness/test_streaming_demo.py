@@ -76,42 +76,32 @@ def test_demo_page_and_metadata(
     with TestClient(app) as client:
         page = client.get("/demo")
         assert page.status_code == 200
-        assert "SignalHarness Change Radar" in page.text
-        assert "最近外部技术环境，哪些变化真的影响当前项目" in page.text
-        assert "实时 Watchlist" in page.text
-        assert "真实模型" in page.text
-        assert "项目环境报告" in page.text
-        assert "重点变化" in page.text
-        assert "全部相关变化" in page.text
-        assert "Agent 审计过程" in page.text
-        assert "面试演示建议" not in page.text
-        assert "interview demos" not in page.text
-        assert "中文" in page.text
+        assert "SignalHarness · Project Environment Intelligence" in page.text
+        assert '<div id="root"></div>' in page.text
         assert 'href="/demo-assets/demo.css"' in page.text
         assert 'src="/demo-assets/demo.js"' in page.text
         assert "<style>" not in page.text
-        assert "<script>" not in page.text
+        assert "面试演示建议" not in page.text
+        assert "interview demos" not in page.text
+
         javascript = client.get("/demo-assets/demo.js")
         stylesheet = client.get("/demo-assets/demo.css")
         assert javascript.status_code == 200
         assert stylesheet.status_code == 200
-        assert "new EventSource" in javascript.text
-        assert 'onclick="' not in page.text
-        assert "safeExternalUrl" in javascript.text
-        assert "['http:','https:']" in javascript.text
-        assert 'data-action="audit"' in javascript.text
-        assert "data-stage=" in javascript.text
-        assert "projects/connect" in javascript.text
-        assert "SAFE_PROJECT_MANIFESTS" in javascript.text
-        assert 'id="draftInput"' in page.text
-        assert 'id="profilePanel"' in page.text
-        assert 'id="preferenceInput"' in page.text
-        assert "preferences/natural-language" in javascript.text
-        assert "data-pref-scope" in javascript.text
-        assert "loadProduct" in javascript.text
+        assert "EventSource" in javascript.text
+        assert "/stream-runs" in javascript.text
+        assert "/projects/connect/github" in javascript.text
+        assert "/preferences/natural-language" in javascript.text
         assert "/product?top=12&all_limit=20" in javascript.text
-        assert 'id="allChanges"' in page.text
-        assert 'id="changeDetail"' in page.text
+        assert "/schedules" in javascript.text
+        assert "/inbox" in javascript.text
+        assert "/outcomes" in javascript.text
+        assert "reasoning_summary" in javascript.text
+        assert "reasoning_items" in javascript.text
+        assert "Approval required before" not in javascript.text
+        assert "--color-canvas" in stylesheet.text
+        assert "prefers-reduced-motion" in stylesheet.text
+        assert "user-scalable=no" not in page.text
 
         meta = client.get("/demo/meta")
         assert meta.status_code == 200
@@ -132,7 +122,7 @@ def test_demo_page_and_metadata(
         assert payload["default_project_id"] == "signalharness"
         projects = {item["id"]: item for item in payload["projects"]}
         assert projects["signalharness"]["name"] == "SignalHarness"
-        assert projects["signalharness"]["watchlist"]["source_count"] == 12
+        assert projects["signalharness"]["watchlist"]["source_count"] == 15
         assert projects["example-agent-service"]["watchlist"]["source_count"] == 7
         assert payload["default_provider_id"] is None
         assert all(option["ready"] is False for option in payload["providers"])
@@ -216,6 +206,37 @@ def test_stream_run_replays_trace_and_final_result(
         assert "run.started" in names
         assert "trace.step" in names
         assert "trace.step.updated" in names
+        running_llm = [
+            event
+            for event in events
+            if event["event"] == "trace.step"
+            and isinstance(event.get("data"), dict)
+            and isinstance(event["data"].get("trace"), dict)
+            and event["data"]["trace"].get("step") == "llm_agent_call"
+            and event["data"]["trace"].get("status") == "running"
+        ]
+        assert running_llm
+        running_trace = running_llm[0]["data"]["trace"]
+        assert running_trace["metadata"]["reasoning_state"] == "waiting_for_model"
+        assert running_trace["metadata"]["reasoning_disclosure"] == (
+            "structured_model_output_summary_not_hidden_chain_of_thought"
+        )
+        completed_llm = [
+            event
+            for event in events
+            if event["event"] == "trace.step.updated"
+            and isinstance(event.get("data"), dict)
+            and isinstance(event["data"].get("trace"), dict)
+            and event["data"]["trace"].get("step") == "llm_agent_call"
+            and event["data"]["trace"].get("status") == "success"
+            and event["data"]["trace"].get("metadata", {}).get("reasoning_state")
+            in {"available", "fallback_output"}
+        ]
+        assert completed_llm
+        assert all(
+            event["data"]["trace"]["metadata"].get("reasoning_summary")
+            for event in completed_llm
+        )
         assert names[-1] == "run.completed"
         ids = [_event_id(event) for event in events]
         assert ids == sorted(ids)
@@ -242,7 +263,9 @@ def test_stream_run_replays_trace_and_final_result(
         product_payload = product.json()
         assert product_payload["scan_id"] == run_id
         assert product_payload["report"]["stats"]["all_change_count"] == 4
+        assert sum(product_payload["report"]["stats"]["impact_group_counts"].values()) == 4
         assert product_payload["top_changes"]
+        assert product_payload["top_changes"][0]["impact_group"]
 
 
 def test_sse_last_event_id_replays_only_newer_events(
@@ -506,3 +529,21 @@ async def test_sse_waits_for_terminal_event_even_if_status_flips_first(
     await producer
     assert terminal.event == "run.completed"
     await stream.aclose()
+
+
+def test_stream_run_accepts_custom_recent_day_window(
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    app = create_app(
+        cwd=project_root,
+        output_dir=tmp_path / "outputs",
+        state_dir=tmp_path / "state",
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            "/stream-runs",
+            json={"mode": "demo", "data_source": "fixture", "since_days": 90},
+        )
+        assert response.status_code == 202, response.text
+        assert response.json()["project_id"] == "signalharness"

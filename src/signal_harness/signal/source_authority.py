@@ -35,9 +35,14 @@ def github_issue_authority(raw: dict[str, object]) -> str:
 
 def event_source_quality(event: SignalEvent) -> SourceQuality:
     raw = event.raw_payload
-    if event.source_type == "github_release":
+    if event.source_type in {
+        "github_release",
+        "github_commit",
+        "github_pull_request",
+        "local_git_commit",
+    }:
         return SourceQuality.OFFICIAL if raw.get("official", True) else SourceQuality.COMMUNITY
-    if event.source_type == "package_registry":
+    if event.source_type in {"package_registry", "security_advisory"}:
         return SourceQuality.OFFICIAL
     if event.source_type == "github_issue":
         authority = github_issue_authority(raw)

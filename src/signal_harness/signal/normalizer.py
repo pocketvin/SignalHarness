@@ -103,7 +103,7 @@ def normalize_github_event(
     event_kind: str | None = None,
     collected_at: datetime | None = None,
 ) -> SignalEvent:
-    """Normalize GitHub release or issue payloads."""
+    """Normalize GitHub release, issue, commit, or merged-PR payloads."""
 
     kind = event_kind or ("github_release" if "tag_name" in raw else "github_issue")
     source_name = repo or _text(raw.get("repository") or raw.get("repo"), "unknown-repo")
@@ -111,7 +111,7 @@ def normalize_github_event(
     if kind == "github_release":
         authority = "official" if raw.get("official", True) else "community"
         official = authority == "official"
-    elif raw.get("official") is True:
+    elif kind in {"github_commit", "github_pull_request"} or raw.get("official") is True:
         authority = "official"
         official = True
     elif association in {"OWNER", "MEMBER", "COLLABORATOR"}:
@@ -122,10 +122,32 @@ def normalize_github_event(
         official = False
     created_at = _datetime_value(raw.get("created_at"))
     updated_at = _datetime_value(raw.get("updated_at"))
-    if kind == "github_release":
+    if kind == "github_commit":
+        commit_value = raw.get("commit")
+        commit: dict[str, Any] = commit_value if isinstance(commit_value, dict) else {}
+        author_value = commit.get("author")
+        author: dict[str, Any] = author_value if isinstance(author_value, dict) else {}
+        committer_value = commit.get("committer")
+        committer: dict[str, Any] = committer_value if isinstance(committer_value, dict) else {}
+        message = _text(commit.get("message") or raw.get("message"))
+        observed_at = committer.get("date") or author.get("date") or raw.get("updated_at")
+        created_at = _datetime_value(author.get("date") or observed_at)
+        updated_at = _datetime_value(committer.get("date") or observed_at)
+        title = message.splitlines()[0] if message else f"Commit {_text(raw.get('sha'))[:12]}"
+        change_kind = "new"
+        current_version = None
+    elif kind == "github_pull_request":
+        observed_at = raw.get("merged_at") or raw.get("updated_at") or raw.get("created_at")
+        title = _text(raw.get("title"), f"Pull request #{raw.get('number', '')}".strip())
+        message = _text(raw.get("body"))
+        change_kind = "new"
+        current_version = None
+    elif kind == "github_release":
         change_kind = "released"
         current_version = _text(raw.get("tag_name") or raw.get("name") or raw.get("title")) or None
         observed_at = raw.get("published_at") or raw.get("created_at")
+        title = _text(raw.get("name") or raw.get("title") or raw.get("tag_name"))
+        message = _text(raw.get("body") or raw.get("content"))
     else:
         change_kind = (
             "updated"
@@ -136,22 +158,94 @@ def normalize_github_event(
         )
         current_version = None
         observed_at = raw.get("updated_at") or raw.get("created_at")
+        title = _text(raw.get("name") or raw.get("title") or raw.get("tag_name"))
+        message = _text(raw.get("body") or raw.get("content"))
     mapped = {
         **raw,
         "source_type": kind,
         "source_name": source_name,
-        "title": raw.get("name") or raw.get("title") or raw.get("tag_name"),
-        "content": raw.get("body") or raw.get("content") or "",
+        "title": title,
+        "content": message,
         "url": raw.get("html_url") or raw.get("url") or "",
         "published_at": observed_at,
-        "source_created_at": raw.get("created_at"),
-        "source_updated_at": raw.get("updated_at"),
+        "source_created_at": created_at or raw.get("created_at"),
+        "source_updated_at": updated_at or raw.get("updated_at") or observed_at,
         "change_kind": change_kind,
         "current_version": current_version,
         "previous_version": raw.get("_previous_tag_name"),
         "repository_official": True,
         "source_authority": authority,
         "official": official,
+    }
+    return normalize_event(mapped, collected_at=collected_at)
+
+
+def normalize_local_git_event(
+    raw: dict[str, Any],
+    *,
+    repository: str | None = None,
+    collected_at: datetime | None = None,
+) -> SignalEvent:
+    """Normalize one read-only local Git commit observation."""
+
+    source_name = repository or _text(
+        raw.get("repository_identity") or raw.get("repository"), "local-repository"
+    )
+    message = _text(raw.get("message"))
+    sha = _text(raw.get("sha"))
+    mapped = {
+        **raw,
+        "id": sha,
+        "source_type": "local_git_commit",
+        "source_name": source_name,
+        "title": raw.get("title") or (message.splitlines()[0] if message else f"Commit {sha[:12]}"),
+        "content": message,
+        "url": raw.get("html_url") or "",
+        "published_at": raw.get("committed_at") or raw.get("authored_at"),
+        "source_created_at": raw.get("authored_at") or raw.get("committed_at"),
+        "source_updated_at": raw.get("committed_at") or raw.get("authored_at"),
+        "change_kind": "new",
+        "official": True,
+        "source_authority": "official",
+        "project_owned": bool(raw.get("project_owned", True)),
+    }
+    return normalize_event(mapped, collected_at=collected_at)
+
+
+def normalize_security_advisory_event(
+    raw: dict[str, Any],
+    *,
+    collected_at: datetime | None = None,
+) -> SignalEvent:
+    """Normalize one OSV advisory matched to a concrete project dependency version."""
+
+    advisory_id = _text(raw.get("id"), "unknown-advisory")
+    package_name = _text(raw.get("matched_package"), "unknown-package")
+    matched_version = _text(raw.get("matched_version")) or None
+    published = _datetime_value(raw.get("published"))
+    modified = _datetime_value(raw.get("modified"))
+    change_kind: ChangeKind = (
+        "updated"
+        if isinstance(published, datetime)
+        and isinstance(modified, datetime)
+        and modified > published
+        else "new"
+    )
+    mapped = {
+        **raw,
+        "source_type": "security_advisory",
+        "source_name": "OSV",
+        "title": raw.get("summary") or f"{advisory_id} affects {package_name}",
+        "content": raw.get("details") or raw.get("summary") or "",
+        "url": raw.get("osv_url") or f"https://osv.dev/vulnerability/{advisory_id}",
+        "published_at": raw.get("modified") or raw.get("published"),
+        "source_created_at": raw.get("published"),
+        "source_updated_at": raw.get("modified"),
+        "change_kind": change_kind,
+        "current_version": matched_version,
+        "official": True,
+        "source_authority": "official",
+        "package_name": package_name,
     }
     return normalize_event(mapped, collected_at=collected_at)
 

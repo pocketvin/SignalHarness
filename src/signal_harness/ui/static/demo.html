@@ -1,25 +1,15 @@
 <!doctype html>
 <html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" href="data:,">
-<title>SignalHarness Change Radar</title>
-<link rel="stylesheet" href="/demo-assets/demo.css">
-
-</head>
-<body><div class="shell">
-<header class="topbar"><div class="brand"><div class="mark">SH</div><div><h1>SignalHarness Change Radar</h1><p data-i18n="brandSub">项目相关技术变化雷达 · 可审计 Agent Harness</p></div></div><div class="top-actions"><div class="lang"><button id="zhBtn" class="active">中文</button><button id="enBtn">EN</button></div><div class="badges" id="badges"></div></div></header>
-<section class="hero"><div class="hero-copy"><div class="kicker" data-i18n="kicker">先看变化，再看 Agent 怎么判断</div><h2 id="heroTitle">最近外部技术环境，哪些变化真的影响当前项目？</h2><p data-i18n="heroBody">选择一个项目，实时扫描它的 Watchlist，再用可切换的模型或离线 Agent 判断相关性、影响模块和行动建议。每个结论都能下钻到真实 Trace、Tool Guard 与证据链。</p></div><div class="control"><h3 data-i18n="controlTitle">启动一次变化扫描</h3><div class="control-grid"><div class="field full"><label data-i18n="project">关联项目</label><select id="projectSelect"></select></div><div class="field full"><button class="draft-button" id="draftBtn" type="button" data-i18n="draftImport">导入本地项目草案</button><input id="draftInput" type="file" webkitdirectory directory multiple hidden></div><div class="field"><label data-i18n="dataSource">数据来源</label><select id="dataSource"><option value="live">实时 Watchlist</option><option value="fixture">示例数据</option></select></div><div class="field"><label data-i18n="analysis">分析方式</label><select id="analysisMode"><option value="mock-agent">离线五 Agent</option><option value="agent">真实模型</option><option value="demo">确定性基线</option></select></div><div class="field" id="providerField"><label data-i18n="model">模型</label><select id="providerSelect"></select></div><div class="field" id="windowField"><label data-i18n="window">时间窗口</label><select id="sinceDays"><option value="7">最近 7 天</option><option value="14" selected>最近 14 天</option><option value="30">最近 30 天</option></select></div><div class="field full"><button class="run" id="runBtn" data-i18n="run">扫描最新变化</button></div></div><div class="model-note" id="modelNote">正在读取本地模型配置…</div><div class="connection"><span class="dot" id="dot"></span><span id="connectionText">等待开始</span></div><div class="statusline" id="runId">暂无运行</div></div></section>
-<div class="watchlist"><strong data-i18n="monitoring">当前监控</strong><div class="chips" id="watchlistChips"></div></div>
-<section class="profile-card" id="profilePanel"><div class="profile-head"><div><h3 data-i18n="profileTitle">当前项目画像</h3><p id="profilePurpose">正在读取项目画像…</p></div><span class="mini" id="profileRevision">—</span></div><div class="profile-facts" id="profileFacts"></div><div class="profile-entities" id="profileEntities"></div><div class="preference-natural"><input id="preferenceInput" type="text" maxlength="1000" data-i18n-placeholder="preferencePlaceholder" placeholder="例如：MCP 很重要 / 不要关注 React"><button id="preferenceApply" type="button" data-i18n="preferenceApply">应用偏好</button></div><div class="mini" id="preferenceStatus"></div></section>
-<section class="draft-preview" id="draftPreview" hidden></section>
-<section class="environment-report" id="environmentReport"><div><div class="report-heading"><h3 data-i18n="reportTitle">项目环境报告</h3><span class="mini" id="reportScan">尚未运行</span></div><p id="reportSummary" data-i18n="reportEmpty">完成一次扫描后，这里会先总结完整变化集，再给出重点变化。</p><div class="report-themes" id="reportThemes"></div></div><div class="report-stats" id="reportStats"></div></section>
-<main class="radar-grid"><section class="panel"><div class="panel-head"><div><h3 data-i18n="topTitle">重点变化</h3><p data-i18n="topSub">Top 只决定阅读顺序，不会删掉完整变化集。</p></div><div class="mini" id="changeCount">0 条变化</div></div><div class="changes" id="changes"><div class="empty" data-i18n="changesEmpty">点击“扫描最新变化”。实时模式会读取当前 Watchlist；示例模式只用于演示和回归测试。</div></div></section><aside class="panel"><div class="panel-head"><div><h3 data-i18n="summaryTitle">本次扫描</h3><p id="scanContext">尚未运行</p></div></div><div class="summary"><div class="summary-grid" id="summaryGrid"></div><div class="source-health"><h4 data-i18n="sourceHealth">来源健康</h4><div id="sourceHealth"><div class="empty">—</div></div></div></div></aside></main>
-<section class="panel all-changes-panel"><div class="panel-head all-head"><div><h3 data-i18n="allTitle">全部相关变化</h3><p data-i18n="allSub">在冻结的 Scan 内搜索、筛选和排序；新扫描不会改变这一页的成员关系。</p></div><div class="mini" id="allCount">0 / 0</div></div><div class="all-toolbar"><input id="allQuery" type="search" maxlength="500" data-i18n-placeholder="allSearch" placeholder="搜索变化、来源、模块…"><select id="allAnalysis"><option value="all">全部</option><option value="analyzed">已深度分析</option><option value="unanalyzed">未深度分析</option></select><select id="allSort"><option value="rank">按优先级</option><option value="score">按影响分</option><option value="newest">按时间</option></select><button id="allApply" type="button" data-i18n="applyFilter">应用</button></div><div class="all-list" id="allChanges"><div class="empty">—</div></div><div class="pagination"><button id="allPrev" type="button" data-i18n="previous">上一页</button><span class="mini" id="allPage">—</span><button id="allNext" type="button" data-i18n="next">下一页</button></div></section>
-<section class="change-detail-panel" id="changeDetail" hidden><div class="detail-head"><div><h3 id="detailTitle">Change detail</h3><span class="mini" id="detailMeta"></span></div><button id="detailClose" type="button" aria-label="Close">×</button></div><div id="detailBody"></div></section>
-<div class="audit-wrap"><details class="audit" id="auditDetails"><summary><span data-i18n="auditTitle">Agent 审计过程</span><span class="mini" id="auditSummary">0 SSE · 0 Trace</span></summary><div class="audit-body"><div class="pipeline" id="pipeline"></div><div class="audit-grid"><div class="inspector" id="inspector"><div class="empty" data-i18n="auditEmpty">点击阶段查看 Schema、Tool、Permission、Fallback 与耗时。</div></div><div class="tracebox"><table class="trace-table"><thead><tr><th>#</th><th data-i18n="step">步骤 / Agent</th><th data-i18n="status">状态</th><th data-i18n="duration">耗时</th></tr></thead><tbody id="traceBody"><tr><td colspan="4">—</td></tr></tbody></table></div></div></div></details></div>
-<section class="evidence"><div><div class="panel-head" style="padding:0 0 10px;border:0"><div><h3 data-i18n="regression">回归评测</h3><p id="regressionLabel">—</p></div></div><div class="metrics" id="metrics"></div></div><div><div class="panel-head" style="padding:0 0 10px;border:0"><div><h3>MCP</h3><p id="mcpLabel">—</p></div></div><div class="chips" id="mcpTools"></div></div></section>
-<div class="footer"><span data-i18n="footerLeft">实时采集、分析与审计共用同一个 SignalHarness Workflow。</span><span data-i18n="footerRight">CLI · REST · SSE · MCP · Change Radar</span></div>
-</div>
-<script src="/demo-assets/demo.js" defer></script></body></html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f4f6fa" />
+    <link rel="icon" href="data:," />
+    <title>SignalHarness · Project Environment Intelligence</title>
+    <script type="module" crossorigin src="/demo-assets/demo.js"></script>
+    <link rel="stylesheet" crossorigin href="/demo-assets/demo.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

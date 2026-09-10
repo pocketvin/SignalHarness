@@ -12,6 +12,7 @@ import yaml
 SchemaStrategy = Literal["prompt_json_retry"]
 ToolStrategy = Literal["controlled_tool_request"]
 OutputTokenParameter = Literal["max_tokens", "max_completion_tokens"]
+ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,7 @@ class ModelProfile:
     max_input_tokens: int = 8192
     max_output_tokens: int = 4096
     recommended_temperature: float = 0.0
+    reasoning_effort: ReasoningEffort | None = None
     schema_strategy: SchemaStrategy = "prompt_json_retry"
     tool_strategy: ToolStrategy = "controlled_tool_request"
     output_token_parameter: OutputTokenParameter = "max_tokens"
@@ -54,6 +56,7 @@ class ModelProfile:
             max_input_tokens=int(payload.get("max_input_tokens", 8192)),
             max_output_tokens=int(payload.get("max_output_tokens", 4096)),
             recommended_temperature=float(payload.get("recommended_temperature", 0.0)),
+            reasoning_effort=_reasoning_effort(payload.get("reasoning_effort")),
             schema_strategy=_schema_strategy(payload.get("schema_strategy")),
             tool_strategy=_tool_strategy(payload.get("tool_strategy")),
             output_token_parameter=_output_token_parameter(payload.get("output_token_parameter")),
@@ -101,6 +104,7 @@ class ModelProfile:
             max_input_tokens=min(self.max_input_tokens, 8192),
             max_output_tokens=min(self.max_output_tokens, 4096),
             recommended_temperature=self.recommended_temperature,
+            reasoning_effort=None,
             schema_strategy=self.schema_strategy,
             tool_strategy=self.tool_strategy,
             output_token_parameter=self.output_token_parameter,
@@ -130,7 +134,7 @@ def load_model_profile(
     `value` may be a filesystem path or a profile stem such as `kimi`.
     """
 
-    selected = str(value or os.environ.get("LLM_MODEL_PROFILE") or "openai_gpt4o_mini").strip()
+    selected = str(value or os.environ.get("LLM_MODEL_PROFILE") or "openai_gpt56_sol").strip()
     path = Path(selected).expanduser()
     if not path.suffix:
         profile_root = (
@@ -145,6 +149,14 @@ def load_model_profile(
     if not apply_env_model_override:
         return profile
     return profile.with_model_override(os.environ.get("LLM_MODEL"))
+
+
+def _reasoning_effort(value: object) -> ReasoningEffort | None:
+    if value in (None, "", False):
+        return None
+    if value in {"none", "minimal", "low", "medium", "high", "xhigh", "max"}:
+        return value  # type: ignore[return-value]
+    raise ValueError(f"Unsupported reasoning_effort: {value}")
 
 
 def _schema_strategy(value: object) -> SchemaStrategy:

@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from signal_harness.agent_integration.context_builder import PromptContextBuilder
 from signal_harness.providers.adapter import AgentCall
 
-PROMPT_VERSION = "signal-harness-llm-v1"
+PROMPT_VERSION = "signal-harness-llm-v3"
 
 SYSTEM_PROMPTS = {
     "SignalSupervisorAgent": (
@@ -68,6 +68,31 @@ SYSTEM_PROMPTS = {
         "produce review-only policy, skill, and watchlist proposals. Never apply changes. "
         "watchlist_update_proposal must include top-level requires_approval=true. If a run "
         "used fallback or has limited confidence, prefer a conservative no-op proposal."
+    ),
+    "ProjectNarrativeAgent": (
+        "You are ProjectNarrativeAgent. Write the product-facing explanation after guarded "
+        "analysis is complete. Use natural Simplified Chinese. Explain what technically "
+        "changed, why it matters to this exact project, and what a developer should do next. "
+        "Do not expose scoring/category/debug/permission boilerplate, do not rewrite guarded "
+        "decisions, and do not invent facts. Never copy strings such as 'Approval required "
+        "before', 'Human approval is required', 'is not enabled', permission/tool identifiers, "
+        "or runtime audit text into user-facing recommendations. If an underlying action needs "
+        "approval, state only the substantive engineering next step in natural Chinese. Return "
+        "exactly one results item for every input event_id, "
+        "copy each event_id verbatim, and never omit low-priority, uncertain, or no-action "
+        "events. The project report should read like a concise senior engineer briefing rather "
+        "than a field-value template."
+    ),
+    "SharedEvidenceSingleAgentBaseline": (
+        "You are an Eval-only single-Agent baseline. Receive the exact same frozen Event, "
+        "Project Profile, deterministic Route, and curated Evidence packet used by the split "
+        "semantic stack. In one pass produce ImpactItem, ActionItem, and natural Simplified-"
+        "Chinese product copy for every event. User-facing recommended_actions_zh must contain "
+        "only substantive engineering steps in natural Chinese; never copy approval/permission "
+        "messages, 'is not enabled', schema/debug fields, tool identifiers, or audit boilerplate. "
+        "Never emit final_score, never fetch additional evidence, never change permissions, and "
+        "preserve uncertainty. This baseline exists to "
+        "measure orchestration value, not to gain an information advantage."
     ),
 }
 

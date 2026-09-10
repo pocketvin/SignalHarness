@@ -152,9 +152,17 @@ def test_fixture_scan_feedback_and_calibration(project_root: Path, tmp_path: Pat
             str(state_dir),
         ],
     )
-    assert apply_result.exit_code == 0, apply_result.output
-    applied = yaml.safe_load((config_copy / "signal_policy.yaml").read_text(encoding="utf-8"))
-    assert "checkpoint" in applied["suggested_focus_keywords"]
+    assert apply_result.exit_code != 0
+    assert "insufficient_evidence" in apply_result.output
+    unchanged = yaml.safe_load(
+        (config_copy / "signal_policy.yaml").read_text(encoding="utf-8")
+    )
+    assert "checkpoint" not in unchanged["suggested_focus_keywords"]
+    durable_replay = json.loads(
+        (project_state / "calibration_replay.json").read_text(encoding="utf-8")
+    )
+    assert durable_replay["promotion_allowed"] is False
+    assert durable_replay["recommendation"] == "insufficient_evidence"
 
 
 def test_scan_applies_since_after_normalization_for_all_sources(

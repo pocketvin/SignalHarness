@@ -82,6 +82,8 @@ def test_product_detail_and_markdown_are_product_facing(
     detail = service.change_detail(analyzed.items[0].change_id, scan_id=result.scan_id)
 
     assert detail.change_id == analyzed.items[0].change_id
+    assert detail.event_id
+    assert detail.event_revision_id > 0
     assert detail.what_changed_zh
     assert detail.why_relevant_zh
     assert "rank" in detail.audit
@@ -118,3 +120,76 @@ def test_product_service_resolves_latest_successful_scan(
     assert first.scan_id != second.scan_id
     assert service.resolve_scan_id() == second.scan_id
     assert service.report().scan_id == second.scan_id
+
+
+def test_product_changes_expose_stable_impact_boards(
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    result, service = _scan(project_root, tmp_path, max_events=4)
+
+    page = service.list_changes(result.scan_id, limit=20)
+    counts = service.report(result.scan_id).stats["impact_group_counts"]
+
+    assert sum(counts.values()) == page.all_count == 4
+    assert {item.impact_group for item in page.items}.issubset(
+        {
+            "project_code",
+            "dependency_version",
+            "security",
+            "api_protocol",
+            "upstream_issue",
+            "tech_news",
+            "other",
+        }
+    )
+    assert "dependency_version" in {item.impact_group for item in page.items}
+    assert "upstream_issue" in {item.impact_group for item in page.items}
+    dependency = service.list_changes(
+        result.scan_id,
+        impact_group="dependency_version",
+        limit=20,
+    )
+    assert dependency.count >= 1
+    assert all(item.impact_group == "dependency_version" for item in dependency.items)
+
+
+def test_mock_agent_product_copy_is_human_facing_chinese(
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    workflow = SignalHarnessWorkflow(
+        cwd=project_root,
+        output_dir=tmp_path / "human-outputs",
+        state_dir=tmp_path / "human-state",
+        mode=RunMode.MOCK_AGENT,
+        project_id="signalharness",
+    )
+    result = asyncio.run(
+        workflow.scan(
+            fixture=project_root / "examples/signal_harness/sample_events.json",
+            max_events=3,
+        )
+    )
+    service = ProductIntelligenceService(
+        ledger=workflow.ledger,
+        project_id="signalharness",
+    )
+    product = service.projection(result.scan_id, top_count=2, all_limit=10)
+
+    assert "信息数量" in product.report.summary_zh
+    assert "本次扫描冻结了" not in product.report.summary_zh
+    first = product.top_changes[0]
+    assert first.what_changed_zh
+    assert first.why_relevant_zh
+    assert first.recommended_actions_zh
+    assert "影响分" not in first.why_relevant_zh
+    assert all("Review " not in action for action in first.recommended_actions_zh)
+    assert all("Approval required before" not in action for action in first.recommended_actions_zh)
+    assert all("Human approval" not in action for action in first.recommended_actions_zh)
+    assert all(" is not enabled" not in action for action in first.recommended_actions_zh)
+    assert any(
+        step.agent_name == "ProjectNarrativeAgent"
+        for step in result.trace.steps
+        if step.step == "llm_agent_call"
+    )

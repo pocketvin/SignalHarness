@@ -12,6 +12,7 @@ from signal_harness.resources import (
     resolve_example_path,
 )
 from signal_harness.service import create_app
+from signal_harness.ui.demo import demo_asset_dir
 
 
 def test_default_resources_fall_back_outside_repository(tmp_path: Path) -> None:
@@ -66,3 +67,42 @@ def test_bundled_regression_files_are_present(tmp_path: Path) -> None:
     baseline = resolve_example_path(tmp_path, "examples/signal_harness/regression_baseline.json")
     assert json.loads(expectations.read_text(encoding="utf-8"))["suite"] == "resume-v1"
     assert json.loads(baseline.read_text(encoding="utf-8"))["passed"] is True
+
+
+def test_bundled_capability_eval_resources_are_present(tmp_path: Path) -> None:
+    capability = resolve_example_path(
+        tmp_path, "examples/signal_harness/capability_golden_v1.json"
+    )
+    narrative_seed = resolve_example_path(
+        tmp_path, "examples/signal_harness/narrative_calibration_seed.json"
+    )
+    capability_payload = json.loads(capability.read_text(encoding="utf-8"))
+    seed_payload = json.loads(narrative_seed.read_text(encoding="utf-8"))
+
+    assert capability_payload["suite"] == "signalharness-capability-v1"
+    assert capability_payload["dataset_role"] == "capability"
+    assert len(capability_payload["cases"]) == 32
+    assert seed_payload["version"] == "narrative-calibration-v1"
+    assert len(seed_payload["case_ids"]) == 16
+
+
+def test_compiled_react_demo_assets_are_packaged_with_ui() -> None:
+    assets = demo_asset_dir()
+
+    html = (assets / "demo.html").read_text(encoding="utf-8")
+    javascript = (assets / "demo.js").read_text(encoding="utf-8")
+    stylesheet = (assets / "demo.css").read_text(encoding="utf-8")
+    assert '<div id="root"></div>' in html
+    assert '/demo-assets/demo.js' in html
+    assert '/demo-assets/demo.css' in html
+    assert "EventSource" in javascript
+    assert "/stream-runs" in javascript
+    assert "--color-canvas" in stylesheet
+
+
+def test_narrative_review_static_assets_are_packaged_with_ui() -> None:
+    assets = demo_asset_dir()
+
+    assert (assets / "narrative_review.html").is_file()
+    assert (assets / "narrative_review.css").is_file()
+    assert (assets / "narrative_review.js").is_file()

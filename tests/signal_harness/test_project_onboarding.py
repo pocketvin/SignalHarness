@@ -314,3 +314,63 @@ def test_project_connect_cli_activates_profile_revision(
     assert payload["profile"]["effective_profile"]["dependency_evidence"][0]["resolved_version"] == "0.116.2"
     assert (config / "projects" / "connected-cli.yaml").is_file()
     assert (state / "projects" / "connected-cli" / "change_ledger.sqlite3").is_file()
+
+
+def test_github_project_connect_route_is_idempotent(
+    project_root: Path,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    import shutil
+
+    from fastapi.testclient import TestClient
+
+    from signal_harness.projects.onboarding import ProjectManifest, draft_project
+    from signal_harness.service import create_app
+
+    draft = draft_project(
+        manifests=[
+            ProjectManifest(
+                path="pyproject.toml",
+                content=(
+                    "[project]\n"
+                    "name='github-demo'\n"
+                    "description='GitHub connected project'\n"
+                    "dependencies=['fastapi>=0.116']\n"
+                ),
+            )
+        ],
+        paths=["src/api.py"],
+        name_hint="github-demo",
+    )
+
+    async def fake_github_draft(url: str):
+        assert url == "https://github.com/acme/github-demo"
+        return draft
+
+    monkeypatch.setattr("signal_harness.service.draft_github_project", fake_github_draft)
+    config = tmp_path / "configs"
+    shutil.copytree(project_root / "configs", config)
+    app = create_app(
+        cwd=project_root,
+        config_dir=config,
+        output_dir=tmp_path / "outputs",
+        state_dir=tmp_path / "state",
+    )
+    with TestClient(app) as client:
+        first = client.post(
+            "/projects/connect/github",
+            json={"url": "https://github.com/acme/github-demo"},
+        )
+        assert first.status_code == 201, first.text
+        assert first.json()["source"] == "github"
+        assert first.json()["already_connected"] is False
+        assert first.json()["project"]["id"] == "github-demo"
+
+        second = client.post(
+            "/projects/connect/github",
+            json={"url": "https://github.com/acme/github-demo"},
+        )
+        assert second.status_code == 201, second.text
+        assert second.json()["already_connected"] is True
+        assert second.json()["project"]["id"] == "github-demo"

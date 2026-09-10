@@ -11,7 +11,7 @@ from signal_harness.providers.model_profile import load_model_profile
 from signal_harness.providers.openai_compatible_provider import OpenAICompatibleProvider
 
 _PROVIDER_SPECS = (
-    ("openai", "OpenAI", "OPENAI", "openai_gpt4o_mini"),
+    ("openai", "OpenAI · GPT-5.6 Sol", "OPENAI", "openai_gpt56_sol"),
     ("qwen", "Qwen", "QWEN", "qwen"),
     ("kimi", "Kimi", "KIMI", "kimi"),
     ("deepseek", "DeepSeek", "DEEPSEEK", "deepseek"),
@@ -121,9 +121,11 @@ def provider_from_selection(
     prefix = option.env_prefix
     api_key = os.environ[f"{prefix}_API_KEY"].strip()
     base_url = os.environ[f"{prefix}_BASE_URL"].strip()
-    profile = load_model_profile(option.profile_name, config_dir=config_dir).with_model_override(
-        option.model
-    )
+    profile = load_model_profile(
+        option.profile_name,
+        config_dir=config_dir,
+        apply_env_model_override=False,
+    ).with_model_override(option.model)
     return OpenAICompatibleProvider(
         api_key=api_key,
         base_url=base_url,

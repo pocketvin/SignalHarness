@@ -246,6 +246,26 @@ class ImpactActionOutput(BaseModel):
     results: list[ImpactActionItem]
 
 
+class ProjectNarrativeItem(BaseModel):
+    """Human-facing explanation for one analyzed Change; never used for scoring."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    event_id: str
+    what_changed_zh: str = Field(min_length=1, max_length=1200)
+    why_relevant_zh: str = Field(min_length=1, max_length=1200)
+    recommended_actions_zh: list[str] = Field(default_factory=list, max_length=6)
+
+
+class ProjectNarrativeOutput(BaseModel):
+    """Agent-written product copy layered on top of frozen guarded decisions."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    report_zh: str = Field(min_length=1, max_length=2400)
+    results: list[ProjectNarrativeItem]
+
+
 class VerificationItem(BaseModel):
     """Conservative verifier output; Python decides whether and how to apply caps."""
 

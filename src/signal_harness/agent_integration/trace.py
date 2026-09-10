@@ -3,9 +3,104 @@
 from __future__ import annotations
 
 from signal_harness.agent_integration.mode import RunMode
+from signal_harness.agent_integration.reasoning_summary import waiting_reasoning_metadata
 from signal_harness.providers.adapter import AgentCall, AgentProvider, ProviderUsage
 from signal_harness.runtime.tracing import TraceRecorder
 from signal_harness.signal.schemas import TraceStep
+
+
+def append_llm_trace_started(
+    recorder: TraceRecorder,
+    *,
+    call: AgentCall,
+    provider: AgentProvider,
+    mode: RunMode,
+    input_event_id: str,
+    input_count: int,
+) -> int:
+    """Emit an SSE-visible running record before the provider call begins."""
+
+    recorder.steps.append(
+        TraceStep(
+            step="llm_agent_call",
+            agent=call.agent_name,
+            agent_name=call.agent_name,
+            mode=mode.value,
+            provider=str(getattr(provider, "provider", provider.name)),
+            model=provider.model,
+            model_profile=str(getattr(provider, "model_profile", "") or ""),
+            prompt_version=call.prompt_version,
+            input_event_id=input_event_id,
+            output_schema=call.output_schema,
+            duration_ms=0,
+            status="running",
+            input_count=input_count,
+            output_count=0,
+            detail="LLM Agent call in progress.",
+            prompt_prefix_hash=call.prompt_prefix_hash or None,
+            static_context_hash=call.static_context_hash or None,
+            dynamic_context_hash=call.dynamic_context_hash or None,
+            context_packet_version=call.context_packet_version or None,
+            cache_strategy=call.cache_strategy,
+            metadata=waiting_reasoning_metadata(),
+        )
+    )
+    return len(recorder.steps) - 1
+
+
+def finish_llm_trace(
+    recorder: TraceRecorder,
+    index: int,
+    *,
+    call: AgentCall,
+    provider: AgentProvider,
+    mode: RunMode,
+    input_event_id: str,
+    input_count: int,
+    output_count: int,
+    duration_ms: int,
+    schema_valid: bool,
+    fallback_used: bool,
+    tools_requested: list[str],
+    source_types_observed: list[str] | None = None,
+    tools_executed: list[str] | None = None,
+    tool_errors: list[str] | None = None,
+    blocked_tools: list[str] | None = None,
+    permission_checks: list[str] | None = None,
+    retry_count: int = 0,
+    schema_error: str | None = None,
+    error: str | None = None,
+    failure_kind: str | None = None,
+    reasoning_metadata: dict[str, object] | None = None,
+    usage: ProviderUsage | None = None,
+) -> int:
+    """Complete one previously emitted running LLM trace record."""
+
+    completed = _llm_trace_step(
+        call=call,
+        provider=provider,
+        mode=mode,
+        input_event_id=input_event_id,
+        input_count=input_count,
+        output_count=output_count,
+        duration_ms=duration_ms,
+        schema_valid=schema_valid,
+        fallback_used=fallback_used,
+        tools_requested=tools_requested,
+        source_types_observed=source_types_observed,
+        tools_executed=tools_executed,
+        tool_errors=tool_errors,
+        blocked_tools=blocked_tools,
+        permission_checks=permission_checks,
+        retry_count=retry_count,
+        schema_error=schema_error,
+        error=error,
+        failure_kind=failure_kind,
+        reasoning_metadata=reasoning_metadata,
+        usage=usage,
+    )
+    recorder.steps[index] = completed
+    return index
 
 
 def append_llm_trace(
@@ -29,54 +124,85 @@ def append_llm_trace(
     retry_count: int = 0,
     schema_error: str | None = None,
     error: str | None = None,
+    failure_kind: str | None = None,
+    reasoning_metadata: dict[str, object] | None = None,
     usage: ProviderUsage | None = None,
 ) -> int:
     """Append one complete LLM invocation record and return its index."""
 
     recorder.steps.append(
-        TraceStep(
-            step="llm_agent_call",
-            agent=call.agent_name,
-            agent_name=call.agent_name,
-            mode=mode.value,
-            provider=str(getattr(provider, "provider", provider.name)),
-            model=provider.model,
-            model_profile=str(getattr(provider, "model_profile", "") or ""),
-            prompt_version=call.prompt_version,
-            input_event_id=input_event_id,
-            output_schema=call.output_schema,
-            schema_valid=schema_valid,
-            fallback_used=fallback_used,
-            duration_ms=duration_ms,
-            source_types_observed=source_types_observed or [],
-            tools_requested=tools_requested,
-            tools_executed=tools_executed or [],
-            tool_errors=tool_errors or [],
-            blocked_tools=blocked_tools or [],
-            permission_checks=permission_checks or [],
-            retry_count=retry_count,
-            schema_error=schema_error,
-            prompt_prefix_hash=call.prompt_prefix_hash or None,
-            static_context_hash=call.static_context_hash or None,
-            dynamic_context_hash=call.dynamic_context_hash or None,
-            context_packet_version=call.context_packet_version or None,
-            cache_strategy=call.cache_strategy,
-            prompt_tokens=usage.prompt_tokens if usage is not None else None,
-            completion_tokens=usage.completion_tokens if usage is not None else None,
-            total_tokens=usage.total_tokens if usage is not None else None,
-            estimated_cost_usd=(usage.estimated_cost_usd if usage is not None else None),
-            usage_source=usage.source if usage is not None else None,
-            error=error,
-            status="success",
-            input_count=input_count,
-            output_count=output_count,
-            detail=(
-                f"Schema fallback used: {error}"
-                if fallback_used and error
-                else f"Schema retry succeeded after: {schema_error}"
-                if retry_count and schema_error
-                else "Structured LLM Agent output accepted."
-            ),
+        _llm_trace_step(
+            call=call, provider=provider, mode=mode, input_event_id=input_event_id,
+            input_count=input_count, output_count=output_count, duration_ms=duration_ms,
+            schema_valid=schema_valid, fallback_used=fallback_used,
+            tools_requested=tools_requested, source_types_observed=source_types_observed,
+            tools_executed=tools_executed, tool_errors=tool_errors,
+            blocked_tools=blocked_tools, permission_checks=permission_checks,
+            retry_count=retry_count, schema_error=schema_error, error=error,
+            failure_kind=failure_kind, reasoning_metadata=reasoning_metadata, usage=usage,
         )
     )
     return len(recorder.steps) - 1
+
+
+def _llm_trace_step(
+    *,
+    call: AgentCall, provider: AgentProvider, mode: RunMode, input_event_id: str,
+    input_count: int, output_count: int, duration_ms: int, schema_valid: bool,
+    fallback_used: bool, tools_requested: list[str],
+    source_types_observed: list[str] | None = None,
+    tools_executed: list[str] | None = None, tool_errors: list[str] | None = None,
+    blocked_tools: list[str] | None = None, permission_checks: list[str] | None = None,
+    retry_count: int = 0, schema_error: str | None = None, error: str | None = None,
+    failure_kind: str | None = None,
+    reasoning_metadata: dict[str, object] | None = None,
+    usage: ProviderUsage | None = None,
+) -> TraceStep:
+    metadata = dict(reasoning_metadata or {})
+    if failure_kind:
+        metadata["failure_kind"] = failure_kind
+    return TraceStep(
+        step="llm_agent_call",
+        agent=call.agent_name,
+        agent_name=call.agent_name,
+        mode=mode.value,
+        provider=str(getattr(provider, "provider", provider.name)),
+        model=provider.model,
+        model_profile=str(getattr(provider, "model_profile", "") or ""),
+        prompt_version=call.prompt_version,
+        input_event_id=input_event_id,
+        output_schema=call.output_schema,
+        schema_valid=schema_valid,
+        fallback_used=fallback_used,
+        duration_ms=duration_ms,
+        source_types_observed=source_types_observed or [],
+        tools_requested=tools_requested,
+        tools_executed=tools_executed or [],
+        tool_errors=tool_errors or [],
+        blocked_tools=blocked_tools or [],
+        permission_checks=permission_checks or [],
+        retry_count=retry_count,
+        schema_error=schema_error,
+        prompt_prefix_hash=call.prompt_prefix_hash or None,
+        static_context_hash=call.static_context_hash or None,
+        dynamic_context_hash=call.dynamic_context_hash or None,
+        context_packet_version=call.context_packet_version or None,
+        cache_strategy=call.cache_strategy,
+        prompt_tokens=usage.prompt_tokens if usage is not None else None,
+        completion_tokens=usage.completion_tokens if usage is not None else None,
+        total_tokens=usage.total_tokens if usage is not None else None,
+        estimated_cost_usd=(usage.estimated_cost_usd if usage is not None else None),
+        usage_source=usage.source if usage is not None else None,
+        error=error,
+        metadata=metadata,
+        status="success",
+        input_count=input_count,
+        output_count=output_count,
+        detail=(
+            f"Schema fallback used: {error}"
+            if fallback_used and error
+            else f"Schema retry succeeded after: {schema_error}"
+            if retry_count and schema_error
+            else "Structured LLM Agent output accepted."
+        ),
+    )

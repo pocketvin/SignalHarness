@@ -146,8 +146,11 @@ class OpenAICompatibleProvider:
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
-            "temperature": self.profile.recommended_temperature,
         }
+        if self.profile.reasoning_effort is not None:
+            payload["reasoning_effort"] = self.profile.reasoning_effort
+        else:
+            payload["temperature"] = self.profile.recommended_temperature
         payload[self.profile.output_token_parameter] = self.profile.max_output_tokens
         if self.profile.supports_json_mode:
             payload["response_format"] = {"type": "json_object"}

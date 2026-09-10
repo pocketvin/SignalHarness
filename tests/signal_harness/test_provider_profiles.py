@@ -408,3 +408,85 @@ def test_provider_catalog_does_not_leak_global_model_into_provider_profiles(
     assert options["kimi"].warning == "deprecated_model_auto_upgraded"
     assert options["deepseek"].model == "deepseek-v4-flash"
     assert options["deepseek"].warning is None
+
+
+def test_provider_selection_does_not_leak_global_model_override(
+    project_root: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("LLM_MODEL", "qwen-plus")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://openai.example/v1")
+    monkeypatch.setenv("OPENAI_MODEL", "gpt-5.6-sol")
+    monkeypatch.setenv("OPENAI_MODEL_PROFILE", "openai_gpt56_sol")
+
+    provider = provider_from_selection("openai", config_dir=project_root / "configs")
+    try:
+        assert provider.model == "gpt-5.6-sol"
+        assert provider.model_profile == "openai_gpt56_sol"
+        assert provider.profile.reasoning_effort == "medium"
+        assert provider.profile.supports_json_mode is True
+        assert provider.profile.supports_json_schema is True
+        assert provider.profile.max_output_tokens == 16384
+        assert provider.profile.input_cost_per_million_usd == 4.0
+        assert provider.profile.output_cost_per_million_usd == 20.0
+    finally:
+        asyncio.run(provider.close())
+
+
+def test_gpt56_sol_profile_uses_reasoning_compatible_payload(project_root: Path) -> None:
+    requests: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode("utf-8"))
+        requests.append(body)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {"message": {"content": '{"routes":[],"batch_summary":"ok"}'}}
+                ]
+            },
+        )
+
+    profile = load_model_profile("openai_gpt56_sol", config_dir=project_root / "configs")
+    assert profile.model == "gpt-5.6-sol"
+    assert profile.reasoning_effort == "medium"
+    assert profile.output_token_parameter == "max_completion_tokens"
+    assert profile.supports_json_mode is True
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    provider = OpenAICompatibleProvider(
+        api_key="test-key",
+        base_url="https://example.test",
+        profile=profile,
+        client=client,
+    )
+    try:
+        response = asyncio.run(provider.complete(_call()))
+    finally:
+        asyncio.run(client.aclose())
+
+    assert response == '{"routes":[],"batch_summary":"ok"}'
+    assert requests[0]["model"] == "gpt-5.6-sol"
+    assert requests[0]["reasoning_effort"] == "medium"
+    assert requests[0]["max_completion_tokens"] == 16384
+    assert "max_tokens" not in requests[0]
+    assert "temperature" not in requests[0]
+    assert requests[0]["response_format"] == {"type": "json_object"}
+
+
+def test_openai_catalog_defaults_to_gpt56_sol_profile(
+    project_root: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.openai.example")
+    monkeypatch.delenv("OPENAI_MODEL", raising=False)
+    monkeypatch.delenv("OPENAI_MODEL_PROFILE", raising=False)
+
+    option = next(
+        item for item in provider_catalog(project_root / "configs") if item.provider_id == "openai"
+    )
+
+    assert option.ready is True
+    assert option.profile_name == "openai_gpt56_sol"
+    assert option.model == "gpt-5.6-sol"
+    assert option.label == "OpenAI · GPT-5.6 Sol"

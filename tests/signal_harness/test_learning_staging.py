@@ -15,6 +15,7 @@ from signal_harness.learning import (
     ProposalRiskClassifier,
     apply_staged_learning,
     load_learning_staging,
+    rollback_policy_revision,
     stage_learning_proposal,
 )
 from signal_harness.signal.policy import load_signal_policy
@@ -415,3 +416,118 @@ def test_calibrate_apply_yes_blocks_high_risk_proposal(
     assert result.exit_code != 0
     assert "Only low-risk proposals can be applied" in result.output
     assert load_signal_policy(config / "signal_policy.yaml") == policy
+
+
+
+def test_real_ledger_requires_durable_calibration_gate_before_apply(
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    from signal_harness.persistence import ChangeLedger
+
+    config = _copy_configs(project_root, tmp_path)
+    policy = load_signal_policy(config / "signal_policy.yaml")
+    state = tmp_path / "state"
+    ChangeLedger(state / "change_ledger.sqlite3")
+    stage_learning_proposal(
+        state_dir=state,
+        output_dir=tmp_path / "outputs",
+        learning=_learning(policy, proposal_id="proposal-durable-required"),
+        replay=_replay(),
+    )
+
+    with pytest.raises(PermissionError, match="Durable calibration replay"):
+        apply_staged_learning(
+            state_dir=state,
+            config_dir=config,
+            proposal_id="proposal-durable-required",
+            yes=True,
+        )
+
+    (state / "calibration_replay.json").write_text(
+        json.dumps(
+            {
+                "recommendation": "insufficient_evidence",
+                "promotion_allowed": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(PermissionError, match="insufficient_evidence"):
+        apply_staged_learning(
+            state_dir=state,
+            config_dir=config,
+            proposal_id="proposal-durable-required",
+            yes=True,
+        )
+
+
+def test_applied_policy_revision_is_recorded_and_reversible(
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    from signal_harness.persistence import ChangeLedger
+
+    config = _copy_configs(project_root, tmp_path)
+    policy = load_signal_policy(config / "signal_policy.yaml")
+    new_policy = deepcopy(policy)
+    new_policy["suggested_focus_keywords"] = [
+        *new_policy.get("suggested_focus_keywords", []),
+        "durable-calibration-test",
+    ]
+    state = tmp_path / "state"
+    ChangeLedger(state / "change_ledger.sqlite3")
+    (state / "calibration_replay.json").write_text(
+        json.dumps(
+            {
+                "recommendation": "review_and_consider",
+                "promotion_allowed": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+    stage_learning_proposal(
+        state_dir=state,
+        output_dir=tmp_path / "outputs",
+        learning=_learning(
+            policy,
+            new_policy=new_policy,
+            proposal_id="proposal-versioned",
+        ),
+        replay=_replay(false_positive_reduction=1),
+    )
+
+    apply_staged_learning(
+        state_dir=state,
+        config_dir=config,
+        proposal_id="proposal-versioned",
+        yes=True,
+    )
+    assert load_signal_policy(config / "signal_policy.yaml") == new_policy
+    applied = json.loads(
+        (state / "applied_learning_changes.json").read_text(encoding="utf-8")
+    )
+    revision_id = applied["applied"][0]["policy_revision_id"]
+    revision_path = state / "policy_revisions" / f"{revision_id}.json"
+    assert revision_path.is_file()
+    revision = json.loads(revision_path.read_text(encoding="utf-8"))
+    assert revision["old_policy"] == policy
+    assert revision["new_policy"] == new_policy
+    assert revision["rolled_back_at"] is None
+
+    rollback_policy_revision(
+        state_dir=state,
+        config_dir=config,
+        revision_id=revision_id,
+        yes=True,
+    )
+    assert load_signal_policy(config / "signal_policy.yaml") == policy
+    revision = json.loads(revision_path.read_text(encoding="utf-8"))
+    assert revision["rolled_back_at"] is not None
+    with pytest.raises(PermissionError, match="already been rolled back"):
+        rollback_policy_revision(
+            state_dir=state,
+            config_dir=config,
+            revision_id=revision_id,
+            yes=True,
+        )

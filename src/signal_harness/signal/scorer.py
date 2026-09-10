@@ -75,8 +75,10 @@ def source_score(event: SignalEvent, policy: dict[str, Any]) -> float:
 
     source_weights = policy.get("source_weights", {})
     quality = event_source_quality(event)
-    if event.source_type in {"github_release", "package_registry"}:
+    if event.source_type in {"github_release", "package_registry", "security_advisory"}:
         key = "official_release" if quality.value == "official" else "community_discussion"
+    elif event.source_type in {"github_commit", "github_pull_request", "local_git_commit"}:
+        key = "team_update"
     elif event.source_type == "github_issue":
         if quality.value == "official":
             key = "official_issue"
@@ -152,6 +154,13 @@ def _preference_relevance_adjustment(
     event: SignalEvent, profile: dict[str, Any]
 ) -> float:
     text = _semantic_text(event, include_source=True)
+    state = resolve_project_change_state(event, profile)
+    entity_keys = {
+        "dependency": state.dependency_name,
+        "provider": state.provider_name,
+        "protocol": state.protocol_name,
+        "runtime": state.runtime_name,
+    }
     preferences = profile.get("importance_preferences", [])
     if not isinstance(preferences, list):
         return 0.0
@@ -166,8 +175,18 @@ def _preference_relevance_adjustment(
     for item in preferences:
         if not isinstance(item, dict):
             continue
-        scope_key = str(item.get("scope_key") or "").strip().lower()
-        if not scope_key or not contains_affirmed_term(text, scope_key):
+        scope_type = str(item.get("scope_type") or "topic").strip().lower()
+        scope_key = str(item.get("scope_key") or "").strip()
+        if not scope_key:
+            continue
+        entity_name = entity_keys.get(scope_type)
+        if entity_name is not None:
+            matched = _normalized_preference_key(scope_key) == _normalized_preference_key(entity_name)
+        elif scope_type in entity_keys:
+            matched = False
+        else:
+            matched = contains_affirmed_term(text, scope_key.lower())
+        if not matched:
             continue
         importance = str(item.get("importance") or "normal").lower()
         value = weights.get(importance, 0.0)
@@ -175,6 +194,10 @@ def _preference_relevance_adjustment(
             return value
         adjustment += value
     return max(-100.0, min(45.0, adjustment))
+
+
+def _normalized_preference_key(value: str) -> str:
+    return " ".join(value.strip().lower().replace("_", " ").replace("-", " ").split())
 
 
 def relevance_score(
@@ -197,6 +220,10 @@ def relevance_score(
     state = resolve_project_change_state(event, profile)
     if state.direct_dependency:
         score += 28
+    if state.provider_name or state.protocol_name or state.runtime_name:
+        score += 24
+    if event.raw_payload.get("project_owned") is True:
+        score += 35
     for key, points in groups:
         if _matched(text, _keywords(profile, key)):
             score += points

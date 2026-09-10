@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,7 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
     import tomli as tomllib  # type: ignore[import-not-found,no-redef]
 
+from signal_harness.signal.source_identity import github_repository_from_remote
 from signal_harness.utils.fs import atomic_write_text
 
 _MAX_MANIFEST_BYTES = 1_000_000
@@ -96,7 +98,6 @@ _DEPENDENCY_MAP: dict[str, dict[str, Any]] = {
         "repo": "fastapi/fastapi",
         "keywords": ["ASGI", "FastAPI", "API compatibility"],
         "modules": ["API service", "request validation"],
-        "web": "https://fastapi.tiangolo.com/release-notes/",
     },
     "pydantic": {
         "label": "Pydantic",
@@ -121,6 +122,9 @@ _DEPENDENCY_MAP: dict[str, dict[str, Any]] = {
         "repo": "openai/openai-python",
         "keywords": ["OpenAI API", "structured output", "provider API"],
         "modules": ["provider adapter"],
+        "web": "https://developers.openai.com/api/docs/changelog",
+        "web_entity_type": "provider",
+        "web_entity_name": "OpenAI API",
     },
     "langgraph": {
         "label": "LangGraph",
@@ -134,6 +138,8 @@ _DEPENDENCY_MAP: dict[str, dict[str, Any]] = {
         "keywords": ["MCP", "tool protocol", "transport"],
         "modules": ["MCP integration"],
         "web": "https://modelcontextprotocol.io/specification/latest",
+        "web_entity_type": "protocol",
+        "web_entity_name": "Model Context Protocol",
     },
     "typer": {
         "label": "Typer",
@@ -189,6 +195,8 @@ _DEPENDENCY_MAP: dict[str, dict[str, Any]] = {
         "keywords": ["MCP", "tool protocol", "transport"],
         "modules": ["MCP integration"],
         "web": "https://modelcontextprotocol.io/specification/latest",
+        "web_entity_type": "protocol",
+        "web_entity_name": "Model Context Protocol",
     },
 }
 
@@ -217,7 +225,56 @@ def inspect_project_directory(project_root: str | Path) -> ProjectDraft:
                 content=path.read_text(encoding="utf-8", errors="replace"),
             )
         )
-    return draft_project(manifests=manifests, paths=_collect_paths(root), name_hint=root.name)
+    draft = draft_project(manifests=manifests, paths=_collect_paths(root), name_hint=root.name)
+    watchlist = dict(draft.watchlist)
+    github_repo = _local_github_repository(root)
+    watchlist["local_git"] = {
+        "repositories": [
+            {
+                "name": draft.name,
+                "path": str(root),
+                **({"github_repo": github_repo} if github_repo else {}),
+            }
+        ]
+    }
+    if github_repo:
+        github = dict(watchlist.get("github", {}))
+        repositories = [dict(item) for item in github.get("repositories", []) if isinstance(item, dict)]
+        existing = next((item for item in repositories if item.get("repo") == github_repo), None)
+        if existing is None:
+            repositories.append(
+                {
+                    "repo": github_repo,
+                    "project_owned": True,
+                    "events": ["commits", "pull_requests"],
+                }
+            )
+        else:
+            existing["project_owned"] = True
+            existing["events"] = list(
+                dict.fromkeys([*existing.get("events", []), "commits", "pull_requests"])
+            )
+        github["repositories"] = repositories
+        watchlist["github"] = github
+    return draft.model_copy(update={"watchlist": watchlist})
+
+
+def _local_github_repository(root: Path) -> str | None:
+    """Resolve an origin GitHub repo without executing project code."""
+
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "config", "--get", "remote.origin.url"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    return github_repository_from_remote(result.stdout.strip())
 
 
 def draft_project(
@@ -318,14 +375,18 @@ def draft_project(
     for item in known:
         url = item.get("web")
         if url and not any(existing["url"] == url for existing in web_sources):
-            web_sources.append(
-                {
-                    "name": f"{item['label']} official page",
-                    "adapter": "http",
-                    "url": url,
-                    "official": True,
-                }
-            )
+            source = {
+                "name": f"{item['label']} official page",
+                "adapter": "http",
+                "url": url,
+                "official": True,
+            }
+            entity_type = str(item.get("web_entity_type") or "").strip()
+            entity_name = str(item.get("web_entity_name") or "").strip()
+            if entity_type and entity_name:
+                source["entity_type"] = entity_type
+                source["entity_name"] = entity_name
+            web_sources.append(source)
 
     name = detected_name or (name_hint or "").strip() or "Imported Project"
     purpose = _project_description(manifest_map)
@@ -392,6 +453,12 @@ def draft_project(
         }
     if web_sources:
         watchlist["web_changes"] = {"sources": web_sources}
+    if any(
+        str(item.get("resolved_version") or "").strip()
+        and str(item.get("ecosystem") or "") in {"PyPI", "npm"}
+        for item in dependency_evidence
+    ):
+        watchlist["security"] = {"osv": {"enabled": True}}
     return ProjectDraft(
         id=project_id,
         name=name,
@@ -506,6 +573,15 @@ def _dependency_evidence(
             *[str(value) for value in declaration.get("source_files", [])],
             *[str(value) for value in resolution.get("source_files", [])],
         ])
+        ecosystem = ""
+        if any(Path(value).name.lower() in {"package.json", "package-lock.json"} for value in files):
+            ecosystem = "npm"
+        elif any(
+            Path(value).name.lower() in {"pyproject.toml", "uv.lock"}
+            or Path(value).name.lower().startswith("requirements")
+            for value in files
+        ):
+            ecosystem = "PyPI"
         result.append(
             {
                 "name": name,
@@ -513,6 +589,7 @@ def _dependency_evidence(
                 "resolved_version": str(resolution.get("version") or ""),
                 "source_files": files,
                 "confidence": "verified" if resolution.get("version") else "declared",
+                "ecosystem": ecosystem,
             }
         )
     return result
@@ -596,7 +673,7 @@ def _resolved_dependency_versions(manifests: dict[str, str]) -> dict[str, dict[s
 def _detected_providers(dependencies: list[str]) -> list[str]:
     values: list[str] = []
     if "openai" in dependencies:
-        values.append("OpenAI-compatible provider API")
+        values.append("OpenAI API")
     return values
 
 

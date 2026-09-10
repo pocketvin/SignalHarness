@@ -1,0 +1,32 @@
+{
+  "version": "narrative-calibration-v1",
+  "description": "Balanced Capability cases reserved for blind human A/B calibration before any LLM-as-judge is trusted.",
+  "minimum_labeled_pairs": 15,
+  "rubric_dimensions": [
+    "factual_grounding",
+    "technical_explanation",
+    "project_specificity",
+    "uncertainty_calibration",
+    "actionability",
+    "natural_language",
+    "no_internal_leakage"
+  ],
+  "case_ids": [
+    "cap-001",
+    "cap-003",
+    "cap-004",
+    "cap-008",
+    "cap-009",
+    "cap-010",
+    "cap-012",
+    "cap-015",
+    "cap-016",
+    "cap-019",
+    "cap-020",
+    "cap-021",
+    "cap-022",
+    "cap-028",
+    "cap-029",
+    "cap-032"
+  ]
+}

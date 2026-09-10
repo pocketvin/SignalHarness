@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SignalHarness · Narrative 盲测</title>
+  <link rel="stylesheet" href="/demo-assets/narrative_review.css" />
+</head>
+<body>
+  <main class="review-shell">
+    <header class="review-header">
+      <div>
+        <a class="back-link" href="/demo">← 返回 Change Radar</a>
+        <p class="eyebrow">SignalHarness Eval</p>
+        <h1>Narrative 盲测</h1>
+        <p class="lede">只比较两份面向用户的解释。页面不会显示架构名称、模型分数或 A/B 到 variant 的映射。</p>
+      </div>
+      <div class="status-card">
+        <div id="progressText" class="status-title">加载中…</div>
+        <div class="progress-track"><span id="progressBar"></span></div>
+        <div id="eligibilityText" class="status-subtle"></div>
+      </div>
+    </header>
+
+    <section id="emptyState" class="empty-state" hidden>
+      <h2>还没有可评审数据</h2>
+      <p id="emptyMessage">先导出一份有效的 Narrative blind review。</p>
+    </section>
+
+    <section id="reviewPanel" hidden>
+      <nav class="pair-nav" aria-label="样本导航">
+        <button id="prevButton" type="button" class="secondary">← 上一条</button>
+        <label>样本 <select id="pairSelect"></select></label>
+        <button id="nextButton" type="button" class="secondary">下一条 →</button>
+      </nav>
+
+      <article class="context-card">
+        <div class="context-heading">
+          <div>
+            <span id="caseId" class="case-id"></span>
+            <h2 id="caseTitle"></h2>
+          </div>
+          <span id="truthStatus" class="truth-pill"></span>
+        </div>
+        <dl class="context-grid">
+          <div><dt>来源</dt><dd id="sourceMeta"></dd></div>
+          <div><dt>证据摘要</dt><dd id="evidenceSummary"></dd></div>
+        </dl>
+        <details>
+          <summary>查看原始事件上下文</summary>
+          <p id="eventContent" class="source-content"></p>
+          <div id="uncertaintyBox" class="uncertainty-box" hidden></div>
+        </details>
+      </article>
+
+      <section class="outputs-grid" aria-label="盲测输出">
+        <article class="output-card">
+          <div class="output-label">A</div>
+          <h3>发生了什么</h3><p id="aWhat"></p>
+          <h3>为什么与你有关</h3><p id="aWhy"></p>
+          <h3>建议怎么做</h3><ul id="aActions"></ul>
+        </article>
+        <article class="output-card">
+          <div class="output-label">B</div>
+          <h3>发生了什么</h3><p id="bWhat"></p>
+          <h3>为什么与你有关</h3><p id="bWhy"></p>
+          <h3>建议怎么做</h3><ul id="bActions"></ul>
+        </article>
+      </section>
+
+      <section class="rating-card">
+        <div class="section-heading">
+          <div><p class="eyebrow">Overall</p><h2>整体上哪一份更好？</h2></div>
+          <p>先按你真实阅读体验判断，不需要让每个维度和总体选择机械一致。</p>
+        </div>
+        <div id="overallChoices" class="choice-row"></div>
+      </section>
+
+      <section class="rating-card">
+        <div class="section-heading">
+          <div><p class="eyebrow">Rubric</p><h2>分维度判断</h2></div>
+          <p>每个维度都需要选择；确实无法比较时可选“不适用”。</p>
+        </div>
+        <div id="dimensionRows" class="dimension-list"></div>
+      </section>
+
+      <section class="rating-card note-card">
+        <label for="humanNote"><strong>备注（可选）</strong></label>
+        <textarea id="humanNote" rows="4" placeholder="例如：B 更具体，但把一个尚未合并的 proposal 说成已经发布。"></textarea>
+      </section>
+
+      <footer class="save-bar">
+        <div id="saveMessage" role="status"></div>
+        <button id="saveButton" type="button" class="primary">保存并进入下一条</button>
+      </footer>
+    </section>
+  </main>
+  <script src="/demo-assets/narrative_review.js" defer></script>
+</body>
+</html>

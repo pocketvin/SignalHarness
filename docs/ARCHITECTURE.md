@@ -1,73 +1,64 @@
 # SignalHarness Architecture
 
-SignalHarness 的目标产品是 Project Environment Intelligence。P1/P2 建立 SQLite Change Ledger、冻结 Scan Window、Coverage 与可恢复本地 Run；P3 增加 versioned ProfileRevision 与显式 Preference Engine；P4 用 frozen Harness ablation 评估 Analyzer 组件；P5 将 frozen Scan 投影成 Overall → Top → All → Detail，并让 CLI/REST/Web/MCP 共用同一产品状态。当前五-Agent routed analyzer 仍是受保护 baseline，未来 Analyzer 数量不是产品约束。
+SignalHarness 的目标产品是 Project Environment Intelligence。P1/P2 建立 SQLite Change Ledger、冻结 Scan Window、Coverage 与可恢复本地 Run；P3 增加 versioned ProfileRevision 与显式 Preference Engine；P4 用 frozen Harness ablation 评估 Analyzer 组件；P5 将 frozen Scan 投影成 Overall → Top → All → Detail，并让 CLI/REST/Web/MCP 共用同一产品状态。真实 `agent` 当前默认 `deterministic-evidence-impact-action` 两调用路径；五-Agent routed analyzer 继续作为受保护 baseline/rollback，`mock-agent` 默认仍覆盖完整五-Agent。
 
 ## Workflow flowchart
 
 ```mermaid
 flowchart TD
     A["External Sources<br/>GitHub / PyPI / RSS / Web change / fixture"] --> B["Source Collection"]
-    B --> C["Normalization"]
-    C --> TW["Unified Time-window Filter"]
-    TW --> D["Deduplication + Change Delta"]
-    D --> CF["Project-aware Candidate Funnel"]
-    CF --> E["Noise Filter"]
-    E --> F["SignalSupervisorAgent"]
-    F --> G["ContextEvidenceAgent"]
-    G --> H["ImpactAnalystAgent"]
-    H --> I["ActionPlannerAgent"]
-    I --> K["Guarded Assessment"]
-    K -. explicit calibration / learning .-> J["LearningPolicyAgent"]
-    K --> L["Alerts"]
-    K --> M["Digest"]
-    K --> N["Dashboard"]
-    K --> O["Trace"]
-    K --> P["Review-only Learning"]
-    K --> R["Regression / Provider Eval"]
-    K --> S["CLI / REST / MCP"]
-    O --> T["Trace Event Sink / SSE / Golden Demo"]
+    B --> C["Normalize / Time Window / Deduplicate"]
+    C --> D["Project-aware Candidate Funnel + Noise Filter"]
+    D --> E["Deterministic Project Route"]
+    E --> F["Deterministic Source-aware Evidence"]
+    F --> G["ImpactActionAnalyzerAgent"]
+    G --> H["Guarded Assessment<br/>Python scoring + permission"]
+    H --> N["ProjectNarrativeAgent"]
+    N --> P["Product / Alerts / Digest / Dashboard"]
+    P --> S["CLI / REST / SSE / MCP"]
 
-    Q["Python Runtime<br/>schema validation / permissions / scoring / fallback / file writes"] -. guards .-> F
+    F --> T["Controlled read-only source tools"] --> F
+    G -. "schema / coverage failure" .-> X["ImpactAnalystAgent → ActionPlannerAgent"] --> H
+    H -. "explicit feedback / calibration" .-> L["LearningPolicyAgent"]
+    Q["Python Runtime<br/>schema / permissions / budgets / fallback / persistence"] -. guards .-> F
     Q -. guards .-> G
+    Q -. guards .-> X
     Q -. guards .-> H
-    Q -. guards .-> I
-    Q -. guards .-> J
 ```
+
 
 ## Real agent run sequence
 
 ```mermaid
 sequenceDiagram
-    participant User as User CLI
+    participant User as User CLI / Service
     participant Workflow
-    participant Provider
-    participant Agents as Five Agents
     participant Tools as Tool Executor
+    participant Provider
+    participant Guard as Python Guarded Runtime
     participant Trace as Trace Recorder
-    participant Dashboard as Dashboard Writer
 
-    User->>Workflow: signal-harness scan --mode agent
-    Workflow->>Trace: record load_config / collect_signals
-    Workflow->>Provider: structured call: SignalSupervisorAgent
-    Provider-->>Workflow: SupervisorOutput
-    Workflow->>Trace: record schema / route metadata
-    Workflow->>Provider: structured call: ContextEvidenceAgent tool plan
-    Provider-->>Workflow: EvidenceToolPlan
-    Workflow->>Tools: execute allowed read-only tools
-    Tools-->>Workflow: ToolObservation objects
-    Workflow->>Trace: tools_requested / tools_executed / permission_checks
-    Workflow->>Provider: structured call: ContextEvidenceAgent final evidence
-    Provider-->>Workflow: ContextEvidenceOutput
-    Workflow->>Provider: structured call: ImpactAnalystAgent
-    Provider-->>Workflow: ImpactOutput
-    Workflow->>Provider: structured call: ActionPlannerAgent
-    Provider-->>Workflow: ActionOutput
-    Workflow->>Workflow: guarded scoring and decision mapping
-    Workflow->>Trace: learning_deferred for real interactive scan
-    Note over Workflow,Provider: LearningPolicyAgent LLM reflection runs in explicit calibration/learning flows, not the real-scan latency-critical path
-    Workflow->>Trace: record fallback / retry / audit completion if any
-    Workflow->>Dashboard: write local dashboard.html and reports
-    Dashboard-->>User: local files under outputs/
+    User->>Workflow: scan --mode agent
+    Workflow->>Trace: collect / normalize / candidate funnel
+    Workflow->>Workflow: deterministic project route
+    Workflow->>Tools: bounded source-aware evidence requests
+    Tools-->>Workflow: ToolObservation / evidence context
+    Workflow->>Provider: ImpactActionAnalyzerAgent
+    Provider-->>Workflow: ImpactActionOutput
+    alt merged schema or event coverage invalid
+        Workflow->>Provider: ImpactAnalystAgent
+        Provider-->>Workflow: ImpactOutput
+        Workflow->>Provider: ActionPlannerAgent
+        Provider-->>Workflow: ActionOutput
+    else provider timeout/error
+        Workflow->>Workflow: deterministic fallback; no extra same-provider split calls
+    end
+    Workflow->>Guard: authoritative score / decision / permission mapping
+    Guard->>Provider: ProjectNarrativeAgent
+    Provider-->>Guard: Chinese product-facing Narrative
+    Guard->>Trace: schema / fallback / failure_kind / cost / latency
+    Guard-->>User: Product Intelligence + human-readable outputs
+    Note over Guard,Provider: LearningPolicyAgent remains outside the real-scan hot path and runs in explicit calibration/learning flows
 ```
 
 ## 四层安全边界
@@ -108,13 +99,13 @@ sequenceDiagram
   Source-native Change Delta：GitHub / package-registry Release 的版本前后关系、Issue/RSS 的 created/updated 变化语义。
 
 - `src/signal_harness/agent_integration/runner.py`
-  五 Agent runner：controlled tool-use loop、schema retry、repair boundary、audit completion、LearningPolicy handling。
+  Versioned Analyzer runner：real-agent 默认 deterministic Route/Evidence + merged ImpactAction + Narrative；schema/coverage contract failure 可升级 split Impact→Action；five-Agent baseline、controlled tool-use、repair、LearningPolicy handling 仍保留。
 
 - `src/signal_harness/agent_integration/scoring_bridge.py`
   将 Agent outputs 转成 guarded `SignalAssessment`，并由 Python runtime 计算 final decision。
 
 - `src/signal_harness/evals.py`
-  三类 eval：40-case 产品 regression gate、cross-project context gate 与 provider contract/model eval。
+  Eval 分层：40-case Regression protection；32-case Capability Golden + fair shared-evidence baseline；逐 case Trajectory contract；cross-project context；provider contract/model eval；Narrative blind human calibration。
 
 - `src/signal_harness/mcp_server.py`
   当前 10 个 structured MCP tools：9 个只读 product/context 查询 + 1 个复用 persistent StreamRunManager 的 fresh-scan starter；不能绕过 Project scope、fixture allowlist 或 permission policy。
@@ -128,8 +119,10 @@ sequenceDiagram
 - `src/signal_harness/resources.py`
   Distribution resource resolver：workspace 本地默认资源优先；缺失时回退到 wheel 内的只读 configs/examples。显式自定义路径不被重定向。
 
-- `src/signal_harness/ui/demo.py` / `src/signal_harness/ui/static/`
-  Golden Demo loader + 独立 HTML/CSS/JS 静态资源。UI 只消费真实 trace append/update 事件，不维护假的 Agent 执行状态；FastAPI 通过 `/demo-assets/*` 提供静态资源。
+- `frontend/` → `src/signal_harness/ui/static/demo.*`
+  Golden Demo 的 source-of-truth 是 React + TypeScript + Tailwind，Vite 只在构建时把 SPA 编译成 package-owned `demo.html/css/js`；FastAPI 仍通过 `/demo` + `/demo-assets/*` 托管这些静态产物，不引入独立 Node 服务。React 数据层只消费既有 REST/SSE/Product contract，不复制评分、路由、Schedule 或持久化业务逻辑。Narrative review 继续作为独立静态 surface，不被 Vite `emptyOutDir=false` 构建删除。
+  UI 采用“项目环境情报控制台”信息架构：顶部只有紧凑项目状态带，随后立即进入 Runtime 控制与真实 Trace 双栏；source / analysis mode / time window 使用可访问的 segmented controls，Project Context/Monitoring 渐进披露，Environment Report → Priority Changes → All Changes 构成主阅读流，Change Detail 使用 Drawer，完整 Audit 位于低层工程入口。
+  LLM 调用会先 append `status=running` Trace、完成后 update 同一 index。完成事件附带 `structured-reasoning-v1`：它只从已经 schema-validated 的显式 Agent 输出提取公开判断摘要，不包含 raw provider response、Prompt 或隐藏 chain-of-thought。每条 LLM Trace 可展开查看 summary / per-event structured fields，以及 Schema、Tool、Permission、Fallback、Latency、Token；用户手动的展开/收起状态在后续 SSE re-render 中保持。Pipeline 也由实际 Trace 映射，不再硬编码 five-Agent。guarded 决策后 `ProjectNarrativeAgent` 仍只负责 presentation，不参与 score/decision/permission。
 
 - `src/signal_harness/ui/dashboard.py`
   静态本地 dashboard writer。展示 summary、signals、source/tool health、model/profile/limits、trace、token/cost/latency、score breakdown、learning。
@@ -138,7 +131,7 @@ sequenceDiagram
   本地 dashboard 产物。用于 demo，不提交。
 
 - `outputs/task_trace.json`
-  本地 trace 产物。记录 Agent calls、schema/fallback/retry、tool requests/executions、permission checks、source task health。
+  本地 trace 产物。记录 Agent calls、schema/fallback/retry、tool requests/executions、permission checks、source task health；LLM step 还可携带 bounded `structured-reasoning-v1` 公共摘要 metadata。该 metadata 是 schema 输出摘要，不是隐藏思维链。
 
 ## P1 durable Change Ledger
 
@@ -176,6 +169,38 @@ sequenceDiagram
 - **Project applicability**：direct dependency 与 installed/resolved version 来自 Project Profile/lockfile evidence；版本适用性判断基于 source identity，而不是 release body 中恰好提到某个依赖名。
 - **Failure / checkpoint boundary**：单个 Registry source 失败时 SourceTask 明确为 `failed + partial`，只要其他来源成功 Scan 可产出 partial 结果，但不会推进 interactive `since_last` checkpoint。
 - **Real-source evidence**：2026-09-09 对官方 PyPI `pydantic` 的只读 smoke 成功，返回 coverage=complete、205 个版本、latest `2.13.5`、previous `2.13.4`；这只是连接器运行证据，不是版本长期事实。
+- **Own-project Local Git**：`local_git` 只读执行 bounded `git log`，保留 repository identity、commit SHA、author/commit time、parents、merge flag 与可识别的 PR number；达到 commit cap 时显式 `partial/history_limited`。GitHub origin 可规范化成 `owner/repo`，无 origin 时退回本地 repository path identity。
+- **Cross-source Git identity**：Local Git commit 与未来/已有 GitHub commit observation 使用 `(normalized repository, commit SHA)` 作为 Change identity；同一 commit 可以保留多份 EventRevision/evidence，但不会制造重复 Change。
+- **OSV exact-version matching**：`security_osv` 只接受 Project Profile/lockfile 已解析出的具体 `name + ecosystem + resolved_version`，不会根据公告正文猜依赖是否受影响；单 dependency 查询失败会形成 partial coverage，全部失败则 source failure。
+- **Security identity / applicability**：OSV advisory 优先使用 CVE alias，其次 GHSA/OSV id 做稳定 Change identity；受影响 resolved version 是直接依赖证据，不复用 release 的 `installed = already satisfied` 语义，避免把真实漏洞错误降权。
+- **Real-source Git/OSV evidence**：2026-09-09 当前仓库只读 Git smoke 正确解析为 `pocketvin/signalharness`；OSV 对 `pydantic==2.13.4` 与 `httpx==0.28.1` 两条真实 PyPI resolved-version 查询均成功，coverage=complete，本次返回 0 advisory。
+- **GitHub own-project facts**：GitHub commit 直接使用 API `since`；merged PR 因 list endpoint 无 `since`，按 `updated desc` 分页并在安全 cutoff 后停止，再用 `merged_at` 做窗口成员判断。commit / merged PR 与 Local Git 共用 `(repository, final commit SHA)` Change identity，同时保留 GitHub author/merger/ref/label/signature 等证据。
+- **Project-owned Git semantics**：local onboarding 只读解析 GitHub origin，把当前项目 repo 标成 `project_owned` 并启用 commits + merged PR；这类事实按项目自身代码变化处理，不伪装成上游 dependency release。
+- **Usage-bound changelog identity**：RSS/Web Watchlist 可声明 `entity_type + entity_name`（dependency/provider/protocol/runtime）。Context/Ranking 只在 Effective Project Profile 确认使用同一实体时建立结构化相关性；显式 Preference 也直接对该身份生效。绑定存在但 Profile 未使用时不靠正文关键词补猜。
+- **Bounded Web restraint**：网页源仍保持现有 body-size/security 边界。FastAPI 全历史 release-notes 页面实测超过 1 MB，因此继续由 GitHub + PyPI 覆盖，而不是为单页放宽所有 Web Snapshot 上限。OpenAI API changelog 与 MCP specification 的真实 baseline smoke 均成功。
+- **Real-source GitHub evidence**：2026-09-09 对 `pocketvin/signalharness` 的认证只读 smoke 在 7 日窗口返回 19 commits（complete / 1 page），merged PR 当前 0 条（complete / 1 page）；认证来自本机已授权 GitHub CLI keyring，token 未写入配置或日志。
+
+## P7 continuous-monitoring boundary
+
+- **One Scan service**：Schedule 只决定触发时机与窗口；实际执行仍复用 `StreamRunManager → SignalHarnessWorkflow`。Scheduler 不复制 source collection、Analyzer、Ledger 或 report 逻辑。
+- **Schedule state**：SQLite `schedules` 保存 cadence、timezone/local time、next-run、last-run、独立 schedule checkpoint 与状态。12h/24h/本地时间均冻结成一次 custom `[L,U)`；missed runs 从旧 checkpoint 合并补扫，不把 timer tick 当业务事实。
+- **Checkpoint isolation**：scheduled run 始终 `interactive=false`，不会推进 manual `since_last`。只有 success 且 coverage 非 partial 才推进 schedule checkpoint；partial/error 保留旧 checkpoint。
+- **Restart reconciliation**：StreamRun 先做既有 queued/running 恢复，Schedule 再重新挂 finalizer；若 Scan 已成功写盘但 schedule 收尾尚未完成，则读取 durable `service_run.json` 补 checkpoint/Inbox，而不是重写或静默跳过。
+- **Inbox projection**：Inbox 从 frozen `ScanChange + EventRevision + Assessment` 生成。逻辑 notification key = Change + EventRevision + decision，因此重复处理幂等；新 revision 或 decision escalation 可产生新提醒。Inbox read state 独立于 notification/delivery 状态。
+- **Outbox / DeliveryAttempt**：外发先落 durable Outbox，再发送；每次尝试单独记录。重试复用同一 idempotency key，HTTP/网络失败不会创建第二个逻辑通知。
+- **Signed Webhook**：第一条 delivery transport 使用 HMAC-SHA256 signed Webhook。URL/secret 只来自 runtime env，不持久化到产品数据库或普通日志。loopback real-HTTP integration 已验证网络栈；真正的外部用户 destination 仍需显式授权后验收。
+- **Legacy alerts**：`alerts.json` / `alerts.md` 继续是兼容本地产物，不作为 Inbox 或 external delivery 的事实源。
+
+## P8 calibration boundary
+
+- **Durable real evidence**：SQLite schema v6 adds project-scoped `calibration_feedback` and `change_outcomes`. Feedback/outcomes attach to frozen ScanChange/EventRevision whenever available; legacy feedback JSON remains a compatibility projection rather than the P8 source of truth.
+- **Episode read model**：`CalibrationDataset` deterministically groups real feedback/outcomes by frozen `(scan, Change, EventRevision)`. Positive/negative evidence can become replay labels; contradictory evidence remains `ambiguous` and is excluded from hard metrics. Missing Change attachment is surfaced as orphan feedback instead of inventing history.
+- **Evidence floor**：durable calibration requires at least three labeled Episodes by default. `insufficient_evidence`, `reject_no_gain`, and `reject_regression` cannot promote a real-project policy candidate. Only measured non-regressing improvement produces `promotion_allowed=true`.
+- **Frozen replay + shadow**：candidate replay reuses the exact frozen EventRevision and effective Project Profile. Shadow output records old/proposed score, rank, decision, and—where the frozen Assessment supports it—notification eligibility for every Episode, so ranking/decision/delivery changes are inspectable before activation.
+- **Promotion boundary**：real-project `apply_staged_learning` requires both the existing risk/human-approval gate and a durable `calibration_replay.json` with `promotion_allowed=true`. A Scan-time Agent cannot write this gate or directly change active policy.
+- **Version / rollback**：each policy apply snapshots old/new policy under `policy_revisions/`. Explicit `learning-rollback --yes` only restores the prior policy if no newer policy has replaced that revision, then records rollback history.
+- **Hot-path isolation**：normal Scan/Analyzer execution does not require Calibration, outcomes, or Episodes. Calibration is an asynchronous/read-model improvement path over already durable Scan facts.
+- **Current real evidence**：2026-09-09 current project has no durable labeled Episodes yet. A legacy feedback-derived candidate therefore correctly returns `insufficient_evidence / promotion_allowed=false`; no real P8 policy improvement is claimed.
 
 ## Project state / candidate / provenance boundaries
 
@@ -196,9 +221,36 @@ SignalHarness 的产品价值是持续回答“项目周围发生了什么、哪
 
 ## Evaluation and observability
 
-SignalHarness 把验证拆成三层：`regression-eval --enforce` 验证 40 个项目 contract case；`project-eval --enforce` 用同一事件跨项目比较，证明 Project Context 会改变判断；`model-eval` 验证 provider schema、retry/fallback、tool errors、repair、latency、provider-reported token usage 和 estimated cost。三者都不是通用 LLM leaderboard。
+SignalHarness 不再让一个数据集承担所有 Eval 目标：
 
-当前 `resume-v1` offline regression suite 的 committed acceptance 是 40/40 exact decision、40/40 exact category、priority precision/recall 100%、FPR/FNR 0%。这些数字来自项目特定 contract corpus。
+- `regression-eval --enforce`：40-case Regression protection；
+- `capability-eval`：32-case hard Capability Golden，使用 acceptable decisions、0–3 relevance/nDCG、fact/project/action/uncertainty/forbidden/language grader；
+- fair baseline：single Agent 与 split semantic stack 使用同一 Event/Profile/Route/Evidence；
+- `trajectory-eval --enforce`：代表性 case 逐条跑完整 offline Harness，验证 Agent/tool/schema/fallback；
+- `project-eval --enforce`：同一事件跨项目比较；
+- `model-eval`：provider contract、latency、tokens/cost；
+- Narrative calibration：16-pair blind human A/B；没有真实人工标注与 agreement/bias 校准时 LLM judge 保持 disabled。
+  `/eval/narrative` 只读取 blind review：review API 不返回 variant mapping，也隐藏 final decision / impact score；overall + 全部 rubric dimensions 完整后才原子写回 review，mapping 始终独立保存。
+  Presentation 与 permission/audit state 明确分层：`action_items`/Trace 属于运行时审计真值，用户可见的 `action_items_zh` / Product projection / Eval reviewer 经过 `presentation-v2` sanitizer。它会保留 substantive Chinese engineering step，但不会把 `Approval required before`、`is not enabled`、`Human approval`、内部 tool/permission id 等执行层文本带到产品文案。Prompt v3 负责减少模型产生这些内容，但 deterministic sanitizer 才是 authoritative presentation boundary。
+  第一轮 pre-fix 人类 quick review 的 5 个总体选择解盲后全部偏向 split semantic stack；因为输出随后发生 presentation 修复，这 5 个标签只作为历史失败证据归档，post-fix review 从 0/16 重启。
+
+`resume-v1` 的 40/40 只代表 Regression Contract。Capability V1 刻意包含会让当前实现失败的 hard cases，因此不以 100% 为初始目标，也不会为了 CI 绿色降低难度。Mock Capability 只验证 plumbing；生产架构选择仍需要重复 real-provider trials + human-calibrated Narrative evidence + production Episodes。
+
+Capability Eval 的真实生成与 deterministic scoring 已解耦。真实 provider 结果按 trial checkpoint 保存，实验签名约束 Prompt/Eval/provider/profile 等生成条件；`capability-regrade` 可在不调用模型的情况下，把同一冻结语义输出重新通过当前 `guarded-scoring-v2` 和 grader。这样 scoring/policy 实验不会重复支付语义生成成本。
+
+`guarded-scoring-v2` 采用 evidence-aware floor：明确不确定/unsupported evidence 不触发硬 alert floor；verified official direct-impact 只有在强 semantic relevance，或 semantic + deterministic project-match 双通道一致时才能升到 priority floor；高相关 engineering opinion 只允许 SAVE floor。`already_satisfied`、显式 Ignore preference、Noise/route 仍拥有最终否决权。
+
+Harness ablation 的 fixture source tools 现在严格 offline：外部 GitHub/RSS/Web/Registry/OSV 读取在 ablation 中转换为 frozen fixture-safe observation，本地 `web_change.load_fixture` 仍真实读取 fixture。GitHub credential/网络失败不再改变离线 Eval 结果。正常产品 Scan 不启用该开关。
+
+### Adaptive semantic execution default
+
+当前 real-agent 默认与离线推荐均是 `deterministic-evidence-impact-action`：deterministic router/evidence 保持 Python/runtime authority，`ImpactActionAnalyzerAgent` 合并 Impact+Action，随后由 presentation-only `ProjectNarrativeAgent` 输出用户文案。正常路径 2 个 LLM calls；40-case 与 15-case real-world Harness 都保持 1.000/1.000/1.000。
+
+Adaptive gate 不按“风险高”机械预路由。已有 Qwen frozen shadow 显示 uncertainty/risk 预升级增加调用但没有 decision/ranking 增益，因此 runtime 只把**模型输出 contract failure**当升级信号：merged schema invalid 或 event coverage incomplete → 追加 split Impact → Action；provider timeout/error → 不追加同 provider 请求，继续 deterministic fallback。`TraceStep.metadata.failure_kind` 显式区分 schema/coverage/provider timeout/provider error，便于 Eval、SSE 与后续成本分析。
+
+真实 smoke 还验证了 presentation/audit 分界：Product Intelligence、Radar Digest、Alerts Markdown、Dashboard 推荐和 Demo fallback 使用 `what_changed_zh / why_relevant_zh / action_items_zh`；raw `reason/action_items/score_breakdown` 只保留在 machine-readable JSON/Trace/audit。这样权限说明和 deterministic fallback 文案不会重新从 legacy 输出漏回用户层。
+
+真实 Qwen `qwen-plus` 已完成 4-case production-style Analyzer smoke：decision/category 4/4 + 4/4，2 次调用均 schema-valid，0 fallback / 0 escalation，10,597 provider-reported tokens，summed LLM latency 47.3s。该 smoke 输入是冻结的 real-world events，因此验证的是真实 Provider Analyzer，不等同于 live source collection。基于 offline 40/15-case、Capability/human evidence 与该 smoke，`RunMode.AGENT` 默认已切换到该 2-call Harness；`RunMode.MOCK_AGENT` 和显式 `--harness-variant five-agent` 继续保留 five-Agent baseline。
 
 ## Distribution boundary
 
@@ -206,6 +258,6 @@ Source checkout、wheel install 与 Docker 共享同一 runtime contract。`uv b
 
 ## Service and deployment boundary
 
-`signal-harness serve` 会先读取项目根目录可选的 `.env`（不覆盖显式进程环境变量），再启动 FastAPI，提供 health、同步 run、trace、assessment、signals、feedback，以及 `/demo` Golden Demo；Golden Demo 默认中文并支持 EN 切换，`/demo/meta` 暴露非敏感 Project Catalog 与 Provider readiness。每个 stream-run 先选择 `project_id`，再按该项目的 profile/watchlist 构造 Workflow 上下文；`/stream-runs/{id}/events` 使用 SSE 推送同一 `TraceRecorder` 的真实 append/update。原 `POST /runs` 仍同步；`POST /stream-runs` 创建后立即启动后台任务，queued/running 输入与状态落盘并支持服务启动时的有界恢复。断线后任务继续，`Last-Event-ID` 可补发当前进程内的事件历史；服务重启后 SSE event replay history 不恢复，因此这里不声称拥有分布式 durable queue。Docker 镜像运行相同入口并包含 `/health` healthcheck。
+`signal-harness serve` 会先读取项目根目录可选的 `.env`（不覆盖显式进程环境变量），`signal-harness scan --mode agent` 也使用同一规则；demo/mock scan 不加载真实凭证。随后 FastAPI，提供 health、同步 run、trace、assessment、signals、feedback，以及 `/demo` Golden Demo；Golden Demo 默认中文并支持 EN 切换，`/demo/meta` 暴露非敏感 Project Catalog 与 Provider readiness。每个 stream-run 先选择 `project_id`，再按该项目的 profile/watchlist 构造 Workflow 上下文；`/stream-runs/{id}/events` 使用 SSE 推送同一 `TraceRecorder` 的真实 append/update。原 `POST /runs` 仍同步；`POST /stream-runs` 创建后立即启动后台任务，queued/running 输入与状态落盘并支持服务启动时的有界恢复。断线后任务继续，`Last-Event-ID` 可补发当前进程内的事件历史；服务重启后 SSE event replay history 不恢复，因此这里不声称拥有分布式 durable queue。Docker 镜像运行相同入口并包含 `/health` healthcheck。
 
-MCP 是只读第二入口，不是新的副作用平面。所有可写行为仍由原有 Workflow、permission guard 和 learning gate 控制。
+MCP 是薄适配层，不是新的业务平面：当前 9 个 product/context 工具只读，`signalharness_start_scan` 是明确标注副作用的持久 fresh-scan starter，并复用同一 StreamRunManager/Workflow。其他可写行为仍由原有 REST/CLI、permission guard、Schedule/Outbox 或 learning gate 控制。

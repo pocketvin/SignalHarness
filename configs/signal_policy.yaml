@@ -76,6 +76,7 @@ thresholds:
 priority_floor:
   enabled: true
   official_only: true
+  suppress_on_uncertainty: true
   categories:
     - dependency_update
     - security_supply_chain
@@ -84,6 +85,65 @@ priority_floor:
     - vulnerability
     - supply chain
   min_score: 80
+
+project_state_priority_floor:
+  enabled: true
+  suppress_on_uncertainty: true
+
+semantic_priority_floor:
+  enabled: true
+  official_only: true
+  suppress_on_uncertainty: true
+  min_semantic_relevance: 88
+  corroborated_min_semantic_relevance: 80
+  min_deterministic_base_score: 80
+  min_evidence_confidence: 0.85
+  suppress_discussion_issues: true
+  discussion_terms:
+    - proposal
+    - not merged
+    - unmerged
+    - still open
+    - under discussion
+    - maintainers discuss
+    - rfc
+    - draft proposal
+  categories:
+    - dependency_update
+    - checkpoint_persistence_signal
+    - structured_output_signal
+    - provider_compatibility_signal
+    - source_collection_signal
+    - security_supply_chain
+    - agent_runtime_signal
+  terms:
+    - breaking
+    - migration
+    - regression
+    - validation
+    - compatibility
+    - deprecated
+    - deprecation
+    - api change
+    - schema
+    - security
+    - cve
+    - vulnerability
+    - path traversal
+    - session resumption
+  min_score: 80
+
+semantic_save_floor:
+  enabled: true
+  min_semantic_relevance: 80
+  min_evidence_confidence: 0.55
+  source_qualities:
+    - official
+    - maintainer
+    - secondary
+  categories:
+    - expert_opinion
+  min_score: 45
 
 feedback_adjustments:
   useful: 5
@@ -94,7 +154,9 @@ feedback_adjustments:
 
 enabled_tools:
   - github_signal
+  - local_git
   - package_registry
+  - security_osv
   - rss_signal
   - web_change
   - signal_memory
@@ -120,7 +182,11 @@ permission_policy:
   auto_allow:
     - read_github_release
     - read_github_issue
+    - read_github_commit
+    - read_github_pull_request
+    - read_local_git
     - read_package_registry
+    - read_security_advisory
     - read_rss
     - read_mock_web_change
     - read_web_change
@@ -130,10 +196,13 @@ permission_policy:
     - read_assessments
     - read_run_trace
     - read_feedback_memory
+    - read_calibration
+    - save_outcome
     - write_local_report
     - write_task_trace
   require_confirmation:
     - modify_signal_policy
+    - manage_schedules
     - add_watchlist_source
     - remove_watchlist_source
     - create_github_issue

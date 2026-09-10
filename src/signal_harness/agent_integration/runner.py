@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, TypeVar
 
 from pydantic import BaseModel
@@ -25,6 +25,7 @@ from signal_harness.agent_integration.schemas import (
     ImpactActionOutput,
     ImpactOutput,
     LearningPolicyOutput,
+    ProjectNarrativeOutput,
     RequiredAgent,
     SupervisorOutput,
     ToolObservation,
@@ -44,6 +45,7 @@ from signal_harness.agent_team import (
     ImpactActionAnalyzerAgent,
     ImpactAnalystAgent,
     LearningPolicyAgent,
+    ProjectNarrativeAgent,
     SelectiveVerifierAgent,
     SignalSupervisorAgent,
 )
@@ -103,6 +105,18 @@ def _canonical_source_request(event: SignalEvent) -> ToolRequest | None:
             tool_name="github_signal",
             arguments={"action": "fetch_repo_issues", "repo": event.source_name},
             reason="Verify the observed GitHub issue source.",
+        )
+    if event.source_type == "github_commit" and "/" in event.source_name:
+        return ToolRequest(
+            tool_name="github_signal",
+            arguments={"action": "fetch_repo_commits", "repo": event.source_name},
+            reason="Verify the observed GitHub commit source.",
+        )
+    if event.source_type == "github_pull_request" and "/" in event.source_name:
+        return ToolRequest(
+            tool_name="github_signal",
+            arguments={"action": "fetch_repo_merged_pulls", "repo": event.source_name},
+            reason="Verify the observed merged GitHub pull request source.",
         )
     if event.source_type == "rss":
         feed_url = str(
@@ -178,6 +192,7 @@ class LLMAgentTeamRunner:
         self.action = ActionPlannerAgent()
         self.verifier = SelectiveVerifierAgent()
         self.learning = LearningPolicyAgent()
+        self.narrative = ProjectNarrativeAgent()
 
     async def _invoke(
         self,
@@ -234,6 +249,7 @@ class LLMAgentTeamRunner:
                 "fallback_used": True,
                 "output_count": _output_count(replacement),
                 "error": "Agent output did not cover every input event exactly once.",
+                "metadata": {**trace.metadata, "failure_kind": "coverage_validation"},
                 "detail": (
                     "Coverage validation failed; deterministic fallback filled "
                     "missing audit records while preserving valid model outputs."
@@ -278,6 +294,7 @@ class LLMAgentTeamRunner:
             HarnessVariant.DETERMINISTIC_SUPERVISOR,
             HarnessVariant.DETERMINISTIC_SUPERVISOR_DEFERRED_LEARNING,
             HarnessVariant.DETERMINISTIC_EVIDENCE_RESOLVER,
+            HarnessVariant.DETERMINISTIC_EVIDENCE_IMPACT_ACTION,
             HarnessVariant.SELECTIVE_EVIDENCE_RESEARCHER,
             HarnessVariant.SELECTIVE_EVIDENCE_IMPACT_ACTION,
             HarnessVariant.SELECTIVE_EVIDENCE_IMPACT_ACTION_VERIFIER,
@@ -329,6 +346,7 @@ class LLMAgentTeamRunner:
             and self.harness_variant
             in {
                 HarnessVariant.DETERMINISTIC_EVIDENCE_RESOLVER,
+                HarnessVariant.DETERMINISTIC_EVIDENCE_IMPACT_ACTION,
                 HarnessVariant.SELECTIVE_EVIDENCE_RESEARCHER,
                 HarnessVariant.SELECTIVE_EVIDENCE_IMPACT_ACTION,
                 HarnessVariant.SELECTIVE_EVIDENCE_IMPACT_ACTION_VERIFIER,
@@ -571,6 +589,7 @@ class LLMAgentTeamRunner:
         action_events = self._events_for(events, route_by_id, "action")
         action_ids = {event.event_id for event in action_events}
         merged_variant = self.harness_variant in {
+            HarnessVariant.DETERMINISTIC_EVIDENCE_IMPACT_ACTION,
             HarnessVariant.SELECTIVE_EVIDENCE_IMPACT_ACTION,
             HarnessVariant.SELECTIVE_EVIDENCE_IMPACT_ACTION_VERIFIER,
         }
@@ -612,46 +631,116 @@ class LLMAgentTeamRunner:
                     ),
                     trace_index=action_trace,
                 )
-                impact = ImpactOutput(results=[item.impact for item in combined.results])
-                action = ActionOutput(
-                    results=[
-                        item.action for item in combined.results if item.event_id in action_ids
-                    ]
+                combined_trace = self.trace.steps[action_trace]
+                failure_kind = str(combined_trace.metadata.get("failure_kind") or "")
+                adaptive_split = (
+                    self.harness_variant
+                    is HarnessVariant.DETERMINISTIC_EVIDENCE_IMPACT_ACTION
+                    and combined_trace.fallback_used
+                    and failure_kind in {"schema_validation", "coverage_validation"}
                 )
-                repair_rounds_before = self.repair.repair_rounds_used
-                evidence, impact = await self._maybe_run_impact_evidence_repair(
-                    events=impact_events,
-                    routes=routes,
-                    evidence=evidence,
-                    impact=impact,
-                    project_profile=project_profile,
-                    policy=policy,
-                    clusters=active_clusters,
-                    memory_snapshot=memory_snapshot,
-                    volatile_metadata=volatile,
-                )
-                if self.repair.repair_rounds_used > repair_rounds_before and action_events:
-                    repaired_action_impact = ImpactOutput(
-                        results=[
-                            item for item in impact.results if item.event_id in action_ids
-                        ]
-                    )
-                    action = self.action.fallback(action_events, repaired_action_impact)
+                if adaptive_split:
                     self.trace.steps.append(
                         TraceStep(
-                            step="merged_action_recomputed_after_repair",
+                            step="adaptive_split_escalation",
                             status="success",
-                            agent="DeterministicActionRecompute",
-                            input_count=len(action_events),
-                            output_count=len(action.results),
+                            agent="AdaptiveSemanticGate",
+                            input_count=len(impact_events),
+                            output_count=len(impact_events),
                             duration_ms=0,
-                            metadata={"harness_variant": self.harness_variant.value},
+                            metadata={
+                                "harness_variant": self.harness_variant.value,
+                                "failure_kind": failure_kind,
+                                "event_ids": [event.event_id for event in impact_events],
+                            },
                             detail=(
-                                "Impact evidence repair changed the combined semantic result; "
-                                "actions were recomputed deterministically from repaired impact."
+                                "Merged ImpactAction contract failed; escalated to the existing "
+                                "split Impact -> Action semantic path. Provider hard failures do "
+                                "not trigger this escalation."
                             ),
                         )
                     )
+                    impact_call = self.impact.build_call(
+                        impact_events,
+                        project_profile,
+                        routes,
+                        impact_evidence,
+                        clusters=active_clusters,
+                        policy=policy,
+                        volatile_metadata={**volatile, "adaptive_split_escalation": True},
+                    )
+                    impact, impact_trace = await self._invoke(
+                        impact_call,
+                        ImpactOutput,
+                        lambda: self.impact.fallback(
+                            impact_events, project_profile, policy, active_clusters
+                        ),
+                        event_ids=[event.event_id for event in impact_events],
+                    )
+                    impact = self._ensure_coverage(
+                        impact,
+                        expected_ids=impact_ids,
+                        fallback=lambda: self.impact.fallback(
+                            impact_events, project_profile, policy, active_clusters
+                        ),
+                        trace_index=impact_trace,
+                    )
+                    evidence, impact = await self._maybe_run_impact_evidence_repair(
+                        events=impact_events,
+                        routes=routes,
+                        evidence=evidence,
+                        impact=impact,
+                        project_profile=project_profile,
+                        policy=policy,
+                        clusters=active_clusters,
+                        memory_snapshot=memory_snapshot,
+                        volatile_metadata=volatile,
+                    )
+                    # Reuse the existing downstream ActionAgent block below.
+                    merged_variant = False
+                    action = ActionOutput(results=[])
+                    action_trace = None
+                else:
+                    impact = ImpactOutput(results=[item.impact for item in combined.results])
+                    action = ActionOutput(
+                        results=[
+                            item.action for item in combined.results if item.event_id in action_ids
+                        ]
+                    )
+                    repair_rounds_before = self.repair.repair_rounds_used
+                    evidence, impact = await self._maybe_run_impact_evidence_repair(
+                        events=impact_events,
+                        routes=routes,
+                        evidence=evidence,
+                        impact=impact,
+                        project_profile=project_profile,
+                        policy=policy,
+                        clusters=active_clusters,
+                        memory_snapshot=memory_snapshot,
+                        volatile_metadata=volatile,
+                    )
+                    if self.repair.repair_rounds_used > repair_rounds_before and action_events:
+                        repaired_action_impact = ImpactOutput(
+                            results=[
+                                item for item in impact.results if item.event_id in action_ids
+                            ]
+                        )
+                        action = self.action.fallback(action_events, repaired_action_impact)
+                        self.trace.steps.append(
+                            TraceStep(
+                                step="merged_action_recomputed_after_repair",
+                                status="success",
+                                agent="DeterministicActionRecompute",
+                                input_count=len(action_events),
+                                output_count=len(action.results),
+                                duration_ms=0,
+                                metadata={"harness_variant": self.harness_variant.value},
+                                detail=(
+                                    "Impact evidence repair changed the combined semantic result; "
+                                    "actions were recomputed deterministically from repaired impact."
+                                ),
+                            )
+                        )
             else:
                 impact_call = self.impact.build_call(
                     impact_events,
@@ -880,6 +969,7 @@ class LLMAgentTeamRunner:
             in {
                 HarnessVariant.DETERMINISTIC_SUPERVISOR_DEFERRED_LEARNING,
                 HarnessVariant.DETERMINISTIC_EVIDENCE_RESOLVER,
+                HarnessVariant.DETERMINISTIC_EVIDENCE_IMPACT_ACTION,
                 HarnessVariant.SELECTIVE_EVIDENCE_RESEARCHER,
                 HarnessVariant.SELECTIVE_EVIDENCE_IMPACT_ACTION,
                 HarnessVariant.SELECTIVE_EVIDENCE_IMPACT_ACTION_VERIFIER,
@@ -949,6 +1039,146 @@ class LLMAgentTeamRunner:
             assessment.decision.value in {"action_required", "alert"} for assessment in assessments
         )
         return not high_priority and not list(feedback_history)
+
+    async def run_narrative(
+        self,
+        events: list[SignalEvent],
+        assessments: list[SignalAssessment],
+        *,
+        project_profile: dict[str, Any],
+        policy: dict[str, Any],
+        run_id: str = "",
+    ) -> list[SignalAssessment]:
+        """Attach Agent-written product copy without changing guarded decisions."""
+
+        if not events or not assessments:
+            return assessments
+        assessment_ids = {item.event_id for item in assessments}
+        narrative_events = [event for event in events if event.event_id in assessment_ids]
+        if not narrative_events:
+            return assessments
+        call = self.narrative.build_call(
+            narrative_events,
+            assessments,
+            project_profile=project_profile,
+            policy=policy,
+            volatile_metadata={
+                "run_id": run_id,
+                "provider": self.provider.name,
+                "model": self.provider.model,
+                "presentation_only": True,
+            },
+        )
+        output, trace_index = await self._invoke(
+            call,
+            ProjectNarrativeOutput,
+            lambda: self.narrative.fallback(
+                narrative_events, assessments, project_profile=project_profile
+            ),
+            event_ids=[event.event_id for event in narrative_events],
+        )
+        expected_order = [event.event_id for event in narrative_events]
+        expected_ids = set(expected_order)
+        current_by_id = {
+            item.event_id: item
+            for item in output.results
+            if item.event_id in expected_ids
+        }
+        missing_ids = [event_id for event_id in expected_order if event_id not in current_by_id]
+        if missing_ids and not self.trace.steps[trace_index].fallback_used:
+            missing_set = set(missing_ids)
+            repair_events = [
+                event for event in narrative_events if event.event_id in missing_set
+            ]
+            repair_assessments = [
+                item for item in assessments if item.event_id in missing_set
+            ]
+            repair_call = self.narrative.build_call(
+                repair_events,
+                repair_assessments,
+                project_profile=project_profile,
+                policy=policy,
+                volatile_metadata={
+                    "run_id": run_id,
+                    "provider": self.provider.name,
+                    "model": self.provider.model,
+                    "presentation_only": True,
+                    "coverage_repair": True,
+                    "missing_event_ids": missing_ids,
+                },
+            )
+            repair_call = replace(
+                repair_call,
+                user_prompt=(
+                    repair_call.user_prompt.rstrip()
+                    + "\n\nCOVERAGE REPAIR: Return exactly one results item for each "
+                    + f"missing event_id in this request: {missing_ids}. "
+                    + "Copy event_id verbatim and return no extra event IDs."
+                ),
+            )
+            repaired, repair_trace_index = await self._invoke(
+                repair_call,
+                ProjectNarrativeOutput,
+                lambda: self.narrative.fallback(
+                    repair_events, repair_assessments, project_profile=project_profile
+                ),
+                event_ids=missing_ids,
+            )
+            for item in repaired.results:
+                if item.event_id in missing_set and item.event_id not in current_by_id:
+                    current_by_id[item.event_id] = item
+            output = output.model_copy(
+                update={
+                    "results": [
+                        current_by_id[event_id]
+                        for event_id in expected_order
+                        if event_id in current_by_id
+                    ]
+                }
+            )
+            if set(current_by_id) == expected_ids:
+                repair_trace = self.trace.steps[repair_trace_index]
+                self.trace.steps[repair_trace_index] = repair_trace.model_copy(
+                    update={
+                        "detail": (
+                            (repair_trace.detail + " ") if repair_trace.detail else ""
+                        )
+                        + "Semantic coverage repair completed for missing narrative event_ids."
+                    }
+                )
+            else:
+                output = self._ensure_coverage(
+                    output,
+                    expected_ids=expected_ids,
+                    fallback=lambda: self.narrative.fallback(
+                        narrative_events, assessments, project_profile=project_profile
+                    ),
+                    trace_index=repair_trace_index,
+                )
+        else:
+            output = self._ensure_coverage(
+                output,
+                expected_ids=expected_ids,
+                fallback=lambda: self.narrative.fallback(
+                    narrative_events, assessments, project_profile=project_profile
+                ),
+                trace_index=trace_index,
+            )
+        output = self.narrative.sanitize_output(output)
+        narrative_by_id = {item.event_id: item for item in output.results}
+        return [
+            assessment.model_copy(
+                update={
+                    "what_changed_zh": narrative_by_id[assessment.event_id].what_changed_zh,
+                    "why_relevant_zh": narrative_by_id[assessment.event_id].why_relevant_zh,
+                    "action_items_zh": narrative_by_id[assessment.event_id].recommended_actions_zh,
+                    "report_summary_zh": output.report_zh,
+                }
+            )
+            if assessment.event_id in narrative_by_id
+            else assessment
+            for assessment in assessments
+        ]
 
     async def run_learning(
         self,

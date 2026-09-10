@@ -1,0 +1,2963 @@
+{
+  "suite": "signalharness-capability-v1",
+  "description": "Curated hard-case capability set for product relevance, grounded explanation, uncertainty, action quality, and ranking. It is intentionally distinct from the 40-case regression protection suite.",
+  "dataset_role": "capability",
+  "thresholds": {
+    "decision_acceptance": 0.75,
+    "category_accuracy": 0.75,
+    "ndcg_at_5": 0.75,
+    "ndcg_at_10": 0.8,
+    "fact_coverage": 0.65,
+    "project_specificity": 0.65,
+    "action_coverage": 0.6,
+    "uncertainty_pass_rate": 0.8,
+    "forbidden_claim_pass_rate": 0.95,
+    "internal_leakage_pass_rate": 1.0,
+    "language_pass_rate": 0.9,
+    "hard_negative_accuracy": 0.85
+  },
+  "cases": [
+    {
+      "id": "cap-001",
+      "title": "Pydantic v3 changes JSON Schema validation defaults",
+      "tags": [
+        "dependency",
+        "breaking",
+        "schema"
+      ],
+      "truth_status": "verified",
+      "event": {
+        "event_id": "cap-001",
+        "source_type": "github_release",
+        "source_name": "pydantic",
+        "title": "Pydantic v3 changes JSON Schema validation defaults",
+        "content": "Pydantic v3 introduces a breaking JSON Schema validation default and requires a migration for strict structured outputs.",
+        "url": "https://eval.signalharness.local/cap-001",
+        "published_at": "2026-09-08T08:00:00Z",
+        "change_kind": "released",
+        "current_version": "3.0.0",
+        "previous_version": "2.12.0",
+        "raw_payload": {},
+        "collected_at": "2026-09-08T08:05:00Z"
+      },
+      "evidence": {
+        "context_summary": "Pydantic v3 introduces a breaking JSON Schema validation default and requires a migration for strict structured outputs.",
+        "confidence": 0.9,
+        "source_quality": "official",
+        "evidence_urls": [
+          "https://eval.signalharness.local/cap-001"
+        ],
+        "uncertainty": "",
+        "unsupported_claims": []
+      },
+      "expected": {
+        "acceptable_decisions": [
+          "alert",
+          "action_required"
+        ],
+        "expected_category": "dependency_update",
+        "relevance_grade": 3,
+        "must_include_facts": [
+          {
+            "name": "pydantic",
+            "any_of": [
+              "pydantic"
+            ]
+          },
+          {
+            "name": "schema",
+            "any_of": [
+              "schema",
+              "结构化"
+            ]
+          },
+          {
+            "name": "breaking",
+            "any_of": [
+              "breaking",
+              "migration",
+              "迁移"
+            ]
+          }
+        ],
+        "project_concepts": [
+          {
+            "name": "pydantic",
+            "any_of": [
+              "pydantic"
+            ]
+          },
+          {
+            "name": "structured-output",
+            "any_of": [
+              "schema",
+              "结构化"
+            ]
+          }
+        ],
+        "acceptable_action_concepts": [
+          {
+            "name": "migration",
+            "any_of": [
+              "migration",
+              "迁移"
+            ]
+          },
+          {
+            "name": "regression",
+            "any_of": [
+              "regression",
+              "回归",
+              "测试"
+            ]
+          }
+        ],
+        "forbidden_claims": [],
+        "forbidden_actions": [
+          "upgrade production immediately"
+        ],
+        "require_uncertainty": false,
+        "require_chinese_narrative": true,
+        "trajectory": {
+          "required_agents": [
+            "ContextEvidenceAgent",
+            "ImpactAnalystAgent",
+            "ActionPlannerAgent",
+            "ProjectNarrativeAgent"
+          ],
+          "required_tools": [
+            "github_signal"
+          ],
+          "max_tool_requests": 8,
+          "require_no_fallback": true,
+          "require_schema_valid": true
+        }
+      }
+    },
+    {
+      "id": "cap-002",
+      "title": "Typer 0.18 ships new colorized help formatting",
+      "tags": [
+        "dependency",
+        "cosmetic",
+        "hard-negative"
+      ],
+      "truth_status": "verified",
+      "event": {
+        "event_id": "cap-002",
+        "source_type": "github_release",
+        "source_name": "typer",
+        "title": "Typer 0.18 ships new colorized help formatting",
+        "content": "Typer 0.18 adds colorized help formatting and examples without runtime or compatibility changes.",
+        "url": "https://eval.signalharness.local/cap-002",
+        "published_at": "2026-09-08T08:00:00Z",
+        "change_kind": "released",
+        "current_version": "0.18.0",
+        "previous_version": "0.17.0",
+        "raw_payload": {},
+        "collected_at": "2026-09-08T08:05:00Z"
+      },
+      "evidence": {
+        "context_summary": "Typer 0.18 adds colorized help formatting and examples without runtime or compatibility changes.",
+        "confidence": 0.9,
+        "source_quality": "official",
+        "evidence_urls": [
+          "https://eval.signalharness.local/cap-002"
+        ],
+        "uncertainty": "",
+        "unsupported_claims": []
+      },
+      "expected": {
+        "acceptable_decisions": [
+          "ignore",
+          "save"
+        ],
+        "expected_category": "ecosystem_issue",
+        "relevance_grade": 0,
+        "must_include_facts": [
+          {
+            "name": "typer",
+            "any_of": [
+              "typer"
+            ]
+          },
+          {
+            "name": "formatting",
+            "any_of": [
+              "colorized",
+              "formatting"
+            ]
+          }
+        ],
+        "project_concepts": [
+          {
+            "name": "typer",
+            "any_of": [
+              "typer"
+            ]
+          }
+        ],
+        "acceptable_action_concepts": [
+          {
+            "name": "release-notes",
+            "any_of": [
+              "release notes",
+              "核对"
+            ]
+          }
+        ],
+        "forbidden_claims": [
+          "breaking change",
+          "must upgrade"
+        ],
+        "forbidden_actions": [],
+        "require_uncertainty": false,
+        "require_chinese_narrative": true,
+        "trajectory": {}
+      }
+    },
+    {
+      "id": "cap-003",
+      "title": "HTTPX CVE affects currently used request path",
+      "tags": [
+        "dependency",
+        "security",
+        "critical"
+      ],
+      "truth_status": "verified",
+      "event": {
+        "event_id": "cap-003",
+        "source_type": "github_release",
+        "source_name": "httpx",
+        "title": "HTTPX CVE affects currently used request path",
+        "content": "HTTPX security advisory CVE-2026-41001 affects redirect handling used by API clients before 0.29.2; the fixed release is 0.29.2.",
+        "url": "https://eval.signalharness.local/cap-003",
+        "published_at": "2026-09-08T08:00:00Z",
+        "change_kind": "released",
+        "current_version": null,
+        "previous_version": null,
+        "raw_payload": {},
+        "collected_at": "2026-09-08T08:05:00Z"
+      },
+      "evidence": {
+        "context_summary": "HTTPX security advisory CVE-2026-41001 affects redirect handling used by API clients before 0.29.2; the fixed release is 0.29.2.",
+        "confidence": 0.9,
+        "source_quality": "official",
+        "evidence_urls": [
+          "https://eval.signalharness.local/cap-003"
+        ],
+        "uncertainty": "",
+        "unsupported_claims": []
+      },
+      "expected": {
+        "acceptable_decisions": [
+          "alert",
+          "action_required"
+        ],
+        "expected_category": "dependency_update",
+        "relevance_grade": 3,
+        "must_include_facts": [
+          {
+            "name": "httpx",
+            "any_of": [
+              "httpx"
+            ]
+          },
+          {
+            "name": "cve",
+            "any_of": [
+              "cve-2026-41001"
+            ]
+          },
+          {
+            "name": "fixed-version",
+            "any_of": [
+              "0.29.2"
+            ]
+          }
+        ],
+        "project_concepts": [
+          {
+            "name": "httpx",
+            "any_of": [
+              "httpx"
+            ]
+          },
+          {
+            "name": "api",
+            "any_of": [
+              "api"
+            ]
+          }
+        ],
+        "acceptable_action_concepts": [
+          {
+            "name": "upgrade",
+            "any_of": [
+              "0.29.2",
+              "升级"
+            ]
+          },
+          {
+            "name": "regression",
+            "any_of": [
+              "redirect",
+              "回归",
+              "测试"
+            ]
+          }
+        ],
+        "forbidden_claims": [],
+        "forbidden_actions": [
+          "ignore the advisory"
+        ],
+        "require_uncertainty": false,
+        "require_chinese_narrative": true,
+        "trajectory": {}
+      }
+    },
+    {
+      "id": "cap-004",
+      "title": "HTTPX advisory does not affect the project resolved version",
+      "tags": [
+        "dependency",
+        "security",
+        "hard-negative"
+      ],
+      "truth_status": "verified",
+      "event": {
+        "event_id": "cap-004",
+        "source_type": "github_release",
+        "source_name": "httpx",
+        "title": "HTTPX advisory does not affect the project resolved version",
+        "content": "CVE-2026-41001 affects HTTPX versions below 0.29.2. The project evidence says the resolved HTTPX version is 0.29.3, so the installed version is outside the affected range.",
+        "url": "https://eval.signalharness.local/cap-004",
+        "published_at": "2026-09-08T08:00:00Z",
+        "change_kind": "released",
+        "current_version": null,
+        "previous_version": null,
+        "raw_payload": {},
+        "collected_at": "2026-09-08T08:05:00Z"
+      },
+      "evidence": {
+        "context_summary": "CVE-2026-41001 affects HTTPX versions below 0.29.2. The project evidence says the resolved HTTPX version is 0.29.3, so the installed version is outside the affected range.",
+        "confidence": 0.9,
+        "source_quality": "official",
+        "evidence_urls": [
+          "https://eval.signalharness.local/cap-004"
+        ],
+        "uncertainty": "",
+        "unsupported_claims": []
+      },
+      "expected": {
+        "acceptable_decisions": [
+          "ignore",
+          "save"
+        ],
+        "expected_category": "dependency_update",
+        "relevance_grade": 0,
+        "must_include_facts": [
+          {
+            "name": "cve",
+            "any_of": [
+              "cve-2026-41001"
+            ]
+          },
+          {
+            "name": "resolved",
+            "any_of": [
+              "0.29.3"
+            ]
+          },
+          {
+            "name": "not-affected",
+            "any_of": [
+              "outside the affected range",
+              "not affected"
+            ]
+          }
+        ],
+        "project_concepts": [
+          {
+            "name": "httpx",
+            "any_of": [
+              "httpx"
+            ]
+          }
+        ],
+        "acceptable_action_concepts": [
+          {
+            "name": "verify-version",
+            "any_of": [
+              "0.29.3",
+              "核对"
+            ]
+          }
+        ],
+        "forbidden_claims": [
+          "SignalHarness is vulnerable",
+          "currently affected"
+        ],
+        "forbidden_actions": [
+          "downgrade",
+          "emergency upgrade"
+        ],
+        "require_uncertainty": false,
+        "require_chinese_narrative": true,
+        "trajectory": {}
+      }
+    },
+    {
+      "id": "cap-005",
+      "title": "FastAPI removes deprecated lifespan compatibility path",
+      "tags": [
+        "dependency",
+        "breaking",
+        "runtime"
+      ],
+      "truth_status": "verified",
+      "event": {
+        "event_id": "cap-005",
+        "source_type": "github_release",
+        "source_name": "fastapi",
+        "title": "FastAPI removes deprecated lifespan compatibility path",
+        "content": "FastAPI removes a deprecated lifespan compatibility path; applications using the old startup hook must migrate before upgrading.",
+        "url": "https://eval.signalharness.local/cap-005",
+        "published_at": "2026-09-08T08:00:00Z",
+        "change_kind": "released",
+        "current_version": null,
+        "previous_version": null,
+        "raw_payload": {},
+        "collected_at": "2026-09-08T08:05:00Z"
+      },
+      "evidence": {
+        "context_summary": "FastAPI removes a deprecated lifespan compatibility path; applications using the old startup hook must migrate before upgrading.",
+        "confidence": 0.9,
+        "source_quality": "official",
+        "evidence_urls": [
+          "https://eval.signalharness.local/cap-005"
+        ],
+        "uncertainty": "",
+        "unsupported_claims": []
+      },
+      "expected": {
+        "acceptable_decisions": [
+          "alert",
+          "action_required"
+        ],
+        "expected_category": "dependency_update",
+        "relevance_grade": 3,
+        "must_include_facts": [
+          {
+            "name": "fastapi",
+            "any_of": [
+              "fastapi"
+            ]
+          },
+          {
+            "name": "lifespan",
+            "any_of": [
+              "lifespan"
+            ]
+          },
+          {
+            "name": "migration",
+            "any_of": [
+              "migrate",
+              "迁移"
+            ]
+          }
+        ],
+        "project_concepts": [
+          {
+            "name": "fastapi",
+            "any_of": [
+              "fastapi"
+            ]
+          },
+          {
+            "name": "api-service",
+            "any_of": [
+              "api service"
+            ]
+          }
+        ],
+        "acceptable_action_concepts": [
+          {
+            "name": "migration",
+            "any_of": [
+              "lifespan",
+              "迁移"
+            ]
+          },
+          {
+            "name": "tests",
+            "any_of": [
+              "startup",
+              "测试",
+              "回归"
+            ]
+          }
+        ],
+        "forbidden_claims": [],
+        "forbidden_actions": [],
+        "require_uncertainty": false,
+        "require_chinese_narrative": true,
+        "trajectory": {}
+      }
+    },
+    {
+      "id": "cap-006",
+      "title": "Rich publishes new terminal theme presets",
+      "tags": [
+        "dependency",
+        "cosmetic",
+        "hard-negative"
+      ],
+      "truth_status": "verified",
+      "event": {
+        "event_id": "cap-006",
+        "source_type": "github_release",
+        "source_name": "rich",
+        "title": "Rich publishes new terminal theme presets",
+        "content": "Rich publishes additional terminal theme presets with no API or rendering compatibility change.",
+        "url": "https://eval.signalharness.local/cap-006",
+        "published_at": "2026-09-08T08:00:00Z",
+        "change_kind": "released",
+        "current_version": null,
+        "previous_version": null,
+        "raw_payload": {},
+        "collected_at": "2026-09-08T08:05:00Z"
+      },
+      "evidence": {
+        "context_summary": "Rich publishes additional terminal theme presets with no API or rendering compatibility change.",
+        "confidence": 0.9,
+        "source_quality": "official",
+        "evidence_urls": [
+          "https://eval.signalharness.local/cap-006"
+        ],
+        "uncertainty": "",
+        "unsupported_claims": []
+      },
+      "expected": {
+        "acceptable_decisions": [
+          "ignore"
+        ],
+        "expected_category": "ecosystem_issue",
+        "relevance_grade": 0,
+        "must_include_facts": [
+          {
+            "name": "rich",
+            "any_of": [
+              "rich"
+            ]
+          },
+          {
+            "name": "theme",
+            "any_of": [
+              "theme"
+            ]
+          }
+        ],
+        "project_concepts": [
+          {
+            "name": "rich",
+            "any_of": [
+              "rich"
+            ]
+          }
+        ],
+        "acceptable_action_concepts": [],
+        "forbidden_claims": [
+          "breaking",
+          "security issue",
+          "requires migration"
+        ],
+        "forbidden_actions": [],
+        "require_uncertainty": false,
+        "require_chinese_narrative": true,
+        "trajectory": {}
+      }
+    },
+    {
+      "id": "cap-007",
+      "title": "PyYAML unsafe_load vulnerability does not cover safe_load path",
+      "tags": [
+        "security",
+        "dependency",
+        "hard-negative"
+      ],
+      "truth_status": "partially_verified",
+      "event": {
+        "event_id": "cap-007",
+        "source_type": "github_release",
+        "source_name": "pyyaml",
+        "title": "PyYAML unsafe_load vulnerability does not cover safe_load path",
+        "content": "A parser vulnerability is reported for unsafe_load on crafted tags. Current project usage evidence only shows safe_load, so exposure is not established.",
+        "url": "https://eval.signalharness.local/cap-007",
+        "published_at": "2026-09-08T08:00:00Z",
+        "change_kind": "released",
+        "current_version": null,
+        "previous_version": null,
+        "raw_payload": {},
+        "collected_at": "2026-09-08T08:05:00Z"
+      },
+      "evidence": {
+        "context_summary": "A parser vulnerability is reported for unsafe_load on crafted tags. Current project usage evidence only shows safe_load, so exposure is not established.",
+        "confidence": 0.72,
+        "source_quality": "official",
+        "evidence_urls": [
+          "https://eval.signalharness.local/cap-007"
+        ],
+        "uncertainty": "The claim is not fully verified.",
+        "unsupported_claims": [
+          "Implementation status is not verified."
+        ]
+      },
+      "expected": {
+        "acceptable_decisions": [
+          "ignore",
+          "save"
+        ],
+        "expected_category": "dependency_update",
+        "relevance_grade": 1,
+        "must_include_facts": [
+          {
+            "name": "pyyaml",
+            "any_of": [
+              "pyyaml"
+            ]
+          },
+          {
+            "name": "unsafe",
+            "any_of": [
+              "unsafe_load"
+            ]
+          },
+          {
+            "name": "safe",
+            "any_of": [
+              "safe_load"
+            ]
+          }
+        ],
+        "project_concepts": [
+          {
+            "name": "pyyaml",
+            "any_of": [
+              "pyyaml"
+            ]
+          }
+        ],
+        "acceptable_action_concepts": [
+          {
+            "name": "verify-usage",
+            "any_of": [
+              "safe_load",
+              "核对"
+            ]
+          }
+        ],
+        "forbidden_claims": [
+          "SignalHarness is definitely vulnerable"
+        ],
+        "forbidden_actions": [],
+        "require_uncertainty": true,
+        "require_chinese_narrative": true,
+        "trajectory": {}
+      }
+    },
+    {
+      "id": "cap-008",
+      "title": "MCP Streamable HTTP changes session resumption semantics",
+      "tags": [
+        "mcp",
+        "protocol",
+        "runtime"
+      ],
+      "truth_status": "verified",
+      "event": {
+        "event_id": "cap-008",
+        "source_type": "web_change",
+        "source_name": "MCP Specification",
+        "title": "MCP Streamable HTTP changes session resumption semantics",
+        "content": "The Model Context Protocol updates Streamable HTTP session resumption semantics and initialize/session behavior.",
+        "url": "https://eval.signalharness.local/cap-008",
+        "published_at": "2026-09-08T08:00:00Z",
+        "change_kind": "updated",
+        "current_version": null,
+        "previous_version": null,
+        "raw_payload": {
+          "entity_type": "protocol",
+          "entity_name": "Model Context Protocol"
+        },
+        "collected_at": "2026-09-08T08:05:00Z"
+      },
+      "evidence": {
+        "context_summary": "The Model Context Protocol updates Streamable HTTP session resumption semantics and initialize/session behavior.",
+        "confidence": 0.9,
+        "source_quality": "official",
+        "evidence_urls": [
+          "https://eval.signalharness.local/cap-008"
+        ],
+        "uncertainty": "",
+        "unsupported_claims": []
+      },
+      "expected": {
+        "acceptable_decisions": [
+          "alert",
+          "action_required"
+        ],
+        "expected_category": "agent_runtime_signal",
+        "relevance_grade": 3,
+        "must_include_facts": [
+          {
+            "name": "mcp",
+            "any_of": [
+              "model context protocol",
+              "mcp"
+            ]
+          },
+          {
+            "name": "streamable-http",
+            "any_of": [
+              "streamable http"
+            ]
+          },
+          {
+            "name": "session",
+            "any_of": [
+              "session",
+              "resumption"
+            ]
+          }
+        ],
+        "project_concepts": [
+          {
+            "name": "mcp",
+            "any_of": [
+              "mcp",
+              "model context protocol"
+            ]
+          },
+          {
+            "name": "runtime",
+            "any_of": [
+              "session",
+              "transport"
+            ]
+          }
+        ],
+        "acceptable_action_concepts": [
+          {
+            "name": "compat-test",
+            "any_of": [
+              "session",
+              "测试",
+              "回归"
+            ]
+          },
+          {
+            "name": "spec",
+            "any_of": [
+              "spec",
+              "核对"
+            ]
+          }
+        ],
+        "forbidden_claims": [],
+        "forbidden_actions": [],
+        "require_uncertainty": false,
+        "require_chinese_narrative": true,
+        "trajectory": {
+          "required_agents": [
+            "ContextEvidenceAgent",
+            "ImpactAnalystAgent",
+            "ActionPlannerAgent",
+            "ProjectNarrativeAgent"
+          ],
+          "required_tools": [
+            "web_change"
+          ],
+          "max_tool_requests": 8,
+          "require_no_fallback": true,
+          "require_schema_valid": true
+        }
+      }
+    },
+    {
+      "id": "cap-009",
+      "title": "MCP outputSchema proposal is discussed but not merged",
+      "tags": [
+        "mcp",
+        "schema",
+        "proposal",
+        "uncertainty"
+      ],
+      "truth_status": "partially_verified",
+      "event": {
+        "event_id": "cap-009",
+        "source_type": "github_issue",
+        "source_name": "MCP Specification",
+        "title": "MCP outputSchema proposal is discussed but not merged",
+        "content": "An upstream proposal discusses outputSchema and structuredContent compatibility, but the issue is still open and no specification release contains the change.",
+        "url": "https://eval.signalharness.local/cap-009",
+        "published_at": "2026-09-08T08:00:00Z",
+        "change_kind": "updated",
+        "current_version": null,
+        "previous_version": null,
+        "raw_payload": {
+          "entity_type": "protocol",
+          "entity_name": "Model Context Protocol"
+        },
+        "collected_at": "2026-09-08T08:05:00Z"
+      },
+      "evidence": {
+        "context_summary": "An upstream proposal discusses outputSchema and structuredContent compatibility, but the issue is still open and no specification release contains the change.",
+        "confidence": 0.7,
+        "source_quality": "maintainer",
+        "evidence_urls": [
+          "https://eval.signalharness.local/cap-009"
+        ],
+        "uncertainty": "The claim is not fully verified.",
+        "unsupported_claims": [
+          "Implementation status is not verified."
+        ]
+      },
+      "expected": {
+        "acceptable_decisions": [
+          "save"
+        ],
+        "expected_category": "structured_output_signal",
+        "relevance_grade": 2,
+        "must_include_facts": [
+          {
+            "name": "proposal",
+            "any_of": [
+              "proposal"
+            ]
+          },
+          {
+            "name": "schema",
+            "any_of": [
+              "outputschema",
+              "structuredcontent",
+              "结构化"
+            ]
+          },
+          {
+            "name": "not-merged",
+            "any_of": [
+              "still open",
+              "no specification release"
+            ]
+          }
+        ],
+        "project_concepts": [
+          {
+            "name": "mcp",
+            "any_of": [
+              "mcp"
+            ]
+          },
+          {
+            "name": "schema",
+            "any_of": [
+              "schema",
+              "结构化"
+            ]
+          }
+        ],
+        "acceptable_action_concepts": [
+          {
+            "name": "watch",
+            "any_of": [
+              "issue",
+              "核对"
+            ]
+          },
+          {
+            "name": "no-migration",
+            "any_of": [
+              "specification release"
+            ]
+          }
+        ],
+        "forbidden_claims": [
+          "MCP now requires outputSchema",
+          "the spec has changed"
+        ],
+        "forbidden_actions": [
+          "migrate production now"
+        ],
+        "require_uncertainty": true,
+        "require_chinese_narrative": true,
+        "trajectory": {
+          "required_agents": [
+            "ContextEvidenceAgent",
+            "ImpactAnalystAgent",
+            "ActionPlannerAgent",
+            "ProjectNarrativeAgent"
+          ],
+          "required_tools": [
+            "github_signal"
+          ],
+          "max_tool_requests": 8,
+          "require_no_fallback": true,
+          "require_schema_valid": true
+        }
+      }
+    },
+    {
+      "id": "cap-010",
+      "title": "Proposal to enforce runtime tool permission allowlists",
+      "tags": [
+        "mcp",
+        "permission",
+        "proposal"
+      ],
+      "truth_status": "partially_verified",
+      "event": {
+        "event_id": "cap-010",
+        "source_type": "github_issue",
+        "source_name": "langchain-ai/langgraph",
+        "title": "Proposal to enforce runtime tool permission allowlists",
+        "content": "Proposal: runtime permission policy would expose only explicitly enabled tools through an allowlist. The proposal is not merged.",
+        "url": "https://eval.signalharness.local/cap-010",
+        "published_at": "2026-09-08T08:00:00Z",
+        "change_kind": "updated",
+        "current_version": null,
+        "previous_version": null,
+        "raw_payload": {},
+        "collected_at": "2026-09-08T08:05:00Z"
+      },
+      "evidence": {
+        "context_summary": "Proposal: runtime permission policy would expose only explicitly enabled tools through an allowlist. The proposal is not merged.",
+        "confidence": 0.68,
+        "source_quality": "maintainer",
+        "evidence_urls": [
+          "https://eval.signalharness.local/cap-010"
+        ],
+        "uncertainty": "The claim is not fully verified.",
+        "unsupported_claims": [
+          "Implementation status is not verified."
+        ]
+      },
+      "expected": {
+        "acceptable_decisions": [
+          "save",
+          "alert"
+        ],
+        "expected_category": "policy_signal",
+        "relevance_grade": 3,
+        "must_include_facts": [
+          {
+            "name": "allowlist",
+            "any_of": [
+              "allowlist"
+            ]
+          },
+          {
+            "name": "permission",
+            "any_of": [
+              "permission",
+              "权限"
+            ]
+          },
+          {
+            "name": "proposal",
+            "any_of": [
+              "proposal",
+              "not merged"
+            ]
+          }
+        ],
+        "project_concepts": [
+          {
+            "name": "tool-guard",
+            "any_of": [
+              "tool guard",
+              "permission",
+              "权限"
+            ]
+          },
+          {
+            "name": "mcp",
+            "any_of": [
+              "mcp",
+              "tool"
+            ]
+          }
+        ],
+        "acceptable_action_concepts": [
+          {
+            "name": "compare-policy",
+            "any_of": [
+              "allowlist",
+              "核对"
+            ]
+          },
+          {
+            "name": "regression",
+            "any_of": [
+              "tool",
+              "回归",
+              "测试"
+            ]
+          }
+        ],
+        "forbidden_claims": [
+          "LangGraph already enforces the allowlist"
+        ],
+        "forbidden_actions": [],
+        "require_uncertainty": true,
+        "require_chinese_narrative": true,
+        "trajectory": {}
+      }
+    },
+    {
+      "id": "cap-011",
+      "title": "MCP documentation fixes a README typo only",
+      "tags": [
+        "mcp",
+        "docs",
+        "hard-negative"
+      ],
+      "truth_status": "verified",
+      "event": {
+        "event_id": "cap-011",
+        "source_type": "github_issue",
+        "source_name": "MCP Specification",
+        "title": "MCP documentation fixes a README typo only",
+        "content": "Documentation typo and wording correction in README example; no protocol, transport, schema, or runtime behavior changes.",
+        "url": "https://eval.signalharness.local/cap-011",
+        "published_at": "2026-09-08T08:00:00Z",
+        "change_kind": "updated",
+        "current_version": null,
+        "previous_version": null,
+        "raw_payload": {
+          "entity_type": "protocol",
+          "entity_name": "Model Context Protocol"
+        },
+        "collected_at": "2026-09-08T08:05:00Z"
+      },
+      "evidence": {
+        "context_summary": "Documentation typo and wording correction in README example; no protocol, transport, schema, or runtime behavior changes.",
+        "confidence": 0.9,
+        "source_quality": "official",
+        "evidence_urls": [
+          "https://eval.signalharness.local/cap-011"
+        ],
+        "uncertainty": "",
+        "unsupported_claims": []
+      },
+      "expected": {
+        "acceptable_decisions": [
+          "ignore"
+        ],
+        "expected_category": "docs_change_signal",
+        "relevance_grade": 0,
+        "must_include_facts": [
+          {
+            "name": "docs",
+            "any_of": [
+              "documentation",
+              "readme"
+            ]
+          },
+          {
+            "name": "typo",
+            "any_of": [
+              "typo",
+              "wording"
+            ]
+          }
+        ],
+        "project_concepts": [
+          {
+            "name": "mcp",
+            "any_of": [
+              "mcp"
+            ]
+          }
+        ],
+        "acceptable_action_concepts": [],
+        "forbidden_claims": [
+          "protocol behavior changed",
+          "migration required"
+        ],
+        "forbidden_actions": [],
+        "require_uncertainty": false,
+        "require_chinese_narrative": true,
+        "trajectory": {}
+      }
+    },
+    {
+      "id": "cap-012",
+      "title": "OpenAI-compatible JSON mode changes response validation behavior",
+      "tags": [
+        "provider",
+        "api",
+        "schema"
+      ],
+      "truth_status": "verified",
+      "event": {
+        "event_id": "cap-012",
+        "source_type": "web_change",
+        "source_name": "OpenAI-compatible provider API",
+        "title": "OpenAI-compatible JSON mode changes response validation behavior",
+        "content": "The provider API changes JSON mode validation: schema violations now return an explicit API error instead of best-effort text.",
+        "url": "https://eval.signalharness.local/cap-012",
+        "published_at": "2026-09-08T08:00:00Z",
+        "change_kind": "updated",
+        "current_version": null,
+        "previous_version": null,
+        "raw_payload": {},
+        "collected_at": "2026-09-08T08:05:00Z"
+      },
+      "evidence": {
+        "context_summary": "The provider API changes JSON mode validation: schema violations now return an explicit API error instead of best-effort text.",
+        "confidence": 0.9,
+        "source_quality": "official",
+        "evidence_urls": [
+          "https://eval.signalharness.local/cap-012"
+        ],
+        "uncertainty": "",
+        "unsupported_claims": []
+      },
+      "expected": {
+        "acceptable_decisions": [
+          "alert",
+          "action_required"
+        ],
+        "expected_category": "provider_compatibility_signal",
+        "relevance_grade": 3,
+        "must_include_facts": [
+          {
+            "name": "provider",
+            "any_of": [
+              "provider"
+            ]
+          },
+          {
+            "name": "json-mode",
+            "any_of": [
+              "json mode"
+            ]
+          },
+          {
+            "name": "validation",
+            "any_of": [
+              "validation",
+              "api error"
+            ]
+          }
+        ],
+        "project_concepts": [
+          {
+            "name": "provider-adapter",
+            "any_of": [
+              "provider adapter"
+            ]
+          },
+          {
+            "name": "schema",
+            "any_of": [
+              "schema",
+              "结构化"
+            ]
+          }
+        ],
+        "acceptable_action_concepts": [
+          {
+            "name": "adapter-test",
+            "any_of": [
+              "provider",
+              "测试",
+              "回归"
+            ]
+          },
+          {
+            "name": "error-handling",
+            "any_of": [
+              "api error",
+              "error handling"
+            ]
+          }
+        ],
+        "forbidden_claims": [],
+        "forbidden_actions": [],
+        "require_uncertainty": false,
+        "require_chinese_narrative": true,
+        "trajectory": {}
+      }
+    },
+    {
+      "id": "cap-013",
+      "title": "New model benchmark improves coding score without API change",
+      "tags": [
+        "model",
+        "benchmark",
+        "hard-negative"
+      ],
+      "truth_status": "verified",
+      "event": {
+        "event_id": "cap-013",
+        "source_type": "rss",
+        "source_name": "Model Lab Blog",
+        "title": "New model benchmark improves coding score without API change",
+        "content": "A new model reports higher coding benchmark and leaderboard scores. The API shape, tool calling contract, pricing, and model alias used by SignalHarness are unchanged.",
+        "url": "https://eval.signalharness.local/cap-013",
+        "published_at": "2026-09-08T08:00:00Z",
+        "change_kind": "updated",
+        "current_version": null,
+        "previous_version": null,
+        "raw_payload": {},
+        "collected_at": "2026-09-08T08:05:00Z"
+      },
+      "evidence": {
+        "context_summary": "A new model reports higher coding benchmark and leaderboard scores. The API shape, tool calling contract, pricing, and model alias used by SignalHarness are unchanged.",
+        "confidence": 0.9,
+        "source_quality": "official",
+        "evidence_urls": [
+          "https://eval.signalharness.local/cap-013"
+        ],
+        "uncertainty": "",
+        "unsupported_claims": []
+      },
+      "expected": {
+        "acceptable_decisions": [
+          "ignore",
+          "save"
+        ],
+        "expected_category": "evaluation_benchmark_signal",
+        "relevance_grade": 1,
+        "must_include_facts": [
+          {
+            "name": "benchmark",
+            "any_of": [
+              "benchmark",
+              "leaderboard"
+            ]
+          },
+          {
+            "name": "no-api-change",
+            "any_of": [
+              "api shape",
+              "unchanged"
+            ]
+          }
+        ],
+        "project_concepts": [
+          {
+            "name": "evaluation",
+            "any_of": [
+              "benchmark",
+              "evaluation"
+            ]
+          }
+        ],
+        "acceptable_action_concepts": [
+          {
+            "name": "optional-eval",
+            "any_of": [
+              "benchmark",
+              "eval"
+            ]
+          }
+        ],
+        "forbidden_claims": [
+          "SignalHarness must migrate",
+          "API compatibility changed"
+        ],
+        "forbidden_actions": [],
+        "require_uncertainty": false,
+        "require_chinese_narrative": true,
+        "trajectory": {}
+      }
+    },
+    {
+      "id": "cap-014",
+      "title": "Unconfigured model family launches a larger context window",
+      "tags": [
+        "model",
+        "hard-negative"
+      ],
+      "truth_status": "verified",
+      "event": {
+        "event_id": "cap-014",
+        "source_type": "rss",
+        "source_name": "Unconfigured Model News",
+        "title": "Unconfigured model family launches a larger context window",
+        "content": "A model family not configured in SignalHarness launches a larger context window and image support. No configured provider or project dependency changes.",
+        "url": "https://eval.signalharness.local/cap-014",
+        "published_at": "2026-09-08T08:00:00Z",
+        "change_kind": "updated",
+        "current_version": null,
+        "previous_version": null,
+        "raw_payload": {},
+        "collected_at": "2026-09-08T08:05:00Z"
+      },
+      "evidence": {
+        "context_summary": "A model family not configured in SignalHarness launches a larger context window and image support. No configured provider or project dependency changes.",
+        "confidence": 0.9,
+        "source_quality": "official",
+        "evidence_urls": [
+          "https://eval.signalharness.local/cap-014"
+        ],
+        "uncertainty": "",
+        "unsupported_claims": []
+      },
+      "expected": {
+        "acceptable_decisions": [
+          "ignore"
+        ],
+        "expected_category": "expert_opinion",
+        "relevance_grade": 0,
+        "must_include_facts": [
+          {
+            "name": "context",
+            "any_of": [
+              "context window"
+            ]
+          },
+          {
+            "name": "unconfigured",
+            "any_of": [
+              "not configured",
+              "unconfigured"
+            ]
+          }
+        ],
+        "project_concepts": [],
+        "acceptable_action_concepts": [],
+        "forbidden_claims": [
+          "affects the current provider adapter",
+          "must switch models"
+        ],
+        "forbidden_actions": [],
+        "require_uncertainty": false,
+        "require_chinese_narrative": true,
+        "trajectory": {}
+      }
+    },
+    {
+      "id": "cap-015",
+      "title": "LangGraph checkpoint recovery regression after restart",
+      "tags": [
+        "checkpoint",
+        "runtime",
+        "critical"
+      ],
+      "truth_status": "verified",
+      "event": {
+        "event_id": "cap-015",
+        "source_type": "github_issue",
+        "source_name": "langchain-ai/langgraph",
+        "title": "LangGraph checkpoint recovery regression after restart",
+        "content": "Checkpoint persistence regression can lose accepted runs after process restart and affects durable recovery.",
+        "url": "https://eval.signalharness.local/cap-015",
+        "published_at": "2026-09-08T08:00:00Z",
+        "change_kind": "updated",
+        "current_version": null,
+        "previous_version": null,
+        "raw_payload": {},
+        "collected_at": "2026-09-08T08:05:00Z"
+      },
+      "evidence": {
+        "context_summary": "Checkpoint persistence regression can lose accepted runs after process restart and affects durable recovery.",
+        "confidence": 0.9,
+        "source_quality": "official",
+        "evidence_urls": [
+          "https://eval.signalharness.local/cap-015"
+        ],
+        "uncertainty": "",
+        "unsupported_claims": []
+      },
+      "expected": {
+        "acceptable_decisions": [
+          "alert",
+          "action_required"
+        ],
+        "expected_category": "checkpoint_persistence_signal",
+        "relevance_grade": 3,
+        "must_include_facts": [
+          {
+            "name": "checkpoint",
+            "any_of": [
+              "checkpoint",
+              "检查点"
+            ]
+          },
+          {
+            "name": "restart",
+            "any_of": [
+              "restart"
+            ]
+          },
+          {
+            "name": "recovery",
+            "any_of": [
+              "recovery",
+              "durable"
+            ]
+          }
+        ],
+        "project_concepts": [
+          {
+            "name": "checkpoint",
+            "any_of": [
+              "checkpoint",
+              "检查点"
+            ]
+          },
+          {
+            "name": "persistence",
+            "any_of": [
+              "persistence",
+              "recovery"
+            ]
+          }
+        ],
+        "acceptable_action_concepts": [
+          {
+            "name": "restart-regression",
+            "any_of": [
+              "restart",
+              "回归",
+              "测试"
+            ]
+          },
+          {
+            "name": "recovery",
+            "any_of": [
+              "checkpoint",
+              "recovery"
+            ]
+          }
+        ],
+        "forbidden_claims": [],
+        "forbidden_actions": [],
+        "require_uncertainty": false,
+        "require_chinese_narrative": true,
+        "trajectory": {
+          "required_agents": [
+            "ContextEvidenceAgent",
+            "ImpactAnalystAgent",
+            "ActionPlannerAgent",
+            "ProjectNarrativeAgent"
+          ],
+          "required_tools": [
+            "github_signal"
+          ],
+          "max_tool_requests": 8,
+          "require_no_fallback": true,
+          "require_schema_valid": true
+        }
+      }
+    },
+    {
+      "id": "cap-016",
+      "title": "Checkpoint migration helper is announced but release evidence conflicts",
+      "tags": [
+        "checkpoint",
+        "uncertainty",
+        "conflict"
+      ],
+      "truth_status": "partially_verified",
+      "event": {
+        "event_id": "cap-016",
+        "source_type": "github_release",
+        "source_name": "langchain-ai/langgraph",
+        "title": "Checkpoint migration helper is announced but release evidence conflicts",
+        "content": "An event claims a checkpoint migration helper shipped, but the retrieved official release evidence points to a different tag and does not contain the claimed migration change.",
+        "url": "https://eval.signalharness.local/cap-016",
+        "published_at": "2026-09-08T08:00:00Z",
+        "change_kind": "released",
+        "current_version": "demo-checkpoint",
+        "previous_version": null,
+        "raw_payload": {},
+        "collected_at": "2026-09-08T08:05:00Z"
+      },
+      "evidence": {
+        "context_summary": "An event claims a checkpoint migration helper shipped, but the retrieved official release evidence points to a different tag and does not contain the claimed migration change.",
+        "confidence": 0.5,
+        "source_quality": "official",
+        "evidence_urls": [
+          "https://eval.signalharness.local/cap-016"
+        ],
+        "uncertainty": "The claim is not fully verified.",
+        "unsupported_claims": [
+          "Implementation status is not verified."
+        ]
+      },
+      "expected": {
+        "acceptable_decisions": [
+          "save"
+        ],
+        "expected_category": "ecosystem_issue",
+        "relevance_grade": 2,
+        "must_include_facts": [
+          {
+            "name": "checkpoint",
+            "any_of": [
+              "checkpoint",
+              "检查点"
+            ]
+          },
+          {
+            "name": "migration",
+            "any_of": [
+              "migration",
+              "迁移"
+            ]
+          },
+          {
+            "name": "conflict",
+            "any_of": [
+              "different tag",
+              "does not contain"
+            ]
+          }
+        ],
+        "project_concepts": [
+          {
+            "name": "checkpoint",
+            "any_of": [
+              "checkpoint",
+              "检查点"
+            ]
+          }
+        ],
+        "acceptable_action_concepts": [
+          {
+            "name": "verify-tag",
+            "any_of": [
+              "tag",
+              "核对"
+            ]
+          },
+          {
+            "name": "regression",
+            "any_of": [
+              "checkpoint",
+              "回归",
+              "测试"
+            ]
+          }
+        ],
+        "forbidden_claims": [
+          "the migration helper is confirmed released"
+        ],
+        "forbidden_actions": [],
+        "require_uncertainty": true,
+        "require_chinese_narrative": true,
+        "trajectory": {}
+      }
+    },
+    {
+      "id": "cap-017",
+      "title": "LangGraph announces maintenance mode with no new features",
+      "tags": [
+        "competitor",
+        "strategy"
+      ],
+      "truth_status": "verified",
+      "event": {
+        "event_id": "cap-017",
+        "source_type": "web_change",
+        "source_name": "LangGraph",
+        "title": "LangGraph announces maintenance mode with no new features",
+        "content": "LangGraph announces maintenance mode for one product line and says no new features will be added.",
+        "url": "https://eval.signalharness.local/cap-017",
+        "published_at": "2026-09-08T08:00:00Z",
+        "change_kind": "updated",
+        "current_version": null,
+        "previous_version": null,
+        "raw_payload": {},
+        "collected_at": "2026-09-08T08:05:00Z"
+      },
+      "evidence": {
+        "context_summary": "LangGraph announces maintenance mode for one product line and says no new features will be added.",
+        "confidence": 0.9,
+        "source_quality": "official",
+        "evidence_urls": [
+          "https://eval.signalharness.local/cap-017"
+        ],
+        "uncertainty": "",
+        "unsupported_claims": []
+      },
+      "expected": {
+        "acceptable_decisions": [
+          "save"
+        ],
+        "expected_category": "competitor_update",
+        "relevance_grade": 2,
+        "must_include_facts": [
+          {
+            "name": "langgraph",
+            "any_of": [
+              "langgraph"
+            ]
+          },
+          {
+            "name": "maintenance",
+            "any_of": [
+              "maintenance mode"
+            ]
+          },
+          {
+            "name": "no-features",
+            "any_of": [
+              "no new features"
+            ]
+          }
+        ],
+        "project_concepts": [
+          {
+            "name": "competitor",
+            "any_of": [
+              "langgraph"
+            ]
+          }
+        ],
+        "acceptable_action_concepts": [
+          {
+            "name": "watch-roadmap",
+            "any_of": [
+              "roadmap",
+              "maintenance"
+            ]
+          }
+        ],
+        "forbidden_claims": [],
+        "forbidden_actions": [],
+        "require_uncertainty": false,
+        "require_chinese_narrative": true,
+        "trajectory": {}
+      }
+    },
+    {
+      "id": "cap-018",
+      "title": "CrewAI launches a new visual theme gallery",
+      "tags": [
+        "competitor",
+        "cosmetic",
+        "hard-negative"
+      ],
+      "truth_status": "verified",
+      "event": {
+        "event_id": "cap-018",
+        "source_type": "web_change",
+        "source_name": "CrewAI",
+        "title": "CrewAI launches a new visual theme gallery",
+        "content": "CrewAI launches a visual theme gallery for its dashboard. No agent runtime, tool calling, persistence, or evaluation capability changes.",
+        "url": "https://eval.signalharness.local/cap-018",
+        "published_at": "2026-09-08T08:00:00Z",
+        "change_kind": "updated",
+        "current_version": null,
+        "previous_version": null,
+        "raw_payload": {},
+        "collected_at": "2026-09-08T08:05:00Z"
+      },
+      "evidence": {
+        "context_summary": "CrewAI launches a visual theme gallery for its dashboard. No agent runtime, tool calling, persistence, or evaluation capability changes.",
+        "confidence": 0.9,
+        "source_quality": "official",
+        "evidence_urls": [
+          "https://eval.signalharness.local/cap-018"
+        ],
+        "uncertainty": "",
+        "unsupported_claims": []
+      },
+      "expected": {
+        "acceptable_decisions": [
+          "ignore"
+        ],
+        "expected_category": "competitor_update",
+        "relevance_grade": 0,
+        "must_include_facts": [
+          {
+            "name": "crewai",
+            "any_of": [
+              "crewai"
+            ]
+          },
+          {
+            "name": "theme",
+            "any_of": [
+              "theme gallery"
+            ]
+          }
+        ],
+        "project_concepts": [
+          {
+            "name": "competitor",
+            "any_of": [
+              "crewai"
+            ]
+          }
+        ],
+        "acceptable_action_concepts": [],
+        "forbidden_claims": [
+          "runtime architecture changed",
+          "SignalHarness needs migration"
+        ],
+        "forbidden_actions": [],
+        "require_uncertainty": false,
+        "require_chinese_narrative": true,
+        "trajectory": {}
+      }
+    },
+    {
+      "id": "cap-019",
+      "title": "Agent evaluation methodology adds trajectory-level scoring",
+      "tags": [
+        "eval",
+        "trajectory"
+      ],
+      "truth_status": "verified",
+      "event": {
+        "event_id": "cap-019",
+        "source_type": "rss",
+        "source_name": "Agent Evaluation Engineering",
+        "title": "Agent evaluation methodology adds trajectory-level scoring",
+        "content": "A new evaluation methodology scores both final answers and agent trajectories, including tool selection and unnecessary steps.",
+        "url": "https://eval.signalharness.local/cap-019",
+        "published_at": "2026-09-08T08:00:00Z",
+        "change_kind": "updated",
+        "current_version": null,
+        "previous_version": null,
+        "raw_payload": {},
+        "collected_at": "2026-09-08T08:05:00Z"
+      },
+      "evidence": {
+        "context_summary": "A new evaluation methodology scores both final answers and agent trajectories, including tool selection and unnecessary steps.",
+        "confidence": 0.9,
+        "source_quality": "official",
+        "evidence_urls": [
+          "https://eval.signalharness.local/cap-019"
+        ],
+        "uncertainty": "",
+        "unsupported_claims": []
+      },
+      "expected": {
+        "acceptable_decisions": [
+          "save"
+        ],
+        "expected_category": "evaluation_benchmark_signal",
+        "relevance_grade": 2,
+        "must_include_facts": [
+          {
+            "name": "trajectory",
+            "any_of": [
+              "trajectory"
+            ]
+          },
+          {
+            "name": "tool-selection",
+            "any_of": [
+              "tool selection"
+            ]
+          },
+          {
+            "name": "evaluation",
+            "any_of": [
+              "evaluation"
+            ]
+          }
+        ],
+        "project_concepts": [
+          {
+            "name": "agent-eval",
+            "any_of": [
+              "agent eval",
+              "evaluation"
+            ]
+          },
+          {
+            "name": "observability",
+            "any_of": [
+              "trajectory",
+              "observability"
+            ]
+          }
+        ],
+        "acceptable_action_concepts": [
+          {
+            "name": "compare-eval",
+            "any_of": [
+              "trajectory",
+              "eval"
+            ]
+          },
+          {
+            "name": "add-cases",
+            "any_of": [
+              "test",
+              "测试"
+            ]
+          }
+        ],
+        "forbidden_claims": [],
+        "forbidden_actions": [],
+        "require_uncertainty": false,
+        "require_chinese_narrative": true,
+        "trajectory": {}
+      }
+    },
+    {
+      "id": "cap-020",
+      "title": "Leaderboard score changes without methodology details",
+      "tags": [
+        "eval",
+        "hard-negative",
+        "uncertainty"
+      ],
+      "truth_status": "unverified",
+      "event": {
+        "event_id": "cap-020",
+        "source_type": "rss",
+        "source_name": "Benchmark Roundup",
+        "title": "Leaderboard score changes without methodology details",
+        "content": "A leaderboard claims a new state-of-the-art score but publishes no dataset version, rubric, judge details, or reproducible methodology.",
+        "url": "https://eval.signalharness.local/cap-020",
+        "published_at": "2026-09-08T08:00:00Z",
+        "change_kind": "updated",
+        "current_version": null,
+        "previous_version": null,
+        "raw_payload": {},
+        "collected_at": "2026-09-08T08:05:00Z"
+      },
+      "evidence": {
+        "context_summary": "A leaderboard claims a new state-of-the-art score but publishes no dataset version, rubric, judge details, or reproducible methodology.",
+        "confidence": 0.45,
+        "source_quality": "secondary",
+        "evidence_urls": [
+          "https://eval.signalharness.local/cap-020"
+        ],
+        "uncertainty": "The claim is not fully verified.",
+        "unsupported_claims": [
+          "Implementation status is not verified."
+        ]
+      },
+      "expected": {
+        "acceptable_decisions": [
+          "ignore",
+          "save"
+        ],
+        "expected_category": "evaluation_benchmark_signal",
+        "relevance_grade": 1,
+        "must_include_facts": [
+          {
+            "name": "leaderboard",
+            "any_of": [
+              "leaderboard"
+            ]
+          },
+          {
+            "name": "missing-method",
+            "any_of": [
+              "no dataset",
+              "no rubric",
+              "no reproducible"
+            ]
+          }
+        ],
+        "project_concepts": [
+          {
+            "name": "evaluation",
+            "any_of": [
+              "evaluation",
+              "benchmark"
+            ]
+          }
+        ],
+        "acceptable_action_concepts": [
+          {
+            "name": "verify-method",
+            "any_of": [
+              "rubric",
+              "dataset",
+              "核对"
+            ]
+          }
+        ],
+        "forbidden_claims": [
+          "proves the model is better"
+        ],
+        "forbidden_actions": [],
+        "require_uncertainty": true,
+        "require_chinese_narrative": true,
+        "trajectory": {}
+      }
+    },
+    {
+      "id": "cap-021",
+      "title": "Evidence trails improve multi-agent failure analysis",
+      "tags": [
+        "expert",
+        "evidence"
+      ],
+      "truth_status": "partially_verified",
+      "event": {
+        "event_id": "cap-021",
+        "source_type": "rss",
+        "source_name": "Engineering Commentary",
+        "title": "Evidence trails improve multi-agent failure analysis",
+        "content": "An engineering article argues that multi-agent conclusions should retain evidence trails so failures can be traced to their source.",
+        "url": "https://eval.signalharness.local/cap-021",
+        "published_at": "2026-09-08T08:00:00Z",
+        "change_kind": "updated",
+        "current_version": null,
+        "previous_version": null,
+        "raw_payload": {},
+        "collected_at": "2026-09-08T08:05:00Z"
+      },
+      "evidence": {
+        "context_summary": "An engineering article argues that multi-agent conclusions should retain evidence trails so failures can be traced to their source.",
+        "confidence": 0.6,
+        "source_quality": "secondary",
+        "evidence_urls": [
+          "https://eval.signalharness.local/cap-021"
+        ],
+        "uncertainty": "The claim is not fully verified.",
+        "unsupported_claims": [
+          "Implementation status is not verified."
+        ]
+      },
+      "expected": {
+        "acceptable_decisions": [
+          "save"
+        ],
+        "expected_category": "expert_opinion",
+        "relevance_grade": 2,
+        "must_include_facts": [
+          {
+            "name": "evidence-trail",
+            "any_of": [
+              "evidence trail"
+            ]
+          },
+          {
+            "name": "multi-agent",
+            "any_of": [
+              "multi-agent"
+            ]
+          }
+        ],
+        "project_concepts": [
+          {
+            "name": "evidence",
+            "any_of": [
+              "evidence verification"
+            ]
+          },
+          {
+            "name": "observability",
+            "any_of": [
+              "observability",
+              "trace"
+            ]
+          }
+        ],
+        "acceptable_action_concepts": [
+          {
+            "name": "compare-design",
+            "any_of": [
+              "trace",
+              "evidence"
+            ]
+          }
+        ],
+        "forbidden_claims": [
+          "this is a new protocol requirement"
+        ],
+        "forbidden_actions": [],
+        "require_uncertainty": true,
+        "require_chinese_narrative": true,
+        "trajectory": {
+          "required_agents": [
+            "ContextEvidenceAgent",
+            "ImpactAnalystAgent",
+            "ProjectNarrativeAgent"
+          ],
+          "required_tools": [
+            "rss_signal"
+          ],
+          "max_tool_requests": 8,
+          "require_no_fallback": true,
+          "require_schema_valid": true
+        }
+      }
+    },
+    {
+      "id": "cap-022",
+      "title": "Opinion post predicts AI will replace software engineers",
+      "tags": [
+        "expert",
+        "noise",
+        "hard-negative"
+      ],
+      "truth_status": "unverified",
+      "event": {
+        "event_id": "cap-022",
+        "source_type": "rss",
+        "source_name": "Opinion Feed",
+        "title": "Opinion post predicts AI will replace software engineers",
+        "content": "Opinion: AI will replace all software engineers within two years. No API, dependency, runtime, security, protocol, or project-specific change is provided.",
+        "url": "https://eval.signalharness.local/cap-022",
+        "published_at": "2026-09-08T08:00:00Z",
+        "change_kind": "updated",
+        "current_version": null,
+        "previous_version": null,
+        "raw_payload": {},
+        "collected_at": "2026-09-08T08:05:00Z"
+      },
+      "evidence": {
+        "context_summary": "Opinion: AI will replace all software engineers within two years. No API, dependency, runtime, security, protocol, or project-specific change is provided.",
+        "confidence": 0.2,
+        "source_quality": "community",
+        "evidence_urls": [
+          "https://eval.signalharness.local/cap-022"
+        ],
+        "uncertainty": "The claim is not fully verified.",
+        "unsupported_claims": [
+          "Implementation status is not verified."
+        ]
+      },
+      "expected": {
+        "acceptable_decisions": [
+          "ignore"
+        ],
+        "expected_category": "expert_opinion",
+        "relevance_grade": 0,
+        "must_include_facts": [
+          {
+            "name": "opinion",
+            "any_of": [
+              "opinion"
+            ]
+          }
+        ],
+        "project_concepts": [],
+        "acceptable_action_concepts": [],
+        "forbidden_claims": [
+          "requires SignalHarness changes"
+        ],
+        "forbidden_actions": [],
+        "require_uncertainty": true,
+        "require_chinese_narrative": true,
+        "trajectory": {}
+      }
+    },
+    {
+      "id": "cap-023",
+      "title": "Project commit tightens Tool Guard permission checks",
+      "tags": [
+        "project-code",
+        "permission",
+        "critical"
+      ],
+      "truth_status": "verified",
+      "event": {
+        "event_id": "cap-023",
+        "source_type": "local_git_commit",
+        "source_name": "SignalHarness",
+        "title": "Project commit tightens Tool Guard permission checks",
+        "content": "Project commit changes Tool Guard permission checks so write-capable actions require explicit approval and adds regression tests.",
+        "url": "https://eval.signalharness.local/cap-023",
+        "published_at": "2026-09-08T08:00:00Z",
+        "change_kind": "updated",
+        "current_version": null,
+        "previous_version": null,
+        "raw_payload": {
+          "project_owned": true,
+          "commit_sha": "abc123"
+        },
+        "collected_at": "2026-09-08T08:05:00Z"
+      },
+      "evidence": {
+        "context_summary": "Project commit changes Tool Guard permission checks so write-capable actions require explicit approval and adds regression tests.",
+        "confidence": 0.9,
+        "source_quality": "official",
+        "evidence_urls": [
+          "https://eval.signalharness.local/cap-023"
+        ],
+        "uncertainty": "",
+        "unsupported_claims": []
+      },
+      "expected": {
+        "acceptable_decisions": [
+          "alert",
+          "save"
+        ],
+        "expected_category": "team_update",
+        "relevance_grade": 3,
+        "must_include_facts": [
+          {
+            "name": "tool-guard",
+            "any_of": [
+              "tool guard"
+            ]
+          },
+          {
+            "name": "permission",
+            "any_of": [
+              "permission",
+              "权限"
+            ]
+          },
+          {
+            "name": "approval",
+            "any_of": [
+              "approval"
+            ]
+          }
+        ],
+        "project_concepts": [
+          {
+            "name": "permission-control",
+            "any_of": [
+              "permission control",
+              "权限"
+            ]
+          },
+          {
+            "name": "tool-guard",
+            "any_of": [
+              "tool guard"
+            ]
+          }
+        ],
+        "acceptable_action_concepts": [
+          {
+            "name": "regression",
+            "any_of": [
+              "regression",
+              "回归",
+              "测试"
+            ]
+          },
+          {
+            "name": "review-diff",
+            "any_of": [
+              "commit",
+              "diff"
+            ]
+          }
+        ],
+        "forbidden_claims": [],
+        "forbidden_actions": [],
+        "require_uncertainty": false,
+        "require_chinese_narrative": true,
+        "trajectory": {}
+      }
+    },
+    {
+      "id": "cap-024",
+      "title": "Project README fixes command spelling",
+      "tags": [
+        "project-code",
+        "docs",
+        "hard-negative"
+      ],
+      "truth_status": "verified",
+      "event": {
+        "event_id": "cap-024",
+        "source_type": "local_git_commit",
+        "source_name": "SignalHarness",
+        "title": "Project README fixes command spelling",
+        "content": "Project commit fixes a misspelled CLI command in README only; no runtime code or configuration changes.",
+        "url": "https://eval.signalharness.local/cap-024",
+        "published_at": "2026-09-08T08:00:00Z",
+        "change_kind": "updated",
+        "current_version": null,
+        "previous_version": null,
+        "raw_payload": {
+          "project_owned": true,
+          "commit_sha": "def456"
+        },
+        "collected_at": "2026-09-08T08:05:00Z"
+      },
+      "evidence": {
+        "context_summary": "Project commit fixes a misspelled CLI command in README only; no runtime code or configuration changes.",
+        "confidence": 0.9,
+        "source_quality": "official",
+        "evidence_urls": [
+          "https://eval.signalharness.local/cap-024"
+        ],
+        "uncertainty": "",
+        "unsupported_claims": []
+      },
+      "expected": {
+        "acceptable_decisions": [
+          "save",
+          "ignore"
+        ],
+        "expected_category": "team_update",
+        "relevance_grade": 1,
+        "must_include_facts": [
+          {
+            "name": "readme",
+            "any_of": [
+              "readme"
+            ]
+          },
+          {
+            "name": "spelling",
+            "any_of": [
+              "misspelled"
+            ]
+          }
+        ],
+        "project_concepts": [
+          {
+            "name": "cli",
+            "any_of": [
+              "cli"
+            ]
+          }
+        ],
+        "acceptable_action_concepts": [],
+        "forbidden_claims": [
+          "runtime behavior changed"
+        ],
+        "forbidden_actions": [],
+        "require_uncertainty": false,
+        "require_chinese_narrative": true,
+        "trajectory": {}
+      }
+    },
+    {
+      "id": "cap-025",
+      "title": "RSS parser regression drops updated timestamps",
+      "tags": [
+        "collection",
+        "reliability"
+      ],
+      "truth_status": "verified",
+      "event": {
+        "event_id": "cap-025",
+        "source_type": "github_issue",
+        "source_name": "Feed Parser Runtime",
+        "title": "RSS parser regression drops updated timestamps",
+        "content": "A source collection regression causes the RSS parser to drop updated timestamps, which can misclassify revised articles as old.",
+        "url": "https://eval.signalharness.local/cap-025",
+        "published_at": "2026-09-08T08:00:00Z",
+        "change_kind": "updated",
+        "current_version": null,
+        "previous_version": null,
+        "raw_payload": {},
+        "collected_at": "2026-09-08T08:05:00Z"
+      },
+      "evidence": {
+        "context_summary": "A source collection regression causes the RSS parser to drop updated timestamps, which can misclassify revised articles as old.",
+        "confidence": 0.9,
+        "source_quality": "official",
+        "evidence_urls": [
+          "https://eval.signalharness.local/cap-025"
+        ],
+        "uncertainty": "",
+        "unsupported_claims": []
+      },
+      "expected": {
+        "acceptable_decisions": [
+          "save",
+          "alert"
+        ],
+        "expected_category": "source_collection_signal",
+        "relevance_grade": 2,
+        "must_include_facts": [
+          {
+            "name": "rss",
+            "any_of": [
+              "rss parser"
+            ]
+          },
+          {
+            "name": "timestamp",
+            "any_of": [
+              "updated timestamps"
+            ]
+          },
+          {
+            "name": "regression",
+            "any_of": [
+              "regression"
+            ]
+          }
+        ],
+        "project_concepts": [
+          {
+            "name": "collection",
+            "any_of": [
+              "source collection"
+            ]
+          },
+          {
+            "name": "revision",
+            "any_of": [
+              "updated",
+              "revision"
+            ]
+          }
+        ],
+        "acceptable_action_concepts": [
+          {
+            "name": "parser-test",
+            "any_of": [
+              "rss parser",
+              "测试",
+              "回归"
+            ]
+          },
+          {
+            "name": "timestamp",
+            "any_of": [
+              "updated timestamps"
+            ]
+          }
+        ],
+        "forbidden_claims": [],
+        "forbidden_actions": [],
+        "require_uncertainty": false,
+        "require_chinese_narrative": true,
+        "trajectory": {
+          "required_agents": [
+            "ContextEvidenceAgent",
+            "ImpactAnalystAgent",
+            "ActionPlannerAgent",
+            "ProjectNarrativeAgent"
+          ],
+          "required_tools": [
+            "github_signal"
+          ],
+          "max_tool_requests": 8,
+          "require_no_fallback": true,
+          "require_schema_valid": true
+        }
+      }
+    },
+    {
+      "id": "cap-026",
+      "title": "Feed adds marketing category metadata only",
+      "tags": [
+        "collection",
+        "hard-negative"
+      ],
+      "truth_status": "verified",
+      "event": {
+        "event_id": "cap-026",
+        "source_type": "rss",
+        "source_name": "Engineering Feed",
+        "title": "Feed adds marketing category metadata only",
+        "content": "The feed adds a marketing category field to entries. Item URLs, published timestamps, updated timestamps, and technical content are unchanged.",
+        "url": "https://eval.signalharness.local/cap-026",
+        "published_at": "2026-09-08T08:00:00Z",
+        "change_kind": "updated",
+        "current_version": null,
+        "previous_version": null,
+        "raw_payload": {},
+        "collected_at": "2026-09-08T08:05:00Z"
+      },
+      "evidence": {
+        "context_summary": "The feed adds a marketing category field to entries. Item URLs, published timestamps, updated timestamps, and technical content are unchanged.",
+        "confidence": 0.9,
+        "source_quality": "official",
+        "evidence_urls": [
+          "https://eval.signalharness.local/cap-026"
+        ],
+        "uncertainty": "",
+        "unsupported_claims": []
+      },
+      "expected": {
+        "acceptable_decisions": [
+          "ignore"
+        ],
+        "expected_category": "expert_opinion",
+        "relevance_grade": 0,
+        "must_include_facts": [
+          {
+            "name": "marketing",
+            "any_of": [
+              "marketing category"
+            ]
+          },
+          {
+            "name": "unchanged",
+            "any_of": [
+              "unchanged"
+            ]
+          }
+        ],
+        "project_concepts": [],
+        "acceptable_action_concepts": [],
+        "forbidden_claims": [
+          "collection is broken",
+          "parser migration required"
+        ],
+        "forbidden_actions": [],
+        "require_uncertainty": false,
+        "require_chinese_narrative": true,
+        "trajectory": {}
+      }
+    },
+    {
+      "id": "cap-027",
+      "title": "Competitor changes enterprise pricing tiers",
+      "tags": [
+        "market",
+        "hard-negative"
+      ],
+      "truth_status": "verified",
+      "event": {
+        "event_id": "cap-027",
+        "source_type": "web_change",
+        "source_name": "Unrelated SaaS",
+        "title": "Competitor changes enterprise pricing tiers",
+        "content": "An unrelated SaaS vendor changes enterprise pricing tiers; it is not a tracked dependency, provider, runtime, protocol, or competitor.",
+        "url": "https://eval.signalharness.local/cap-027",
+        "published_at": "2026-09-08T08:00:00Z",
+        "change_kind": "updated",
+        "current_version": null,
+        "previous_version": null,
+        "raw_payload": {},
+        "collected_at": "2026-09-08T08:05:00Z"
+      },
+      "evidence": {
+        "context_summary": "An unrelated SaaS vendor changes enterprise pricing tiers; it is not a tracked dependency, provider, runtime, protocol, or competitor.",
+        "confidence": 0.9,
+        "source_quality": "official",
+        "evidence_urls": [
+          "https://eval.signalharness.local/cap-027"
+        ],
+        "uncertainty": "",
+        "unsupported_claims": []
+      },
+      "expected": {
+        "acceptable_decisions": [
+          "ignore"
+        ],
+        "expected_category": "market_signal",
+        "relevance_grade": 0,
+        "must_include_facts": [
+          {
+            "name": "pricing",
+            "any_of": [
+              "pricing"
+            ]
+          }
+        ],
+        "project_concepts": [],
+        "acceptable_action_concepts": [],
+        "forbidden_claims": [
+          "affects SignalHarness runtime"
+        ],
+        "forbidden_actions": [],
+        "require_uncertainty": false,
+        "require_chinese_narrative": true,
+        "trajectory": {}
+      }
+    },
+    {
+      "id": "cap-028",
+      "title": "Provider rate-limit response adds Retry-After semantics",
+      "tags": [
+        "provider",
+        "api",
+        "reliability"
+      ],
+      "truth_status": "verified",
+      "event": {
+        "event_id": "cap-028",
+        "source_type": "web_change",
+        "source_name": "OpenAI-compatible provider API",
+        "title": "Provider rate-limit response adds Retry-After semantics",
+        "content": "The model API now documents Retry-After semantics for rate-limit responses and recommends bounded retry handling.",
+        "url": "https://eval.signalharness.local/cap-028",
+        "published_at": "2026-09-08T08:00:00Z",
+        "change_kind": "updated",
+        "current_version": null,
+        "previous_version": null,
+        "raw_payload": {},
+        "collected_at": "2026-09-08T08:05:00Z"
+      },
+      "evidence": {
+        "context_summary": "The model API now documents Retry-After semantics for rate-limit responses and recommends bounded retry handling.",
+        "confidence": 0.9,
+        "source_quality": "official",
+        "evidence_urls": [
+          "https://eval.signalharness.local/cap-028"
+        ],
+        "uncertainty": "",
+        "unsupported_claims": []
+      },
+      "expected": {
+        "acceptable_decisions": [
+          "save",
+          "alert"
+        ],
+        "expected_category": "provider_compatibility_signal",
+        "relevance_grade": 2,
+        "must_include_facts": [
+          {
+            "name": "rate-limit",
+            "any_of": [
+              "rate-limit"
+            ]
+          },
+          {
+            "name": "retry-after",
+            "any_of": [
+              "retry-after"
+            ]
+          }
+        ],
+        "project_concepts": [
+          {
+            "name": "provider-adapter",
+            "any_of": [
+              "provider adapter"
+            ]
+          },
+          {
+            "name": "retries",
+            "any_of": [
+              "retry"
+            ]
+          }
+        ],
+        "acceptable_action_concepts": [
+          {
+            "name": "retry-test",
+            "any_of": [
+              "retry-after",
+              "测试",
+              "回归"
+            ]
+          },
+          {
+            "name": "adapter",
+            "any_of": [
+              "provider adapter"
+            ]
+          }
+        ],
+        "forbidden_claims": [],
+        "forbidden_actions": [],
+        "require_uncertainty": false,
+        "require_chinese_narrative": true,
+        "trajectory": {
+          "required_agents": [
+            "ContextEvidenceAgent",
+            "ImpactAnalystAgent",
+            "ActionPlannerAgent",
+            "ProjectNarrativeAgent"
+          ],
+          "required_tools": [
+            "web_change"
+          ],
+          "max_tool_requests": 8,
+          "require_no_fallback": true,
+          "require_schema_valid": true
+        }
+      }
+    },
+    {
+      "id": "cap-029",
+      "title": "Malware advisory names package the project does not use",
+      "tags": [
+        "security",
+        "hard-negative"
+      ],
+      "truth_status": "verified",
+      "event": {
+        "event_id": "cap-029",
+        "source_type": "rss",
+        "source_name": "Security Feed",
+        "title": "Malware advisory names package the project does not use",
+        "content": "A malware advisory affects package evil-helper. SignalHarness dependency evidence contains no evil-helper package or transitive reference.",
+        "url": "https://eval.signalharness.local/cap-029",
+        "published_at": "2026-09-08T08:00:00Z",
+        "change_kind": "updated",
+        "current_version": null,
+        "previous_version": null,
+        "raw_payload": {},
+        "collected_at": "2026-09-08T08:05:00Z"
+      },
+      "evidence": {
+        "context_summary": "A malware advisory affects package evil-helper. SignalHarness dependency evidence contains no evil-helper package or transitive reference.",
+        "confidence": 0.9,
+        "source_quality": "official",
+        "evidence_urls": [
+          "https://eval.signalharness.local/cap-029"
+        ],
+        "uncertainty": "",
+        "unsupported_claims": []
+      },
+      "expected": {
+        "acceptable_decisions": [
+          "ignore"
+        ],
+        "expected_category": "security_supply_chain",
+        "relevance_grade": 0,
+        "must_include_facts": [
+          {
+            "name": "malware",
+            "any_of": [
+              "malware"
+            ]
+          },
+          {
+            "name": "package",
+            "any_of": [
+              "evil-helper"
+            ]
+          },
+          {
+            "name": "not-used",
+            "any_of": [
+              "no evil-helper"
+            ]
+          }
+        ],
+        "project_concepts": [],
+        "acceptable_action_concepts": [
+          {
+            "name": "verify-deps",
+            "any_of": [
+              "evil-helper",
+              "核对"
+            ]
+          }
+        ],
+        "forbidden_claims": [
+          "SignalHarness is compromised"
+        ],
+        "forbidden_actions": [
+          "emergency patch SignalHarness"
+        ],
+        "require_uncertainty": false,
+        "require_chinese_narrative": true,
+        "trajectory": {
+          "required_agents": [
+            "ContextEvidenceAgent",
+            "ImpactAnalystAgent",
+            "ProjectNarrativeAgent"
+          ],
+          "required_tools": [
+            "rss_signal"
+          ],
+          "max_tool_requests": 8,
+          "require_no_fallback": true,
+          "require_schema_valid": true
+        }
+      }
+    },
+    {
+      "id": "cap-030",
+      "title": "Compromised direct dependency release is withdrawn",
+      "tags": [
+        "security",
+        "dependency",
+        "critical"
+      ],
+      "truth_status": "verified",
+      "event": {
+        "event_id": "cap-030",
+        "source_type": "github_release",
+        "source_name": "pydantic",
+        "title": "Compromised direct dependency release is withdrawn",
+        "content": "Pydantic release 2.99.0 is withdrawn after a supply chain compromise; maintainers advise pinning away from the compromised release.",
+        "url": "https://eval.signalharness.local/cap-030",
+        "published_at": "2026-09-08T08:00:00Z",
+        "change_kind": "released",
+        "current_version": "2.99.0",
+        "previous_version": null,
+        "raw_payload": {},
+        "collected_at": "2026-09-08T08:05:00Z"
+      },
+      "evidence": {
+        "context_summary": "Pydantic release 2.99.0 is withdrawn after a supply chain compromise; maintainers advise pinning away from the compromised release.",
+        "confidence": 0.9,
+        "source_quality": "official",
+        "evidence_urls": [
+          "https://eval.signalharness.local/cap-030"
+        ],
+        "uncertainty": "",
+        "unsupported_claims": []
+      },
+      "expected": {
+        "acceptable_decisions": [
+          "alert",
+          "action_required"
+        ],
+        "expected_category": "dependency_update",
+        "relevance_grade": 3,
+        "must_include_facts": [
+          {
+            "name": "pydantic",
+            "any_of": [
+              "pydantic"
+            ]
+          },
+          {
+            "name": "supply-chain",
+            "any_of": [
+              "supply chain",
+              "compromise"
+            ]
+          },
+          {
+            "name": "version",
+            "any_of": [
+              "2.99.0"
+            ]
+          }
+        ],
+        "project_concepts": [
+          {
+            "name": "pydantic",
+            "any_of": [
+              "pydantic"
+            ]
+          }
+        ],
+        "acceptable_action_concepts": [
+          {
+            "name": "pin",
+            "any_of": [
+              "pin",
+              "2.99.0"
+            ]
+          },
+          {
+            "name": "verify-lock",
+            "any_of": [
+              "lock",
+              "核对"
+            ]
+          }
+        ],
+        "forbidden_claims": [],
+        "forbidden_actions": [
+          "install 2.99.0"
+        ],
+        "require_uncertainty": false,
+        "require_chinese_narrative": true,
+        "trajectory": {}
+      }
+    },
+    {
+      "id": "cap-031",
+      "title": "Dependency license proposal may change redistribution obligations",
+      "tags": [
+        "policy",
+        "license",
+        "uncertainty"
+      ],
+      "truth_status": "partially_verified",
+      "event": {
+        "event_id": "cap-031",
+        "source_type": "github_issue",
+        "source_name": "pydantic",
+        "title": "Dependency license proposal may change redistribution obligations",
+        "content": "Proposal to change a future dependency license and redistribution terms. The proposal is under discussion and no release has adopted it.",
+        "url": "https://eval.signalharness.local/cap-031",
+        "published_at": "2026-09-08T08:00:00Z",
+        "change_kind": "updated",
+        "current_version": null,
+        "previous_version": null,
+        "raw_payload": {},
+        "collected_at": "2026-09-08T08:05:00Z"
+      },
+      "evidence": {
+        "context_summary": "Proposal to change a future dependency license and redistribution terms. The proposal is under discussion and no release has adopted it.",
+        "confidence": 0.65,
+        "source_quality": "maintainer",
+        "evidence_urls": [
+          "https://eval.signalharness.local/cap-031"
+        ],
+        "uncertainty": "The claim is not fully verified.",
+        "unsupported_claims": [
+          "Implementation status is not verified."
+        ]
+      },
+      "expected": {
+        "acceptable_decisions": [
+          "save"
+        ],
+        "expected_category": "policy_signal",
+        "relevance_grade": 2,
+        "must_include_facts": [
+          {
+            "name": "license",
+            "any_of": [
+              "license"
+            ]
+          },
+          {
+            "name": "proposal",
+            "any_of": [
+              "proposal"
+            ]
+          },
+          {
+            "name": "not-adopted",
+            "any_of": [
+              "no release",
+              "under discussion"
+            ]
+          }
+        ],
+        "project_concepts": [
+          {
+            "name": "pydantic",
+            "any_of": [
+              "pydantic"
+            ]
+          },
+          {
+            "name": "compliance",
+            "any_of": [
+              "license"
+            ]
+          }
+        ],
+        "acceptable_action_concepts": [
+          {
+            "name": "monitor",
+            "any_of": [
+              "proposal",
+              "核对"
+            ]
+          },
+          {
+            "name": "no-immediate",
+            "any_of": [
+              "release"
+            ]
+          }
+        ],
+        "forbidden_claims": [
+          "the license has already changed"
+        ],
+        "forbidden_actions": [],
+        "require_uncertainty": true,
+        "require_chinese_narrative": true,
+        "trajectory": {}
+      }
+    },
+    {
+      "id": "cap-032",
+      "title": "MCP resource path traversal proposal tightens server allowlist",
+      "tags": [
+        "mcp",
+        "security",
+        "permission",
+        "critical"
+      ],
+      "truth_status": "partially_verified",
+      "event": {
+        "event_id": "cap-032",
+        "source_type": "github_issue",
+        "source_name": "MCP Specification",
+        "title": "MCP resource path traversal proposal tightens server allowlist",
+        "content": "Security proposal: MCP resource servers should reject path traversal and constrain resource roots with an explicit allowlist. The proposal is not yet in a released specification.",
+        "url": "https://eval.signalharness.local/cap-032",
+        "published_at": "2026-09-08T08:00:00Z",
+        "change_kind": "updated",
+        "current_version": null,
+        "previous_version": null,
+        "raw_payload": {
+          "entity_type": "protocol",
+          "entity_name": "Model Context Protocol"
+        },
+        "collected_at": "2026-09-08T08:05:00Z"
+      },
+      "evidence": {
+        "context_summary": "Security proposal: MCP resource servers should reject path traversal and constrain resource roots with an explicit allowlist. The proposal is not yet in a released specification.",
+        "confidence": 0.7,
+        "source_quality": "maintainer",
+        "evidence_urls": [
+          "https://eval.signalharness.local/cap-032"
+        ],
+        "uncertainty": "The claim is not fully verified.",
+        "unsupported_claims": [
+          "Implementation status is not verified."
+        ]
+      },
+      "expected": {
+        "acceptable_decisions": [
+          "save",
+          "alert"
+        ],
+        "expected_category": "policy_signal",
+        "relevance_grade": 3,
+        "must_include_facts": [
+          {
+            "name": "path-traversal",
+            "any_of": [
+              "path traversal"
+            ]
+          },
+          {
+            "name": "allowlist",
+            "any_of": [
+              "allowlist"
+            ]
+          },
+          {
+            "name": "proposal",
+            "any_of": [
+              "proposal",
+              "not yet"
+            ]
+          }
+        ],
+        "project_concepts": [
+          {
+            "name": "mcp",
+            "any_of": [
+              "mcp"
+            ]
+          },
+          {
+            "name": "permission",
+            "any_of": [
+              "permission control",
+              "权限"
+            ]
+          }
+        ],
+        "acceptable_action_concepts": [
+          {
+            "name": "audit-roots",
+            "any_of": [
+              "resource",
+              "allowlist"
+            ]
+          },
+          {
+            "name": "security-test",
+            "any_of": [
+              "path traversal",
+              "安全",
+              "测试"
+            ]
+          }
+        ],
+        "forbidden_claims": [
+          "the released MCP spec already requires this behavior"
+        ],
+        "forbidden_actions": [
+          "change production behavior before verification"
+        ],
+        "require_uncertainty": true,
+        "require_chinese_narrative": true,
+        "trajectory": {}
+      }
+    }
+  ]
+}

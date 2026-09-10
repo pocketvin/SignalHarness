@@ -5,9 +5,11 @@ from __future__ import annotations
 from signal_harness.runtime.tools_base import ToolRegistry
 from signal_harness.tools import (
     GitHubSignalTool,
+    LocalGitTool,
     PackageRegistryTool,
     ReportWriterTool,
     RssSignalTool,
+    SecurityOsvTool,
     SignalMemoryTool,
     SignalScoreTool,
     WebChangeTool,
@@ -16,8 +18,10 @@ from signal_harness.tools import (
 SIGNAL_TOOL_ALLOWLIST = frozenset(
     {
         "github_signal",
+        "local_git",
         "package_registry",
         "rss_signal",
+        "security_osv",
         "web_change",
         "signal_memory",
         "signal_score",
@@ -32,8 +36,10 @@ def create_signal_tool_registry() -> ToolRegistry:
     registry = ToolRegistry()
     for tool in (
         GitHubSignalTool(),
+        LocalGitTool(),
         PackageRegistryTool(),
         RssSignalTool(),
+        SecurityOsvTool(),
         WebChangeTool(),
         SignalMemoryTool(),
         SignalScoreTool(),

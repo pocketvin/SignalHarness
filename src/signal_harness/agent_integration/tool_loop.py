@@ -189,11 +189,11 @@ class ControlledToolLoop:
 
 def permission_action(name: str, arguments: dict[str, Any]) -> str:
     if name == "github_signal":
-        return (
-            "read_github_issue"
-            if arguments.get("action") == "fetch_repo_issues"
-            else "read_github_release"
-        )
+        return {
+            "fetch_repo_issues": "read_github_issue",
+            "fetch_repo_commits": "read_github_commit",
+            "fetch_repo_merged_pulls": "read_github_pull_request",
+        }.get(str(arguments.get("action") or ""), "read_github_release")
     if name == "rss_signal":
         return "read_rss"
     if name == "web_change":

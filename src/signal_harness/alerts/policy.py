@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from signal_harness.presentation import sanitize_user_facing_actions
 from signal_harness.signal.schemas import (
     SignalAssessment,
     SignalCategory,
@@ -111,6 +112,11 @@ def select_alerts(
                 "cross_source_confidence": assessment.cross_source_confidence,
                 "conflicting_evidence": assessment.conflicting_evidence,
                 "reasons": reasons,
+                "what_changed_zh": assessment.what_changed_zh,
+                "why_relevant_zh": assessment.why_relevant_zh,
+                "recommended_actions_zh": sanitize_user_facing_actions(
+                    assessment.action_items_zh
+                ),
                 "external_dispatch": "disabled",
             }
         )

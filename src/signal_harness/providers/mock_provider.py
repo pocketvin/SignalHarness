@@ -18,6 +18,8 @@ from signal_harness.agent_integration.schemas import (
     ImpactItem,
     ImpactOutput,
     LearningPolicyOutput,
+    ProjectNarrativeItem,
+    ProjectNarrativeOutput,
     RequiredAgent,
     SupervisorOutput,
     SupervisorRoute,
@@ -33,6 +35,7 @@ from signal_harness.agent_team import (
     ImpactActionAnalyzerAgent,
     ImpactAnalystAgent,
     LearningPolicyAgent,
+    ProjectNarrativeAgent,
     SelectiveVerifierAgent,
     SignalSupervisorAgent,
 )
@@ -41,8 +44,10 @@ from signal_harness.signal.source_authority import event_source_quality
 from signal_harness.signal.schemas import (
     PolicyUpdateProposal,
     SignalCategory,
+    SignalAssessment,
     SignalCluster,
     SignalEvent,
+    SignalDecision,
     SourceQuality,
 )
 from signal_harness.signal.text_semantics import any_affirmed_term, source_semantic_text
@@ -102,6 +107,14 @@ class MockProvider:
             return self._scripted_verification(payload).model_dump_json()
         if call.output_schema == "LearningPolicyOutput":
             return self._scripted_learning(payload).model_dump_json()
+        if call.output_schema == "ProjectNarrativeOutput":
+            return self._scripted_narrative(
+                payload, project_profile=self._project_profile(call)
+            ).model_dump_json()
+        if call.output_schema == "SharedEvidenceSingleOutput":
+            return self._scripted_shared_evidence_single(
+                payload, project_profile=self._project_profile(call)
+            )
         raise ValueError(f"Unknown scripted schema: {call.output_schema}")
 
     def _fallback_response(self, call: AgentCall) -> str:
@@ -157,6 +170,23 @@ class MockProvider:
             return SelectiveVerifierAgent().fallback(events).model_dump_json()
         if call.agent_name == LearningPolicyAgent.name:
             return LearningPolicyAgent().fallback(payload).model_dump_json()
+        if call.output_schema == "ProjectNarrativeOutput":
+            changes = [item for item in payload.get("changes", []) if isinstance(item, dict)]
+            events = [
+                SignalEvent.model_validate(item["event"])
+                for item in changes
+                if isinstance(item.get("event"), dict)
+            ]
+            assessments = [
+                SignalAssessment.model_validate(item["guarded_assessment"])
+                for item in changes
+                if isinstance(item.get("guarded_assessment"), dict)
+            ]
+            return (
+                ProjectNarrativeAgent()
+                .fallback(events, assessments, project_profile=project_profile)
+                .model_dump_json()
+            )
         raise ValueError(f"Unknown fallback Agent: {call.agent_name}")
 
     def _scripted_supervisor(
@@ -237,10 +267,17 @@ class MockProvider:
             by_type.setdefault(event.source_type, []).append(event)
         for source_type, grouped in by_type.items():
             event_ids = [event.event_id for event in grouped]
-            if source_type in {"github_release", "github_issue"}:
-                action = (
-                    "fetch_repo_issues" if source_type == "github_issue" else "fetch_repo_releases"
-                )
+            if source_type in {
+                "github_release",
+                "github_issue",
+                "github_commit",
+                "github_pull_request",
+            }:
+                action = {
+                    "github_issue": "fetch_repo_issues",
+                    "github_commit": "fetch_repo_commits",
+                    "github_pull_request": "fetch_repo_merged_pulls",
+                }.get(source_type, "fetch_repo_releases")
                 requests.append(
                     ToolRequest(
                         tool_name="github_signal",
@@ -461,6 +498,131 @@ class MockProvider:
                 for event in self._events(payload)
             ]
         )
+
+    def _scripted_shared_evidence_single(
+        self, payload: dict[str, Any], *, project_profile: dict[str, Any]
+    ) -> str:
+        from signal_harness.capability_eval import (
+            SharedEvidenceSingleItem,
+            SharedEvidenceSingleOutput,
+        )
+
+        impact = self._scripted_impact(payload)
+        action_payload = {**payload, "impact": impact.model_dump(mode="json")}
+        action = self._scripted_action(action_payload)
+        impact_by_id = {item.event_id: item for item in impact.results}
+        action_by_id = {item.event_id: item for item in action.results}
+        assessments = [
+            SignalAssessment(
+                event_id=event.event_id,
+                category=ClassifierAgent().run(event, project_profile).category,
+                relevance_score=impact_by_id[event.event_id].semantic_relevance,
+                impact_score=impact_by_id[event.event_id].semantic_relevance,
+                confidence=0.7,
+                affected_modules=impact_by_id[event.event_id].affected_modules,
+                reason=impact_by_id[event.event_id].impact_reason,
+                action_items=action_by_id[event.event_id].action_items,
+                decision=SignalDecision.SAVE,
+            )
+            for event in self._events(payload)
+        ]
+        narrative = ProjectNarrativeAgent().fallback(
+            self._events(payload), assessments, project_profile=project_profile
+        )
+        narrative_by_id = {item.event_id: item for item in narrative.results}
+        return SharedEvidenceSingleOutput(
+            report_zh=narrative.report_zh,
+            results=[
+                SharedEvidenceSingleItem(
+                    event_id=event.event_id,
+                    impact=impact_by_id[event.event_id],
+                    action=action_by_id[event.event_id],
+                    what_changed_zh=narrative_by_id[event.event_id].what_changed_zh,
+                    why_relevant_zh=narrative_by_id[event.event_id].why_relevant_zh,
+                    recommended_actions_zh=(
+                        narrative_by_id[event.event_id].recommended_actions_zh
+                    ),
+                )
+                for event in self._events(payload)
+            ],
+        ).model_dump_json()
+
+    def _scripted_narrative(
+        self, payload: dict[str, Any], *, project_profile: dict[str, Any]
+    ) -> ProjectNarrativeOutput:
+        changes = [item for item in payload.get("changes", []) if isinstance(item, dict)]
+        results: list[ProjectNarrativeItem] = []
+        for row in changes:
+            if not isinstance(row.get("event"), dict) or not isinstance(
+                row.get("guarded_assessment"), dict
+            ):
+                continue
+            event = SignalEvent.model_validate(row["event"])
+            assessment = SignalAssessment.model_validate(row["guarded_assessment"])
+            modules = [item for item in assessment.affected_modules if item != "project-wide"]
+            target = self._scripted_project_target(event, modules, project_profile)
+            what = self._scripted_what_changed_zh(event)
+            results.append(
+                ProjectNarrativeItem(
+                    event_id=event.event_id,
+                    what_changed_zh=what,
+                    why_relevant_zh=(
+                        f"这不是单纯的行业资讯，它和 {target} 的实现边界有交集。"
+                        "如果项目当前依赖了对应的运行时、协议或上游行为，就需要确认这次变化是否会改变现有兼容性或调用方式。"
+                    ),
+                    recommended_actions_zh=[
+                        "先核对上游原始说明，确认变化范围和生效条件。",
+                        f"在 {target} 做一组针对性回归验证，再决定是否需要调整实现。",
+                    ],
+                )
+            )
+        highlights = "；".join(
+            item.what_changed_zh.rstrip("。！？； ") for item in results[:2]
+        )
+        report = (
+            "这次更值得关注的是几项会碰到现有工程边界的变化，而不是信息数量本身。"
+            + (f"其中最值得先看的是：{highlights}。" if highlights else "")
+            + "下一步先确认这些上游变化和项目实际用法有没有重叠，再决定是否需要做兼容性验证或调整实现。"
+        )
+        return ProjectNarrativeOutput(report_zh=report, results=results)
+
+    @staticmethod
+    def _scripted_project_target(
+        event: SignalEvent, modules: list[str], project_profile: dict[str, Any]
+    ) -> str:
+        if modules:
+            return "、".join(modules[:3])
+        text = f"{event.title} {event.content}".lower()
+        project_name = str(project_profile.get("project_name") or "当前项目")
+        if "checkpoint" in text:
+            return f"{project_name} 的 checkpoint / 可恢复状态持久化"
+        if "tool" in text and any(term in text for term in ("allowlist", "permission", "runtime")):
+            return f"{project_name} 的 Tool Guard / 工具权限边界"
+        if "schema" in text or "structured" in text:
+            return f"{project_name} 的结构化输出与 Schema 校验"
+        if any(term in text for term in ("provider", "api compatibility", "model api")):
+            return f"{project_name} 的模型 Provider / API 适配层"
+        return f"{project_name} 当前使用的相关依赖或运行时"
+
+    @staticmethod
+    def _scripted_what_changed_zh(event: SignalEvent) -> str:
+        text = f"{event.title} {event.content}".lower()
+        if "checkpoint" in text and any(term in text for term in ("migration", "reliability")):
+            return "LangGraph 的 checkpoint 能力新增了迁移辅助，并修复了 durable checkpoint 的可靠性问题，重点是已有持久化状态如何更稳妥地迁移和继续运行。"
+        if "tool" in text and "allowlist" in text:
+            return "上游正在收紧 Agent 的工具暴露方式：运行时只把明确启用的工具放进 allowlist，避免模型看到或请求未授权工具。"
+        if "schema" in text or "structured" in text:
+            return "相关接口或文档更新了结构化输出 / Schema 约束，核心变化是模型输出的字段契约和校验方式更加明确。"
+        if any(term in text for term in ("vulnerability", "cve", "security", "supply chain")):
+            return "上游披露或修复了一项安全相关变化，需要确认受影响版本、攻击面以及当前项目是否实际使用到对应组件。"
+        if event.source_type in {"github_release", "package_registry"}:
+            version = event.current_version or "新版本"
+            return f"{event.source_name} 发布了 {version}，这次不是单纯版本号变化，需要结合 release notes 确认行为、兼容性或迁移要求是否发生变化。"
+        if event.source_type == "github_issue":
+            return f"{event.source_name} 的上游 Issue 正在讨论「{event.title}」；它代表一个可能进入后续实现或规范的工程方向，目前还不是已经落地的正式行为。"
+        if event.source_type in {"rss", "web_change"}:
+            return f"技术生态中出现了「{event.title}」这项更新；需要把正文中的具体行为变化和普通观点/宣传内容区分开，再判断是否值得项目跟进。"
+        return f"{event.source_name} 出现了与「{event.title}」相关的新变化，后续需要以原始来源确认具体行为边界。"
 
     def _scripted_learning(self, payload: dict[str, Any]) -> LearningPolicyOutput:
         active = deepcopy(payload.get("policy_memory", {}).get("active_policy", {}))

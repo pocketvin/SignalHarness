@@ -1,5 +1,15 @@
+local_git:
+  repositories:
+    - name: SignalHarness
+      path: .
+
 github:
   repositories:
+    - repo: pocketvin/signalharness
+      project_owned: true
+      events:
+        - commits
+        - pull_requests
     - repo: langchain-ai/langgraph
       package_name: langgraph
       package_registry: pypi
@@ -25,6 +35,10 @@ package_registries:
       - name: fastapi
       - name: pydantic
 
+security:
+  osv:
+    enabled: true
+
 rss:
   feeds:
     - name: OpenAI News
@@ -49,3 +63,5 @@ web_changes:
       adapter: http
       url: https://modelcontextprotocol.io/specification/latest
       official: true
+      entity_type: protocol
+      entity_name: Model Context Protocol

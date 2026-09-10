@@ -9,6 +9,17 @@ from typing import Any
 from signal_harness.runtime.tools_base import ToolExecutionContext, ToolRegistry, ToolResult
 
 
+_OFFLINE_FIXTURE_SOURCE_TOOLS = frozenset(
+    {
+        "github_signal",
+        "rss_signal",
+        "web_change",
+        "package_registry",
+        "security_osv",
+    }
+)
+
+
 class SignalToolExecutor:
     """Resolve, validate, and execute allowlisted SignalHarness tools."""
 
@@ -26,23 +37,38 @@ class SignalToolExecutor:
         )
 
     async def call(self, name: str, arguments: dict[str, Any]) -> ToolResult:
-        if (
+        explicit_mock = (
             arguments.get("mock_tool_eval") is True
             and self.context.metadata.get("allow_mock_tool_eval") is True
-        ):
+        )
+        local_fixture_read = (
+            name == "web_change" and arguments.get("action") == "load_fixture"
+        )
+        frozen_source_mock = (
+            self.context.metadata.get("offline_fixture_source_tools") is True
+            and name in _OFFLINE_FIXTURE_SOURCE_TOOLS
+            and not local_fixture_read
+        )
+        if explicit_mock or frozen_source_mock:
             payload = {
                 "tool": name,
                 "mocked": True,
+                "offline_fixture": frozen_source_mock,
                 "source_type": arguments.get("source_type"),
                 "event_ids": arguments.get("event_ids", []),
                 "summary": (
-                    "Fixture-safe mock tool observation generated for "
-                    "scripted mock-agent evaluation."
+                    "Fixture-safe frozen source observation generated without external I/O."
+                    if frozen_source_mock
+                    else "Fixture-safe mock tool observation generated for scripted mock-agent evaluation."
                 ),
             }
             return ToolResult(
                 output=json.dumps(payload, ensure_ascii=False),
-                metadata={"mock_tool_eval": True, "tool": name},
+                metadata={
+                    "mock_tool_eval": True,
+                    "offline_fixture": frozen_source_mock,
+                    "tool": name,
+                },
             )
         if (
             arguments.get("mock_tool_error") is True

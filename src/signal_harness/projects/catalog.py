@@ -122,6 +122,15 @@ def _watchlist_metadata(path: Path) -> dict[str, Any]:
             for item in repos:
                 if isinstance(item, dict) and item.get("repo"):
                     sources.append({"type": "github", "name": str(item["repo"])})
+    local_git = payload.get("local_git")
+    if isinstance(local_git, dict):
+        repositories = local_git.get("repositories")
+        if isinstance(repositories, list):
+            for item in repositories:
+                if isinstance(item, dict) and (item.get("name") or item.get("path")):
+                    sources.append(
+                        {"type": "local_git", "name": str(item.get("name") or item.get("path"))}
+                    )
     package_registries = payload.get("package_registries")
     if isinstance(package_registries, dict):
         pypi = package_registries.get("pypi")
@@ -133,6 +142,10 @@ def _watchlist_metadata(path: Path) -> dict[str, Any]:
                         sources.append({"type": "pypi", "name": str(item["name"])})
                     elif isinstance(item, str) and item.strip():
                         sources.append({"type": "pypi", "name": item.strip()})
+    security = payload.get("security")
+    if isinstance(security, dict) and isinstance(security.get("osv"), dict):
+        if bool(security["osv"].get("enabled", False)):
+            sources.append({"type": "security", "name": "OSV"})
     rss = payload.get("rss")
     if isinstance(rss, dict):
         feeds = rss.get("feeds")

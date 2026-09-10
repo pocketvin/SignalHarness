@@ -35,7 +35,12 @@ class ContextEvidenceAgent:
     tool_request_contract = {
         "github_signal": {
             "required": ["action"],
-            "common_valid_actions": ["fetch_repo_releases", "fetch_repo_issues"],
+            "common_valid_actions": [
+                "fetch_repo_releases",
+                "fetch_repo_issues",
+                "fetch_repo_commits",
+                "fetch_repo_merged_pulls",
+            ],
             "required_when_applicable": ["repo"],
             "minimal_examples": [
                 {
@@ -224,21 +229,20 @@ class ContextEvidenceAgent:
             for item in active_observations
             if item.status != "success"
         ]
-        failure_note = (
-            "Evidence confidence reduced due to tool errors."
-            if errors
-            else "No additional external lookup was performed by the fallback."
-        )
+        uncertainty = "Evidence confidence reduced due to tool errors." if errors else ""
+        process_note = "No additional external lookup was performed by the fallback."
         return ContextEvidenceOutput(
             results=[
                 ContextEvidenceItem(
                     event_id=event.event_id,
                     evidence_urls=result.evidence_urls,
-                    context_summary=f"Deterministic fallback: {result.reason}",
+                    context_summary=(
+                        f"Deterministic fallback: {result.reason} {process_note}"
+                    ),
                     confidence=min(result.confidence, 0.55) if errors else result.confidence,
                     source_quality=result.source_quality,
                     unsupported_claims=[],
-                    uncertainty=failure_note,
+                    uncertainty=uncertainty,
                     source_types_observed=[event.source_type],
                     tools_requested=requested,
                     tools_executed=executed,
@@ -289,6 +293,24 @@ def _source_tool_hint(event: SignalEvent) -> ToolRequest | None:
                 "repo": event.source_name,
             },
             reason="Verify the observed GitHub issue from the same repository.",
+        )
+    if event.source_type == "github_commit" and "/" in event.source_name:
+        return ToolRequest(
+            tool_name="github_signal",
+            arguments={
+                "action": "fetch_repo_commits",
+                "repo": event.source_name,
+            },
+            reason="Verify the observed GitHub commit from the same repository.",
+        )
+    if event.source_type == "github_pull_request" and "/" in event.source_name:
+        return ToolRequest(
+            tool_name="github_signal",
+            arguments={
+                "action": "fetch_repo_merged_pulls",
+                "repo": event.source_name,
+            },
+            reason="Verify the observed merged pull request from the same repository.",
         )
     if event.source_type == "rss":
         feed_url = str(

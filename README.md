@@ -4,7 +4,7 @@
 
 > 一个面向持续开发软件项目的 Project Environment Intelligence 系统：连接项目后持续收集、聚合和分析周围的工程环境变化，回答“发生了什么、哪些值得关注、会影响什么、应该做什么”。Multi-Agent、规则、Search 与 Scoring 都只是可替换的实现技术。
 
-SignalHarness 会实时监听 GitHub / PyPI package registry / RSS / 配置化网页快照等外部工程信号；它判断这些变化是否真正影响当前选择的项目，并把结果转成**可解释、可审计、可回归验证**的决策，而不是再做一个信息聚合器或聊天机器人。
+SignalHarness 会实时监听项目本地 Git、GitHub、PyPI package registry、OSV 安全公告、RSS 与配置化网页快照等工程信号；它判断这些变化是否真正影响当前选择的项目，并把结果转成**可解释、可审计、可回归验证**的决策，而不是再做一个信息聚合器或聊天机器人。
 
 ## 30 秒看懂这个项目
 
@@ -17,27 +17,29 @@ SignalHarness 会实时监听 GitHub / PyPI package registry / RSS / 配置化�
 - 一次判断为什么发生，之后能不能复盘？
 - 修改 Prompt / Router / Scoring 后，如何防止旧能力被改坏？
 
-SignalHarness 的核心答案是：**稳定的环境事实与 Scan 状态由 Python/runtime 持久化和约束，LLM 只负责真正需要语义判断的分析节点。** 当前五 Agent 路径保留为 Analyzer baseline，后续通过 Eval 决定哪些组件真正值得长期保留。
+SignalHarness 的核心答案是：**稳定的环境事实与 Scan 状态由 Python/runtime 持久化和约束，LLM 只负责真正需要语义判断的分析节点。** 真实 `agent` 扫描现在默认使用 2-call adaptive Analyzer；原五 Agent 路径继续作为受保护 baseline / rollback 对照，`mock-agent` 仍默认走五 Agent 以覆盖完整链路。
 
 ## 当前已实现能力
 
 | 能力 | 当前实现 |
 | --- | --- |
-| Analyzer baseline | 当前五 Agent：Supervisor → Evidence → Impact → Action → Learning；P4 通过 Harness Ablation 决定最终形态 |
+| Analyzer default | real `agent`：deterministic Route/Evidence → merged Impact+Action → Narrative（2 calls）；schema/coverage 失败才升级 split；`mock-agent` 保留 five-Agent baseline |
 | Tool Calling | Evidence 两阶段工具计划；Python 负责 allowlist、permission、budget、execution、observation |
 | 结构化输出 | Pydantic Schema、一次 schema retry、确定性 fallback |
 | Guarded Scoring | LLM 提供语义判断；Python 持有 authoritative final score |
 | Change Ledger | Project-scoped SQLite：EventRevision → Change → ProjectImpact → ScanChange；Top-K 不再决定事实是否存在 |
 | Project Profile / Preference | versioned ProfileRevision + Critical / Important / Normal / Low / Ignore；显式偏好直接影响排序和 Agent Context |
-| Sources | GitHub releases/issues、PyPI release registry、RSS、配置化 Web snapshot；同一 package/version 的 GitHub + Registry observation 聚合为一个 Change |
+| Sources | 项目本地 Git commits、GitHub releases/issues/commits/merged PRs、PyPI、基于 lockfile 精确版本的 OSV、RSS、usage-bound 官方 Web changelog/spec；同一 package/version 或同一 repo/commit 的多源 observation 聚合为一个 Change |
 | Memory / State | Project-scoped Signal / Feedback / Learning 兼容状态；新业务历史逐步迁移到结构化 Ledger |
-| Agent Eval | 40 条项目级 Regression Suite + 3 条 Cross-project Context Gate + Provider Contract Eval |
-| Observability | Agent、Schema、Retry、Fallback、Tools、Latency、Tokens、Estimated Cost Trace |
+| Agent Eval | 40-case Regression protection + 32-case Capability Golden V1 + 8-case Trajectory contract + 3-case Cross-project Context + Provider Contract；Narrative Judge 尚未校准/启用 |
+| Observability | 同一 TraceRecorder 通过 SSE 实时 append/update；Agent、Schema、Retry、Fallback、Tools、Latency、Tokens、Estimated Cost，以及可展开的 `structured-reasoning-v1` 模型结构化判断摘要 |
 | MCP | 10 个 structured tools：9 个只读读取工具 + 1 个持久化 fresh-scan 启动工具；CLI 仍是开发者/Coding Agent 首选接口 |
 | Product Intelligence | 同一 frozen Scan 的 Overall Report → Top Changes → All Relevant Changes → Change Detail，共用一份 core projection |
+| Continuous Monitoring | 持久 Schedule（12h/24h/本地时间）+ 独立 schedule checkpoint + Inbox + Outbox/DeliveryAttempt + 可选 HMAC signed Webhook；scheduled run 不消耗手动 `since_last` |
+| Calibration | 真实 Feedback/Outcome → frozen Episode → historical/shadow replay → durable promotion gate；至少 3 条 labeled Episode，no-gain/regression 拒绝，policy apply 有 revision + rollback |
 | CLI | CLI-first developer / Coding Agent surface：`scan/report/changes/change --json` + shared Markdown export |
 | Service | FastAPI REST + SSE Streaming Run + Product Intelligence REST + MCP Streamable HTTP |
-| Golden Demo | 默认中文，可切换 English；Profile → Overall Report → Top → All → Detail → Audit，并实时消费同一份 Trace |
+| Golden Demo | React + TypeScript + Tailwind SPA；默认中文，可切换 English；Runtime/Trace 双栏、Project Context 渐进展开、Intelligence 结果流与 Change Drawer 共用现有 REST/SSE contract |
 | Deployment | Docker + `/health` healthcheck |
 | Learning | Review-only proposal → replay/risk gate → 显式人工 apply |
 
@@ -45,31 +47,42 @@ SignalHarness 的核心答案是：**稳定的环境事实与 Scan 状态由 Pyt
 
 ```mermaid
 flowchart LR
-    Sources[GitHub / PyPI / RSS / Web change / fixture]
+    Sources[Local Git / GitHub / PyPI / OSV / RSS / Web change / fixture]
     Collect[Collect / Normalize / Deduplicate]
     Funnel[Project-aware Candidate Funnel]
     Noise[Noise Filter]
-    Supervisor[SignalSupervisorAgent]
-    Evidence[ContextEvidenceAgent]
-    Tools[Controlled read-only tool loop]
-    Impact[ImpactAnalystAgent]
-    Action[ActionPlannerAgent]
-    Learning[LearningPolicyAgent]
-    Guard[Python constraint plane]
-    Output[Assessment / Trace / Dashboard / Digest]
+    Route[Deterministic project-aware Route]
+    Evidence[Deterministic source-aware Evidence]
+    Tools[Controlled read-only source tools]
+    IA[ImpactActionAnalyzerAgent]
+    Split[ImpactAnalystAgent → ActionPlannerAgent]
+    Guard[Python guarded scoring / permission]
+    Narrative[ProjectNarrativeAgent]
+    Learning[Explicit Calibration / Learning]
+    Output[Assessment / Product / Trace / Digest]
     Interfaces[CLI / REST / SSE Demo / MCP]
 
-    Sources --> Collect --> Funnel --> Noise --> Supervisor --> Evidence --> Impact --> Action --> Learning --> Output
+    Sources --> Collect --> Funnel --> Noise --> Route --> Evidence --> IA --> Guard --> Narrative --> Output --> Interfaces
     Evidence --> Tools --> Evidence
-    Guard -. schema / permission / budget / fallback / scoring .-> Supervisor
-    Guard -.-> Evidence
-    Guard -.-> Impact
-    Guard -.-> Action
-    Guard -.-> Learning
-    Output --> Interfaces
+    IA -. schema / coverage failure only .-> Split --> Guard
+    Guard -. feedback / outcomes .-> Learning
+    Guard -. schema / permission / budgets / fallback / scoring .-> IA
+    Guard -.-> Split
 ```
 
 核心边界：**Agent 负责语义推理；Python constraint plane 负责可验证规则和外部副作用。**
+
+### 实时 SSE Trace 与模型判断摘要
+
+Golden Demo 的扫描进度不再用“预设 Agent 动画”模拟执行。`TraceRecorder` 在 LLM 调用前先 append `status=running`，完成后以同一 Trace index 发出 update；`StreamRunManager` 将这两类真实事件通过 SSE `trace.step / trace.step.updated` 推到页面。扫描控制区和底部完整 Audit 消费的是同一份 Trace。
+
+模型步骤可用原生 `<details>` 展开/收起。展开后显示 `structured-reasoning-v1`：它只从已经通过 Pydantic 验证的显式模型输出字段中提取 `impact_reason / uncertainty / planning_summary / report_zh` 等可公开判断摘要，并附带 Schema、Tool、Permission、Fallback、Latency、Token 等技术审计。**这里不展示、也不声称展示模型隐藏思维链 / chain-of-thought。** Provider 原始响应和 Prompt 不进入这份 UI metadata。
+
+前端源码现在位于 `frontend/`，使用 React + TypeScript + Tailwind；Vite 将生产 bundle 编译为 FastAPI 继续托管的 `src/signal_harness/ui/static/demo.html|css|js`，因此 `/demo` URL、REST/SSE contract 和 wheel 静态资源路径不变。界面按项目环境情报控制台重新组织：Runtime/真实 Trace 是首要工作区，Project Context 保留快速自然语言偏好并折叠详细规则，Continuous Monitoring 降到渐进披露，Intelligence 使用报告 + editorial priority rows + grouped All Changes，Change Detail 使用右侧 Drawer。Pipeline 根据实际 Trace 映射为采集 → 路由 → 证据 → 影响/行动 → 受控决策 → 用户摘要，不再写死历史 five-Agent 结构。
+
+`signal-harness serve` 的 FastAPI 生命周期同时运行持久 Schedule manager：`/projects/{project_id}/schedules` 可创建/查看/停用 12h、24h 或本地时间计划，`/projects/{project_id}/inbox` 提供项目 Inbox 与未读状态。若运行环境同时配置 `SIGNALHARNESS_WEBHOOK_URL` 与 `SIGNALHARNESS_WEBHOOK_SECRET`，高优先级 Inbox 会通过带 HMAC 签名和幂等键的 Webhook Outbox 投递；未配置时只保留 Inbox，绝不自动外发。
+Golden Demo 也提供同一套持续监控控制面：在项目画像下可直接创建/停用 Schedule、查看 next-run/checkpoint，并读取/标记 Inbox；页面调用的仍是上述项目级 REST/SQLite 状态，没有单独的前端调度逻辑。
+Change Detail 同时是 P8 的真实数据入口：用户可以记录 useful / not useful / false positive / too generic，以及实际是否有影响、是否采取行动、建议是否有帮助、是否解决。SignalHarness 只沉淀这些事实；不足 3 条 labeled Episode、没有实测收益或出现回归时，durable calibration gate 都不会允许真实项目 policy promotion。
 
 ## Golden Demo：实时运行入口
 
@@ -87,7 +100,7 @@ uv run signal-harness serve \
 http://127.0.0.1:8001/demo
 ```
 
-页面默认是**中文**，右上角可切换 `EN`。运行前先选择**关联项目**，再选择数据来源、分析方式和真实模型。项目不是写死在 UI 中：`configs/projects/*.yaml` 是 Project Catalog，每个项目分别绑定自己的 Project Profile 与 Watchlist。公开仓库默认提供 `SignalHarness` 与 `Example · Agent API Service` 两个 profile。页面可直接选择本地项目目录完成连接并自动激活 ProfileRevision；浏览器只读取白名单 manifest/lockfile 与相对路径，不上传源码或 `.env`。连接后可以查看 effective Profile，并用五档重要性或自然语言快速修改显式 Preference。
+页面默认是**中文**，右上角可切换 `EN`。运行前先选择**关联项目**，再选择数据来源、分析方式和真实模型。项目不是写死在 UI 中：`configs/projects/*.yaml` 是 Project Catalog，每个项目分别绑定自己的 Project Profile 与 Watchlist。公开仓库默认提供 `SignalHarness` 与 `Example · Agent API Service` 两个 profile。页面既可直接粘贴 GitHub 仓库根链接完成安全连接，也可选择本地项目目录；两条路径都复用同一套 Project Profile / Watchlist onboarding，只读取仓库元数据、白名单 manifest/lockfile 与有限路径，不执行仓库代码、不读取 `.env`。GitHub URL 连接会优先使用有效环境 Token；本机 `signal-harness serve` 在环境 Token 缺失/不可用时可复用 GitHub CLI/keyring 登录凭据，凭据只保留在进程内且不会写回配置。仓库存在根 manifest 时，根 manifest/lockfile 定义主项目画像，嵌套 examples/demo manifest 不会覆盖主项目名称、purpose 或依赖。连接成功后项目下拉框立即切到新项目。连接后可以查看 effective Profile，并用五档重要性或自然语言快速修改显式 Preference。时间窗口除 7/14/30 天外，也支持手动输入 1–3650 天，并仅在选择“自定义天数”后显示输入框。
 
 默认组合是：
 
@@ -97,27 +110,13 @@ SignalHarness + 实时 Watchlist + 离线五 Agent / mock-agent
 
 它不需要 API Key，但仍然走真实五 Agent orchestration、Schema、Tool Guard、Trace、SSE 和 Python scoring，因此适合稳定展示真实 Harness 行为。
 
-页面会实时展示：
+页面会根据本次 **真实 Trace** 动态展示执行阶段，而不是写死 Agent 数量：
 
 ```text
-采集 + 标准化
-      ↓
-SignalSupervisorAgent
-      ↓
-ContextEvidenceAgent
-      ↓
-Python 工具守卫
-      ↓
-ImpactAnalystAgent
-      ↓
-ActionPlannerAgent
-      ↓
-LearningPolicyAgent
-      ↓
-受控决策
+采集 → 路由 → 证据 → 影响/行动 → 受控决策 → 用户摘要
 ```
 
-点击任一阶段可以查看：
+`mock-agent` 运行时仍会展开到完整 five-Agent baseline；真实 `agent` 默认则会显示当前 2-call adaptive Analyzer，只有 schema/coverage contract failure 才出现 split escalation。展开任一模型 Trace 可以查看：
 
 - Schema 是否有效
 - Retry / Fallback
@@ -149,6 +148,8 @@ SSE
 ```
 
 `POST /stream-runs` 创建后就开始执行，不再依赖首个 SSE subscriber。queued/running 输入与状态会持久化，服务重启时可做有界恢复；浏览器断开不会取消任务，重连仍可通过 `Last-Event-ID` 补发当前进程内的历史事件。
+
+LLM 调用现在在真正发出 Provider 请求前先写入 `status=running` Trace，完成后更新同一条 Trace。因此 React Runtime 控制台可以通过 SSE 显示当前处于采集/路由/证据/影响与行动/决策/用户摘要中的哪一步，以及正在运行的 Agent 与模型；Run 完成后 Trace 仍保留，可继续展开审计，而不是把完成状态隐藏。
 
 这里仍明确不是 Redis/Celery/Kafka 一类分布式 durable queue：**任务输入/状态可恢复，SSE replay history 仍是 in-process。**
 
@@ -190,7 +191,9 @@ uv run signal-harness change <change_id> --scan <scan_id> --json
 uv run signal-harness export --scan <scan_id> --mode report --out report.md
 ```
 
-JSON 模式将 requested data 保持在 stdout；机器可读错误走 stderr 并返回非零 exit code。REST 与 Golden Demo 调用同一个 `ProductIntelligenceService`，不是重新计算另一份业务判断。All Relevant Changes 支持 frozen pagination、search、analysis/decision/source/category filter 与 rank/impact/newest sorting；Detail 再展开 what/why/modules/actions/Before-After/evidence/audit。
+JSON 模式将 requested data 保持在 stdout；机器可读错误走 stderr 并返回非零 exit code。REST 与 Golden Demo 调用同一个 `ProductIntelligenceService`，不是重新计算另一份业务判断。All Relevant Changes 会先按稳定的项目影响板块归类（项目代码、依赖/版本、安全、API/协议/文档、上游 Issue/提案、技术动态/生态、其他），再支持 frozen pagination、search、impact-board/analysis/decision/source/category filter 与 rank/impact/newest sorting；Detail 再展开 what/why/modules/actions/Before-After/evidence/audit。
+
+正常 Agent 扫描在 guarded score / decision / evidence / permission 全部确定后，会额外运行一次 **presentation-only `ProjectNarrativeAgent`**。它只负责把同一份冻结事实写成给人看的中文“项目环境报告 / 发生了什么 / 为什么与你有关 / 建议怎么做”，不会回写分数或改变决策。Golden Demo 的重点变化卡片直接展示这些中文内容；底部完整 Audit 仍保留结构化证据与决策细节。这个展示层会增加一次 LLM call，但不属于决策 Agent 链。
 
 ### Candidate Funnel V2：先判断相关性，再做 Top-K
 
@@ -246,7 +249,7 @@ LLM_API_KEY=... uv run signal-harness scan \
   --mode agent
 ```
 
-`signal-harness serve` 启动时会自动读取项目根目录的 `.env`，但不会覆盖已经显式 export 的环境变量。Golden Demo 当前可识别并按 run 切换 OpenAI、Qwen、Kimi、DeepSeek 四套 OpenAI-compatible 配置；未配置的 provider 会保持不可选。Model Profile 带有 freshness metadata，过期的已知模型名会解析到当前 profile 并在 UI 明示 warning；未知自定义模型仍可配置，但 capability 会降为 conservative，不继承其他模型未经验证的 JSON/context/pricing 能力。
+`signal-harness serve` 启动时会自动读取项目根目录的 `.env`，但不会覆盖已经显式 export 的环境变量。Golden Demo 当前可识别并按 run 切换 OpenAI、Qwen、Kimi、DeepSeek 四套 OpenAI-compatible 配置；当前 OpenAI profile 使用 `gpt-5.6-sol`（中等 reasoning effort）并作为本地已配置环境的默认真实模型，旧 `gpt-4o-mini` profile 仅保留兼容。未配置的 provider 会保持不可选。Model Profile 带有 freshness metadata，过期的已知模型名会解析到当前 profile 并在 UI 明示 warning；未知自定义模型仍可配置，但 capability 会降为 conservative，不继承其他模型未经验证的 JSON/context/pricing 能力。
 
 页面不会暴露 API Key、Base URL 或本地配置路径；“已配置”也只表示本地配置完整，真实网络连接仍在 Run 时验证。`.env` 已被 Git 和 Docker build context 排除。真实 `agent` 的交互关键路径在 ActionPlanner + guarded decision 后即可返回，LearningPolicyAgent 的 LLM reflection 后置到显式 calibration/learning 路径；`mock-agent` 仍保留完整五 Agent orchestration 作为稳定离线演示与回归路径。
 
@@ -363,6 +366,82 @@ priority recall     28.57%
 - routing contract 回归
 
 > **重要：这里的 100% 只代表 SignalHarness 项目级 Regression Contract，不代表通用 LLM 准确率 100%。**
+
+## Capability Golden V1：不再拿 Regression 证明产品能力
+
+现有 40 条继续保留，但职责明确为 **Regression protection**：已经解决的问题不能回来。它不再承担“哪种 Agent 架构更聪明”“报告是否真正好用”的证明责任。
+
+新的 `examples/signal_harness/capability_golden_v1.json` 是独立的 32-case Capability Set，刻意包含 hard negatives、部分验证/冲突证据、直接依赖与无关重大新闻、MCP proposal vs released spec、安全影响版本 vs 当前已修复版本、project-owned code change、来源采集与评测方法变化。每条 case 使用 rubric，而不是唯一参考答案字符串：`truth_status`、可接受 decision 集、0–3 relevance、must-include facts、project concepts、acceptable/forbidden actions、uncertainty 与可选 trajectory contract。
+
+```bash
+uv run signal-harness capability-eval --mode mock-agent
+uv run signal-harness capability-regrade --checkpoint-dir <real-checkpoints>
+uv run signal-harness trajectory-eval --enforce
+```
+
+`capability-eval` 的公平 baseline 让两边拿到**完全相同的 Event、Project Profile、确定性 Route 与 curated Evidence**。`shared-evidence-single-agent` 用 1 次语义调用同时做 Impact + Action + Narrative；`split-impact-action-narrative` 用 Impact → Action → Narrative 3 次调用。两边仍走同一 Python guarded scoring/decision，因此比较的是 orchestration 本身，不是谁拿到了更多信息。
+
+Mock Capability 只验证 Eval plumbing，明确返回 `recommendation_state=plumbing_only`，并且当前 **故意没有通过**全部 Capability 阈值：hard-negative、uncertainty、project-specificity 等弱项应该被暴露，而不是为了 CI 绿色把题目改简单。真实模型少于 3 次重复 trial 也不会给架构推荐；>=3 次只形成评审矩阵，仍不自动 promotion。
+
+真实 Qwen `qwen-plus` 已完成一轮有效的 **32-case × 3-trial × batch=4** 公平矩阵：六个 variant-trial checkpoint 均 coverage 完整、Schema valid、0 fallback，且 decision consistency=1.0。原始语义结果显示 split stack 在 fact coverage（0.825 vs 0.799）和 project specificity（0.728 vs 0.537）上优于 single-Agent，但生成代价约为 3× calls / 2.8× tokens；这仍只是模型/架构证据，不是自动切换生产 Harness 的授权。OpenAI GPT-5.6 Sol 本轮因 API `credit_balance_exhausted` 未形成有效 Capability 证据；DeepSeek 的重结构化 batch 存在明显 timeout/long-tail，因此也未形成有效 3-trial 矩阵。
+
+Capability 长跑现在按 trial 落 checkpoint，并逐 batch 打进度；只有 `coverage=complete + schema-valid + 0 fallback` 的 checkpoint 才允许 `--resume` 复用。Prompt/Eval/Provider/Profile/生成相关 Policy 通过实验签名防止旧 trial 混入新实验。Schema 合法但漏 event_id 时，Narrative 会只对缺失 ID 做一次 semantic coverage repair，仍失败才 deterministic fallback。
+
+`signal-harness capability-regrade` 可以对已冻结的真实语义 checkpoint **零模型调用重打 deterministic scoring**。当前 `guarded-scoring-v2` 修正了不确定证据触发硬 floor、verified direct-impact 被低估、高相关 engineering guidance 被直接忽略等共享 scoring 问题；同一 Qwen checkpoint 离线 regrade 后两种架构 decision acceptance 都为 1.000，nDCG@5=1.000、nDCG@10=0.9202，同时 Narrative 原文保持不变。40-case Regression 与 15-case real-world Harness 也保持 1.000。
+
+### Real-agent 默认 Harness：正常 2 calls，结构失败才升级
+
+最新 frozen Harness ablation 新增 `deterministic-evidence-impact-action`：deterministic Supervisor + deterministic source-aware Evidence → 1 次 `ImpactActionAnalyzerAgent` → 1 次 `ProjectNarrativeAgent`。在 40-case Regression 与 15-case real-world corpus 上，该 variant 都保持 decision / priority precision / priority recall = **1.000 / 1.000 / 1.000**，LLM calls 从旧 `deterministic-evidence-resolver` 的 3 次降到 **2 次**，因此当前 offline Harness recommendation 更新为它。
+
+没有采用“高风险/不确定就预先 multi-Agent”的语义 routing。基于现有 Qwen 3×32 frozen outputs 的 shadow 对比，uncertainty-only 与 uncertainty+risk gate 都没有改善 decision/nDCG，却会把每轮估算 calls 从 single 的 8 提高到约 15–16；因此没有证据支持常态预升级。当前 adaptive 只在 merged output 的 **schema validation 或 event coverage contract** 失败时升级到既有 Impact → Action split；`provider_timeout/provider_error` 不会触发额外 split 请求，避免故障时放大流量。Trace 的 `metadata.failure_kind` 现在区分 `schema_validation / coverage_validation / provider_timeout / provider_error`。
+
+真实 `agent` 模式已默认使用该 2-call Harness；开发者仍可显式选择任意 Harness（包括回退 five-Agent）。`mock-agent` 默认保持 five-Agent baseline：
+
+```bash
+uv run signal-harness scan --mode agent --provider qwen \
+  --fixture examples/signal_harness/sample_events.json
+
+# 显式回退 / 对照旧 baseline
+uv run signal-harness scan --mode agent --provider qwen \
+  --fixture examples/signal_harness/sample_events.json \
+  --harness-variant five-agent
+```
+
+真实 Qwen `qwen-plus` production-style Analyzer smoke 已通过：从现有 real-world corpus 冻结选取 4 条代表 case，decision/category **4/4 + 4/4** 命中；`ImpactActionAnalyzerAgent` 与 `ProjectNarrativeAgent` 两次调用均 schema-valid、0 fallback、0 adaptive escalation，总计 **10,597 provider-reported tokens / 47.3s summed LLM latency**。本地 Qwen profile 未配置权威价格，因此 trace 中 `$0.0` 不能解释为实际零费用。该 smoke 使用冻结事件验证 Analyzer，不声称本轮重新做了 live source collection；证据保存在 `outputs/adaptive-qwen-real-smoke/smoke_summary.{json,md}`。
+
+真实 smoke 还暴露并修复了 legacy human-readable 输出边界：`radar_digest.md`、`alerts.md`、Dashboard 推荐与 Demo fallback 现在只读 `what_changed_zh / why_relevant_zh / action_items_zh` 等 presentation 字段；raw `reason/action_items/score_breakdown` 继续只在 JSON/Trace 审计层保留。`scan --mode agent` 同时与 `serve` 对齐，只在真实 agent 模式加载项目 `.env`，demo/mock 不读取真实凭证。
+
+### Trajectory Eval
+
+8 个代表性 Capability case 逐 case 通过完整 offline mock Harness，检查 required/forbidden Agent、source tool、tool request budget、Schema 与 fallback。逐 case 执行避免 batched Trace 把别的事件工具调用错误归因到当前 case。当前本地 contract acceptance 为 8/8；它衡量 runtime 行为，不替代真实模型 intelligence Eval。
+
+### Narrative Human Calibration：Judge 默认关闭
+
+```bash
+uv run signal-harness narrative-pair-export
+uv run signal-harness narrative-calibration-status
+```
+
+16 条平衡 case 会导出 blind A/B review：review 文件只展示两份“发生了什么 / 为什么与你有关 / 建议”，variant 身份单独放在 mapping 文件。Mock/offline pair 即使人工打满标签也**不能**校准生产 Judge。只有真实 provider、有效 comparison、至少 15 条 blind human preference 后，状态才会变成 `ready_for_judge_calibration=true`；这仍不会自动启用 Judge，agreement / bias / position/verbosity bias 等检查必须另行实现并通过。当前 `judge_calibrated=false / judge_enabled=false` 是刻意状态。
+
+服务提供独立盲测入口 `http://127.0.0.1:8001/eval/narrative`。它显示共同的 case/evidence context 与匿名 A/B Narrative；**review API 与页面都不暴露 variant mapping，也不暴露 decision / impact score**，避免架构名与数值锚定 reviewer。总体偏好与 7 个维度必须完整选择后才允许原子保存，mapping 始终留在单独文件。
+
+第一轮人工快速阅读已经产生一条真实但**仅限 pre-fix** 的信号：前 5 个 blind pair 的整体偏好是 `B/B/B/B/A`，解盲后恰好 **5/5 都选择 `split-impact-action-narrative`**。同时 reviewer 明确指出另一侧存在自然语言更弱，以及 `Approval required before ... / ... is not enabled / Human approval ...` 等 runtime permission 文案泄漏。这个结果只说明这 5 个旧输出的人类偏好，不足以直接决定生产架构。旧标签完整归档在 `outputs/narrative-calibration-pre-presentation-v2/`，不会自动复制到修复后的新输出。
+
+由此新增 `presentation-v2` deterministic presentation boundary：核心 `action_items` / Trace 仍保留完整 permission/audit 信息，但 `action_items_zh`、Product Intelligence 与 Capability reviewer 只能展示经过 sanitizer 的用户动作。中文 substantive action 会从 approval wrapper 中解包，纯内部 tool/permission id、`Human approval`、`is not enabled` 等直接丢弃；短的 runtime action label 也不作为用户建议。Prompt 同时升级到 `signal-harness-llm-v3`，但 5-case Qwen 真实诊断证明 **Prompt 约束本身仍会生成 raw permission boilerplate**，因此 deterministic sanitizer 是必要边界而不是可选润色。`capability-grader-v4` 也正式把这类字符串计为 internal leakage，并修复了“迁移影响分析”误撞 `影响分` 的旧 grader 误报。
+
+当前 canonical post-fix review 重新从 **0/16** 开始；浏览器已验收第一条 A/B 均无上述权限文案。不能把 pre-fix 的 5 个选择直接沿用到 post-fix 输出。
+
+### 真实失败回流，而不是自动污染 Golden
+
+`not_useful / false_positive / too_generic / missed_signal` 会把当时 frozen Event、Assessment、run/change revision 与用户备注写入 project-scoped `golden_candidates.json`：
+
+```bash
+uv run signal-harness golden-candidates --json
+uv run signal-harness golden-review-draft <candidate-id>
+```
+
+候选只生成 human review worksheet，不自动写入 Capability Golden。`useful` 反馈也不会自动变成 Golden case。
 
 ## Cross-project Context Eval
 
@@ -507,7 +586,7 @@ Learning proposal 不自动应用。高风险 proposal 或 replay gate failed pr
 
 ## Wheel / 仓库外运行
 
-`uv build` 生成的 wheel 现在自带默认 `configs/`、Project Catalog、Model Profiles、Watchlists、Regression/Demo fixtures 与 Golden Demo 静态资源。运行时仍然**优先使用当前工作区自己的 `configs/`**；只有默认 `configs` / `examples/signal_harness` 在 cwd 不存在时，才回退到 package 内的只读资源。用户显式传入的其他路径不会被偷偷替换。
+`uv build` 生成的 wheel 现在自带默认 `configs/`、Project Catalog、Model Profiles、Watchlists、Regression/Capability/Narrative-calibration/Demo fixtures 与 Golden Demo 静态资源。运行时仍然**优先使用当前工作区自己的 `configs/`**；只有默认 `configs` / `examples/signal_harness` 在 cwd 不存在时，才回退到 package 内的只读资源。用户显式传入的其他路径不会被偷偷替换。
 
 因此 wheel 安装后可以离开源码仓库直接运行，例如：
 
@@ -571,11 +650,14 @@ src/signal_harness/ui/demo.py           Golden Demo HTML loader
 src/signal_harness/tools/web_snapshot.py safe public snapshot / visible-text diff
 src/signal_harness/ui/static/           Golden Demo HTML / CSS / JS
 src/signal_harness/evals.py             Regression + Provider Contract Eval
+src/signal_harness/capability_eval.py   Capability Golden / fair baseline / nDCG / trajectory
+src/signal_harness/narrative_calibration.py blind human Narrative calibration gate
+src/signal_harness/golden_candidates.py real-failure → human Golden candidate queue
 configs/projects/                       Project Catalog entries
 configs/project_profiles/               Additional project profiles
 configs/watchlists/                      Additional project-scoped Watchlists
 configs/                                Default project / Policy / Model profiles
-examples/signal_harness/                Demo / Regression fixtures
+examples/signal_harness/                Demo / Regression / Capability / Narrative calibration fixtures
 tests/signal_harness/                   Unit / Integration / Regression tests
 ```
 
@@ -611,4 +693,4 @@ SignalHarness 当前 package 不 vendor、也不 import OpenHarness runtime code
 - `docs/PROJECT_STAR.md`
 - `docs/RESUME_GUIDE.md`
 
-建议从 **Golden Demo → 40-case Eval → Trace/Tool Guard → MCP → 架构边界** 依次理解项目。
+建议从 **Golden Demo → Regression protection → Capability/Trajectory Eval → Trace/Tool Guard → MCP → 架构边界** 依次理解项目。

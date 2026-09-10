@@ -11,10 +11,20 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from signal_harness.persistence import ChangeLedger
+from signal_harness.presentation import sanitize_user_facing_actions
 
 PRODUCT_PROJECTION_VERSION = "scan-product-v1"
 ChangeSort = Literal["rank", "score", "newest"]
 MarkdownMode = Literal["report", "top", "change"]
+ImpactGroup = Literal[
+    "project_code",
+    "dependency_version",
+    "security",
+    "api_protocol",
+    "upstream_issue",
+    "tech_news",
+    "other",
+]
 
 _DECISION_ZH = {
     "action_required": "需要处理",
@@ -26,10 +36,23 @@ _DECISION_ZH = {
 _SOURCE_ZH = {
     "github_release": "上游版本发布",
     "github_issue": "上游问题/提案",
+    "github_commit": "项目代码变化",
+    "github_pull_request": "合并变更",
+    "local_git_commit": "项目代码变化",
     "rss": "技术动态",
     "web_change": "网页变化",
     "package_registry": "包版本变化",
+    "security_advisory": "安全公告",
     "team_update": "项目动态",
+}
+_IMPACT_GROUP_ZH: dict[ImpactGroup, str] = {
+    "project_code": "项目代码变化",
+    "dependency_version": "依赖 / 版本变化",
+    "security": "安全变化",
+    "api_protocol": "API / 协议 / 文档",
+    "upstream_issue": "上游 Issue / 提案",
+    "tech_news": "技术动态 / 生态",
+    "other": "其他环境变化",
 }
 
 
@@ -39,7 +62,12 @@ class ProductChangeSummary(BaseModel):
     change_id: str
     rank: int = Field(ge=1)
     change_type: str
+    impact_group: ImpactGroup
+    impact_group_zh: str
     summary_zh: str
+    what_changed_zh: str
+    why_relevant_zh: str
+    recommended_actions_zh: list[str] = Field(default_factory=list)
     project_impact_zh: str
     decision: str | None = None
     impact_score: float | None = None
@@ -51,6 +79,8 @@ class ProductChangeSummary(BaseModel):
 
 
 class ProductChangeDetail(ProductChangeSummary):
+    event_id: str
+    event_revision_id: int
     what_changed_zh: str
     why_relevant_zh: str
     affected_modules: list[str] = Field(default_factory=list)
@@ -127,21 +157,32 @@ class ProductIntelligenceService:
         assessments = [row["assessment"] for row in rows if isinstance(row.get("assessment"), dict)]
         decision_counts = Counter(str(item.get("decision") or "unknown") for item in assessments)
         category_counts = Counter(str(item.get("category") or "unknown") for item in assessments)
+        impact_group_counts = Counter(self._impact_group(row) for row in rows)
         analyzed_count = len(assessments)
         high_priority = decision_counts["alert"] + decision_counts["action_required"]
         top = self.top_changes(selected, top_count=top_count)
         themes = [name for name, _ in category_counts.most_common(3)]
         if not themes:
             themes = [name for name, _ in source_counts.most_common(3)]
-        source_text = "、".join(name for name, _ in source_counts.most_common(3)) or "暂无来源"
-        theme_text = "、".join(themes) or "暂无明确主题"
         coverage = str(metadata.get("coverage_status") or "unknown")
-        summary = (
-            f"本次扫描冻结了 {len(rows)} 条与项目相关的环境变化，其中 {analyzed_count} 条进入深度影响分析；"
-            f"深度分析中有 {high_priority} 条需要优先关注。来源主要包括 {source_text}，"
-            f"当前主要主题为 {theme_text}。扫描覆盖状态为 {coverage}；"
-            "以下 Top 变化只是阅读优先级，不会改变完整变化集。"
+        agent_report = next(
+            (
+                str(item.get("report_summary_zh") or "").strip()
+                for item in assessments
+                if str(item.get("report_summary_zh") or "").strip()
+            ),
+            "",
         )
+        if agent_report:
+            summary = agent_report
+        else:
+            highlights = [self._summary(row).what_changed_zh for row in self._sort_rows(rows, "rank")[:3]]
+            highlight_text = "；".join(item for item in highlights if item)
+            summary = (
+                "这次项目环境里更值得看的，是这些变化是否真正碰到现有实现边界。"
+                + (f"目前比较值得继续核实的是：{highlight_text}。" if highlight_text else "")
+                + "建议先确认上游事实与项目实际用法的交集，再决定是否需要进入兼容性验证或代码调整。"
+            )
         stats: dict[str, Any] = {
             "all_change_count": len(rows),
             "analyzed_count": analyzed_count,
@@ -151,6 +192,7 @@ class ProductIntelligenceService:
             "source_counts": dict(source_counts),
             "decision_counts": dict(decision_counts),
             "category_counts": dict(category_counts),
+            "impact_group_counts": dict(impact_group_counts),
         }
         return ProductReport(
             scan_id=selected,
@@ -197,6 +239,7 @@ class ProductIntelligenceService:
         decision: str | None = None,
         source_type: str | None = None,
         category: str | None = None,
+        impact_group: ImpactGroup | None = None,
         analyzed: bool | None = None,
         sort: ChangeSort = "rank",
     ) -> ProductChangePage:
@@ -215,6 +258,7 @@ class ProductIntelligenceService:
                 decision=decision,
                 source_type=source_type,
                 category=category,
+                impact_group=impact_group,
                 analyzed=analyzed,
             )
         ]
@@ -316,23 +360,49 @@ class ProductIntelligenceService:
             else None
         )
         type_name = category or str(row.get("source_type") or "change")
+        impact_group = cls._impact_group(row)
         prefix = _SOURCE_ZH.get(str(row.get("source_type") or ""), "环境变化")
         title = str(row.get("title") or event.get("title") or row.get("change_id"))
         summary_zh = f"{prefix}：{title}"
-        decision_zh = _DECISION_ZH.get(decision or None, "待判断")
-        if assessment is not None:
-            module_text = "、".join(modules) if modules else "项目相关能力"
-            score_text = f"，影响分 {impact_score:.1f}" if impact_score is not None else ""
-            impact_zh = f"可能影响 {module_text}；当前判定为“{decision_zh}”{score_text}。"
+        raw_what = (
+            str(assessment.get("what_changed_zh") or "").strip()
+            if assessment is not None
+            else ""
+        )
+        what_changed_zh = raw_what or cls._plain_event_summary(event, title)
+        raw_why = (
+            str(assessment.get("why_relevant_zh") or "").strip()
+            if assessment is not None
+            else ""
+        )
+        if raw_why:
+            why_relevant_zh = raw_why
+        elif assessment is not None:
+            module_text = "、".join(modules) if modules else "项目当前使用方式"
+            why_relevant_zh = (
+                f"这条变化和 {module_text} 有交集，但现有分析还没有形成更具体的人话解释。"
+                "需要结合当前依赖版本和实现方式再确认实际影响。"
+            )
         else:
-            impact_zh = "该变化已进入完整变化集，但尚未进入深度影响分析。"
+            why_relevant_zh = "这条变化与项目存在确定性的基础相关性，但还没有进入深度 Agent 分析。"
+        recommended_actions_zh = (
+            sanitize_user_facing_actions(assessment.get("action_items_zh", []))
+            if assessment is not None and isinstance(assessment.get("action_items_zh"), list)
+            else []
+        )
+        impact_zh = why_relevant_zh
         evidence_urls = assessment.get("evidence_urls") if assessment is not None else None
         evidence_count = len(evidence_urls) if isinstance(evidence_urls, list) else int(bool(row.get("url")))
         return ProductChangeSummary(
             change_id=str(row["change_id"]),
             rank=int(row["rank"]),
             change_type=type_name,
+            impact_group=impact_group,
+            impact_group_zh=_IMPACT_GROUP_ZH[impact_group],
             summary_zh=summary_zh,
+            what_changed_zh=what_changed_zh,
+            why_relevant_zh=why_relevant_zh,
+            recommended_actions_zh=recommended_actions_zh,
             project_impact_zh=impact_zh,
             decision=decision or None,
             impact_score=impact_score,
@@ -348,14 +418,10 @@ class ProductIntelligenceService:
         summary = cls._summary(row)
         assessment = cls._assessment(row)
         event = cls._event_payload(row)
-        content = cls._clean_text(str(event.get("content") or event.get("title") or summary.summary_zh))
-        content = content[:1200] + ("…" if len(content) > 1200 else "")
         modules = [str(item) for item in (assessment.get("affected_modules") or [])] if assessment is not None else []
-        actions = [str(item) for item in (assessment.get("action_items") or [])] if assessment is not None else []
-        if assessment is not None:
-            why = summary.project_impact_zh
-        else:
-            why = "当前只有确定性的项目相关性排序证据，尚未形成深度影响结论。"
+        actions = list(summary.recommended_actions_zh)
+        if not actions and assessment is not None:
+            actions = sanitize_user_facing_actions(assessment.get("action_items") or [])
         previous = event.get("previous_version")
         current = event.get("current_version")
         before_after = (
@@ -394,8 +460,8 @@ class ProductIntelligenceService:
             )
         return ProductChangeDetail(
             **summary.model_dump(),
-            what_changed_zh=content or summary.summary_zh,
-            why_relevant_zh=why,
+            event_id=str(event.get("event_id") or ""),
+            event_revision_id=int(row["event_revision_id"]),
             affected_modules=modules,
             recommended_actions=actions,
             before_after=before_after,
@@ -412,6 +478,7 @@ class ProductIntelligenceService:
         decision: str | None,
         source_type: str | None,
         category: str | None,
+        impact_group: ImpactGroup | None,
         analyzed: bool | None,
     ) -> bool:
         assessment = cls._assessment(row)
@@ -420,6 +487,8 @@ class ProductIntelligenceService:
         if source_type is not None and str(row.get("source_type") or "") != source_type:
             return False
         if category is not None and str((assessment or {}).get("category") or "") != category:
+            return False
+        if impact_group is not None and cls._impact_group(row) != impact_group:
             return False
         if analyzed is not None and bool(row.get("selected_for_analysis")) is not analyzed:
             return False
@@ -440,6 +509,43 @@ class ProductIntelligenceService:
             if needle not in searchable:
                 return False
         return True
+
+    @classmethod
+    def _impact_group(cls, row: dict[str, Any]) -> ImpactGroup:
+        """Map each frozen Change to a stable product-facing board."""
+
+        assessment = cls._assessment(row) or {}
+        category = str(assessment.get("category") or "")
+        source_type = str(row.get("source_type") or "")
+        if source_type == "security_advisory" or category == "security_supply_chain":
+            return "security"
+        if source_type in {
+            "local_git_commit",
+            "github_commit",
+            "github_pull_request",
+            "team_update",
+        }:
+            return "project_code"
+        if source_type in {"package_registry", "github_release"} or category == "dependency_update":
+            return "dependency_version"
+        if category in {
+            "provider_compatibility_signal",
+            "structured_output_signal",
+            "tool_calling_signal",
+            "docs_change_signal",
+        }:
+            return "api_protocol"
+        if source_type == "github_issue":
+            return "upstream_issue"
+        if source_type in {"rss", "web_change"} or category in {
+            "checkpoint_persistence_signal",
+            "evaluation_benchmark_signal",
+            "ecosystem_issue",
+            "competitor_update",
+            "expert_opinion",
+        }:
+            return "tech_news"
+        return "other"
 
     @classmethod
     def _sort_rows(cls, rows: list[dict[str, Any]], sort: ChangeSort) -> list[dict[str, Any]]:
@@ -483,6 +589,13 @@ class ProductIntelligenceService:
             return datetime.fromisoformat(raw).timestamp()
         except ValueError:
             return 0.0
+
+    @classmethod
+    def _plain_event_summary(cls, event: dict[str, Any], title: str) -> str:
+        content = cls._clean_text(str(event.get("content") or ""))
+        if content and content.lower() != title.lower():
+            return content[:520] + ("…" if len(content) > 520 else "")
+        return title
 
     @staticmethod
     def _clean_text(value: str) -> str:

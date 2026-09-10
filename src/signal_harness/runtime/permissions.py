@@ -20,7 +20,11 @@ class SignalPermissionGuard:
         {
             "read_github_release",
             "read_github_issue",
+            "read_github_commit",
+            "read_github_pull_request",
+            "read_local_git",
             "read_package_registry",
+            "read_security_advisory",
             "read_rss",
             "read_mock_web_change",
             "read_web_change",
@@ -30,6 +34,8 @@ class SignalPermissionGuard:
             "read_assessments",
             "read_run_trace",
             "read_feedback_memory",
+            "read_calibration",
+            "save_outcome",
             "write_local_report",
             "write_task_trace",
             "save_feedback",
@@ -39,6 +45,7 @@ class SignalPermissionGuard:
     DEFAULT_REQUIRE_CONFIRMATION = frozenset(
         {
             "modify_signal_policy",
+            "manage_schedules",
             "add_watchlist_source",
             "remove_watchlist_source",
             "create_github_issue",

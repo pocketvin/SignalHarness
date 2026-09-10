@@ -58,33 +58,50 @@ def write_alert_outputs(
 
 def _render_alerts_markdown(alerts: list[dict[str, Any]]) -> str:
     lines = [
-        "# SignalHarness Alerts",
+        "# SignalHarness 重点提醒",
         "",
-        "Default dispatcher: local files only. No external notification was sent.",
+        "当前仅写入本地文件，不会自动向外部渠道发送。",
         "",
     ]
     if not alerts:
-        lines.extend(["_No new alerts._", ""])
+        lines.extend(["_目前没有新的重点提醒。_", ""])
         return "\n".join(lines)
     for alert in alerts:
+        title = str(alert.get("title") or alert.get("event_id") or "未命名变化")
+        what = str(alert.get("what_changed_zh") or "").strip() or f"检测到「{title}」这条变化。"
+        why = str(alert.get("why_relevant_zh") or "").strip()
+        if not why:
+            modules = "、".join(str(item) for item in alert.get("affected_modules", [])[:3])
+            why = f"这条变化与 {modules or '项目当前使用方式'} 有关联，需要结合实际版本确认影响。"
+        actions = [
+            str(item).strip()
+            for item in alert.get("recommended_actions_zh", [])
+            if str(item).strip()
+        ]
         lines.extend(
             [
-                f"## {alert.get('title') or alert.get('event_id')}",
+                f"## {title}",
                 "",
-                f"- Event ID: `{alert.get('event_id')}`",
-                f"- Source: {alert.get('source_name')} ({alert.get('source_type')})",
-                f"- Decision: {alert.get('decision')}",
-                f"- Category: {alert.get('category')}",
-                f"- Impact score: {float(alert.get('impact_score', 0)):.2f}",
-                f"- Confidence: {float(alert.get('confidence', 0)):.2f}",
-                "- Affected modules: "
-                + ", ".join(str(item) for item in alert.get("affected_modules", [])),
-                "- Reasons:",
+                f"- 来源：{alert.get('source_name') or '未知'} ({alert.get('source_type') or 'unknown'})",
+                f"- 当前判断：{alert.get('decision') or 'unknown'}",
+                f"- 分类：{alert.get('category') or 'unknown'}",
+                f"- 影响分：{float(alert.get('impact_score', 0)):.2f}",
+                "",
+                "**发生了什么**",
+                "",
+                what,
+                "",
+                "**为什么与你有关**",
+                "",
+                why,
+                "",
+                "**建议怎么做**",
+                "",
             ]
         )
-        lines.extend(f"  - {reason}" for reason in alert.get("reasons", []))
+        lines.extend([f"- {item}" for item in actions] or ["- 暂无需要立即执行的动作。"] )
         if alert.get("url"):
-            lines.append(f"- URL: {alert['url']}")
-        lines.extend(["", "_External dispatch disabled._", ""])
+            lines.extend(["", f"原始来源：{alert['url']}"])
+        lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 

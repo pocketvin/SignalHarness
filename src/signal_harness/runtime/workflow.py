@@ -47,8 +47,10 @@ from signal_harness.signal.noise import NoiseFilter
 from signal_harness.signal.normalizer import (
     normalize_event,
     normalize_github_event,
+    normalize_local_git_event,
     normalize_package_registry_event,
     normalize_rss_item,
+    normalize_security_advisory_event,
 )
 from signal_harness.tools.web_snapshot import (
     commit_pending_web_snapshots,
@@ -100,6 +102,9 @@ class SourceJob:
     official: bool | None = None
     package_name: str | None = None
     package_registry: str | None = None
+    project_owned: bool = False
+    entity_type: str | None = None
+    entity_name: str | None = None
 
 
 class SignalHarnessWorkflow:
@@ -119,7 +124,8 @@ class SignalHarnessWorkflow:
         agent_loop_limits: AgentLoopLimits | None = None,
         trace_listener: TraceListener | None = None,
         project_id: str | None = None,
-        harness_variant: HarnessVariant | str = HarnessVariant.FIVE_AGENT,
+        harness_variant: HarnessVariant | str | None = None,
+        offline_fixture_source_tools: bool = False,
     ) -> None:
         self.cwd = Path(cwd).expanduser().resolve()
         self.config_dir = resolve_config_dir(self.cwd, config_dir or "configs")
@@ -134,7 +140,13 @@ class SignalHarnessWorkflow:
         self.mode = RunMode(mode)
         self.provider = provider
         self.agent_loop_limits = agent_loop_limits
-        self.harness_variant = HarnessVariant(harness_variant)
+        self.harness_variant = (
+            HarnessVariant(harness_variant)
+            if harness_variant is not None
+            else HarnessVariant.DETERMINISTIC_EVIDENCE_IMPACT_ACTION
+            if self.mode is RunMode.AGENT
+            else HarnessVariant.FIVE_AGENT
+        )
         self.source_cache = SourceFetchCache(self.state_dir / "cache")
         self.trace = TraceRecorder(trace_listener)
         self.executor = SignalToolExecutor(
@@ -148,6 +160,7 @@ class SignalHarnessWorkflow:
                 "state_dir": str(self.state_dir),
                 "mode": self.mode.value,
                 "allow_mock_tool_eval": self.mode is RunMode.MOCK_AGENT,
+                "offline_fixture_source_tools": bool(offline_fixture_source_tools),
             },
         )
 
@@ -232,6 +245,7 @@ class SignalHarnessWorkflow:
             else:
                 collection = await self._collect_watchlist(
                     watchlist,
+                    profile=profile,
                     since=window.lower,
                     guard=guard,
                 )
@@ -465,6 +479,13 @@ class SignalHarnessWorkflow:
                         "permissions, and fallback. Interactive real-provider runs defer "
                         "LearningPolicyAgent reflection from the critical path."
                     )
+                assessments = await runner.run_narrative(
+                    events,
+                    assessments,
+                    project_profile=profile,
+                    policy=policy,
+                    run_id=run_id,
+                )
             except (TimeoutError, asyncio.TimeoutError):
                 detail = (
                     "agent_team_run_timeout after "
@@ -647,12 +668,14 @@ class SignalHarnessWorkflow:
         *,
         since: datetime | None,
         guard: SignalPermissionGuard,
+        profile: dict[str, Any] | None = None,
     ) -> CollectionBatch:
         jobs: list[SourceJob] = []
         for entry in watchlist.get("github", {}).get("repositories", []):
             repo = str(entry.get("repo", ""))
             package_name = str(entry.get("package_name") or "").strip() or None
             package_registry = str(entry.get("package_registry") or "").strip().lower() or None
+            project_owned = bool(entry.get("project_owned", False))
             for event_kind in entry.get("events", []):
                 if event_kind == "releases":
                     guard.require("read_github_release")
@@ -669,6 +692,7 @@ class SignalHarnessWorkflow:
                             ttl_seconds=600,
                             package_name=package_name,
                             package_registry=package_registry,
+                            project_owned=project_owned,
                         )
                     )
                 elif event_kind == "issues":
@@ -686,8 +710,81 @@ class SignalHarnessWorkflow:
                             ttl_seconds=600,
                             package_name=package_name,
                             package_registry=package_registry,
+                            project_owned=project_owned,
                         )
                     )
+                elif event_kind == "commits":
+                    guard.require("read_github_commit")
+                    jobs.append(
+                        SourceJob(
+                            tool_name="github_signal",
+                            arguments={
+                                "action": "fetch_repo_commits",
+                                "repo": repo,
+                                "since": since,
+                            },
+                            source_name=repo,
+                            source_type="github_commit",
+                            ttl_seconds=300,
+                            package_name=package_name,
+                            package_registry=package_registry,
+                            project_owned=project_owned,
+                        )
+                    )
+                elif event_kind == "pull_requests":
+                    guard.require("read_github_pull_request")
+                    jobs.append(
+                        SourceJob(
+                            tool_name="github_signal",
+                            arguments={
+                                "action": "fetch_repo_merged_pulls",
+                                "repo": repo,
+                                "since": since,
+                            },
+                            source_name=repo,
+                            source_type="github_pull_request",
+                            ttl_seconds=300,
+                            package_name=package_name,
+                            package_registry=package_registry,
+                            project_owned=project_owned,
+                        )
+                    )
+        for entry in watchlist.get("local_git", {}).get("repositories", []):
+            if not isinstance(entry, dict):
+                continue
+            repo_path = str(entry.get("path") or "").strip()
+            if not repo_path:
+                continue
+            resolved_path = Path(repo_path).expanduser()
+            if not resolved_path.is_absolute():
+                resolved_path = self.cwd / resolved_path
+            guard.require("read_local_git")
+            jobs.append(
+                SourceJob(
+                    tool_name="local_git",
+                    arguments={"action": "fetch_commits", "repo_path": str(resolved_path.resolve()), "since": since},
+                    source_name=str(entry.get("name") or resolved_path.name or "local-repository"),
+                    source_type="local_git_commit",
+                    ttl_seconds=0,
+                    official=True,
+                    project_owned=True,
+                )
+            )
+        osv = watchlist.get("security", {}).get("osv", {})
+        if isinstance(osv, dict) and bool(osv.get("enabled", False)):
+            dependencies = self._resolved_security_dependencies(profile or {})
+            if dependencies:
+                guard.require("read_security_advisory")
+                jobs.append(
+                    SourceJob(
+                        tool_name="security_osv",
+                        arguments={"action": "query_dependencies", "dependencies": dependencies},
+                        source_name="OSV",
+                        source_type="security_advisory",
+                        ttl_seconds=1800,
+                        official=True,
+                    )
+                )
         pypi = watchlist.get("package_registries", {}).get("pypi", {})
         for package in pypi.get("packages", []):
             package_name = str(package.get("name") if isinstance(package, dict) else package).strip()
@@ -721,6 +818,8 @@ class SignalHarnessWorkflow:
                     source_type="rss",
                     ttl_seconds=900,
                     official=(bool(feed.get("official")) if "official" in feed else None),
+                    entity_type=str(feed.get("entity_type") or "").strip().lower() or None,
+                    entity_name=str(feed.get("entity_name") or "").strip() or None,
                 )
             )
         for source in watchlist.get("web_changes", {}).get("sources", []):
@@ -740,6 +839,8 @@ class SignalHarnessWorkflow:
                         source_name=source_name,
                         source_type="web_change",
                         ttl_seconds=0,
+                        entity_type=str(source.get("entity_type") or "").strip().lower() or None,
+                        entity_name=str(source.get("entity_name") or "").strip() or None,
                     )
                 )
             elif adapter in {"http", "snapshot"}:
@@ -758,6 +859,8 @@ class SignalHarnessWorkflow:
                         source_type="web_change",
                         ttl_seconds=0,
                         official=(bool(source.get("official")) if "official" in source else None),
+                        entity_type=str(source.get("entity_type") or "").strip().lower() or None,
+                        entity_name=str(source.get("entity_name") or "").strip() or None,
                     )
                 )
 
@@ -774,9 +877,21 @@ class SignalHarnessWorkflow:
                 continue
             for item in payload:
                 if job.source_type == "web_change":
-                    collected.append(item)
+                    raw_item = dict(item)
+                    if job.entity_type and job.entity_name:
+                        raw_item.setdefault("entity_type", job.entity_type)
+                        raw_item.setdefault("entity_name", job.entity_name)
+                    collected.append(raw_item)
                 else:
                     raw_item = dict(item)
+                    if job.project_owned:
+                        raw_item.setdefault("project_owned", True)
+                    if job.entity_type and job.entity_name:
+                        raw_item.setdefault("entity_type", job.entity_type)
+                        raw_item.setdefault("entity_name", job.entity_name)
+                    if job.source_type in {"github_commit", "github_pull_request"}:
+                        raw_item.setdefault("repository", job.source_name)
+                        raw_item.setdefault("repository_identity", job.source_name.lower())
                     if job.source_type.startswith("github_") and job.package_name:
                         raw_item.setdefault("package_name", job.package_name)
                         if job.package_registry:
@@ -1144,7 +1259,27 @@ class SignalHarnessWorkflow:
             )
         if source_type == "package_registry":
             return normalize_package_registry_event(raw, package_name=source_name)
+        if source_type == "local_git_commit":
+            return normalize_local_git_event(raw)
+        if source_type == "security_advisory":
+            return normalize_security_advisory_event(raw)
         return normalize_rss_item(raw, feed_name=source_name)
+
+    @staticmethod
+    def _resolved_security_dependencies(profile: dict[str, Any]) -> list[dict[str, str]]:
+        evidence = profile.get("dependency_evidence", [])
+        if not isinstance(evidence, list):
+            return []
+        rows: list[dict[str, str]] = []
+        for item in evidence:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            version = str(item.get("resolved_version") or "").strip()
+            ecosystem = str(item.get("ecosystem") or "").strip()
+            if name and version and ecosystem in {"PyPI", "npm"}:
+                rows.append({"name": name, "version": version, "ecosystem": ecosystem})
+        return rows
 
     async def _write_outputs(
         self,

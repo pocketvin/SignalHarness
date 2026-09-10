@@ -115,15 +115,24 @@ class ClassifierAgent:
                 "The source identity matches a tracked direct dependency and includes breaking, "
                 "security, migration, schema, API compatibility, or regression impact."
             )
-        elif project_state.protocol_name and any(
-            value in text
-            for value in (
-                "protocol",
-                "session",
-                "initialize",
-                "transport",
-                "routing",
-                "streamable http",
+        elif project_state.provider_name:
+            category = SignalCategory.PROVIDER_COMPATIBILITY_SIGNAL
+            reason = "The source is explicitly bound to a provider API used by the project."
+        elif project_state.runtime_name:
+            category = SignalCategory.AGENT_RUNTIME_SIGNAL
+            reason = "The source is explicitly bound to a runtime used by the project."
+        elif project_state.protocol_name and (
+            event.raw_payload.get("entity_type") == "protocol"
+            or any(
+                value in text
+                for value in (
+                    "protocol",
+                    "session",
+                    "initialize",
+                    "transport",
+                    "routing",
+                    "streamable http",
+                )
             )
         ):
             category = SignalCategory.AGENT_RUNTIME_SIGNAL
@@ -170,7 +179,10 @@ class ClassifierAgent:
         ) and any(value in content_text for value in ("typo", "wording", "copy", "example")):
             category = SignalCategory.DOCS_CHANGE_SIGNAL
             reason = "The signal is a documentation-only change without runtime impact."
-        elif direct_dependency and event.source_type in {"github_release", "package_registry"}:
+        elif direct_dependency and (
+            event.source_type in {"github_release", "package_registry"}
+            or event.raw_payload.get("entity_type") == "dependency"
+        ):
             category = SignalCategory.ECOSYSTEM_ISSUE
             reason = (
                 "The signal is a tracked direct dependency release without confirmed "
@@ -194,6 +206,11 @@ class ClassifierAgent:
             category = SignalCategory.AGENT_RUNTIME_SIGNAL
             reason = (
                 "The GitHub issue is an ecosystem runtime signal rather than a dependency update."
+            )
+        elif event.source_type in {"github_commit", "github_pull_request", "local_git_commit"}:
+            category = SignalCategory.TEAM_UPDATE
+            reason = (
+                "The signal is an observed source-control change in the connected project."
             )
         elif event.source_type == "team_update":
             category = SignalCategory.TEAM_UPDATE

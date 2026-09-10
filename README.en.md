@@ -4,27 +4,29 @@
 
 **Project Environment Intelligence for continuously developed software projects: collect environmental changes, preserve them durably, decide what matters to a project, explain impact, and recommend action.**
 
-SignalHarness watches GitHub, the PyPI package registry, RSS, and configured public-page snapshots, decides whether those changes matter to a project, and turns them into durable, auditable project intelligence instead of another noisy feed. Multi-agent orchestration, single-agent analysis, rules, search, and scoring are implementation techniques rather than the product identity; the current five-Agent path remains an evaluation baseline.
+SignalHarness watches project-local Git, GitHub, the PyPI package registry, OSV advisories matched to resolved dependency versions, RSS, and configured public-page snapshots, decides whether those changes matter to a project, and turns them into durable, auditable project intelligence instead of another noisy feed. Multi-agent orchestration, single-agent analysis, rules, search, and scoring are implementation techniques rather than the product identity. Real `agent` scans now default to the adaptive two-call Analyzer; the five-Agent path remains a protected evaluation/rollback baseline and is still the default for `mock-agent`.
 
 ## At a glance
 
 | Area | What is implemented |
 | --- | --- |
-| Analyzer baseline | Current five-Agent route: Supervisor → Evidence → Impact → Action → Learning; P4 Harness ablation decides the long-term form |
+| Analyzer default | Real `agent`: deterministic Route/Evidence → merged Impact+Action → Narrative (2 calls), with split escalation only on schema/coverage failure; `mock-agent` retains the five-Agent baseline |
 | Tool use | Two-turn evidence tool plan; Python owns allowlist, permission checks, budgets, execution, and observations |
 | Reliability | Pydantic structured outputs, schema retry, deterministic fallback, bounded repair, run timeout limits |
 | Guarded decisions | LLM contributes semantics; Python owns final scoring and a primary-source high-risk alert floor |
 | Change ledger | Project-scoped SQLite EventRevision → Change → ProjectImpact → ScanChange; Top-K no longer controls durable existence |
 | Project profile / preference | Versioned ProfileRevision plus Critical / Important / Normal / Low / Ignore preferences that affect ranking and Agent context |
-| Sources | GitHub releases/issues, PyPI releases, RSS, and configured Web snapshots; GitHub + registry observations for one package/version aggregate into one Change |
+| Sources | Project-local Git commits, GitHub releases/issues/commits/merged PRs, PyPI releases, OSV advisories matched to exact lockfile versions, RSS, and usage-bound official Web changelog/spec sources; equivalent package/version or repo/commit observations aggregate into one Change |
 | Memory / state | Existing project-scoped signal/feedback/learning compatibility state remains separated from per-run output/trace |
-| Eval | 40-case Agent regression + 3-case cross-project context gate + provider contract eval |
-| Observability | Local trace for Agent calls, schema/retry/fallback, tools, latency, provider-reported tokens, and estimated cost |
+| Eval | 40-case regression protection + 32-case Capability Golden V1 + 8-case trajectory contracts + 3-case cross-project context + provider contract; Narrative judge remains uncalibrated/disabled |
+| Observability | Real TraceRecorder append/update streamed through SSE, including Agent/schema/retry/fallback/tools/latency/tokens/cost plus expandable `structured-reasoning-v1` summaries |
 | MCP | Ten structured tools: nine read-only product/context tools plus one persistent fresh-scan starter; CLI remains the primary developer/coding-agent interface |
 | Product intelligence | One frozen Scan projection for Overall Report → Top Changes → All Relevant Changes → Change Detail |
+| Continuous monitoring | Persistent 12h/24h/local-time schedules + isolated schedule checkpoint + Inbox + Outbox/DeliveryAttempt + optional HMAC-signed Webhook; scheduled runs never consume manual `since_last` |
+| Calibration | Real Feedback/Outcome → frozen Episodes → historical/shadow replay → durable promotion gate; minimum labeled evidence, no-gain/regression rejection, and versioned policy rollback |
 | CLI | CLI-first developer / coding-Agent surface with stable JSON reads and shared Markdown export |
 | Service | FastAPI REST API + replayable SSE streaming runs + Product Intelligence REST + MCP Streamable HTTP |
-| Golden Demo | Chinese by default with an in-page English switch; Profile → Overall Report → Top → All → Detail → Audit on the same frozen Scan |
+| Golden Demo | React + TypeScript + Tailwind SPA; Chinese by default with English switch, Runtime/Trace workspace, progressive Project Context, Intelligence results, and Change Drawer over the existing REST/SSE contracts |
 | Deployment | Docker image with health check; package/CLI remains usable without a server |
 | Learning | Review-only proposals → risk classification → replay gate → explicit human apply |
 
@@ -69,31 +71,30 @@ SignalHarness treats those questions as an Agent-runtime problem rather than a c
 
 ```mermaid
 flowchart LR
-    Sources[GitHub / PyPI / RSS / Web change / fixture]
+    Sources[Local Git / GitHub / PyPI / OSV / RSS / Web change / fixture]
     Collect[Collect + Normalize + Deduplicate]
     Funnel[Project-aware Candidate Funnel]
     Noise[Noise Filter]
-    Supervisor[SignalSupervisorAgent]
-    Evidence[ContextEvidenceAgent]
-    Tools[Controlled read-only tool loop]
-    Impact[ImpactAnalystAgent]
-    Action[ActionPlannerAgent]
-    Learning[LearningPolicyAgent]
-    Guard[Python constraint plane]
-    Output[Assessment / Trace / Dashboard / Digest]
+    Route[Deterministic project-aware Route]
+    Evidence[Deterministic source-aware Evidence]
+    Tools[Controlled read-only source tools]
+    IA[ImpactActionAnalyzerAgent]
+    Split[ImpactAnalystAgent → ActionPlannerAgent]
+    Guard[Python guarded scoring / permission]
+    Narrative[ProjectNarrativeAgent]
+    Learning[Explicit Calibration / Learning]
+    Output[Assessment / Product / Trace / Digest]
     Interfaces[CLI / REST / SSE Demo / MCP]
 
-    Sources --> Collect --> Funnel --> Noise --> Supervisor --> Evidence --> Impact --> Action --> Learning --> Output
+    Sources --> Collect --> Funnel --> Noise --> Route --> Evidence --> IA --> Guard --> Narrative --> Output --> Interfaces
     Evidence --> Tools --> Evidence
-    Guard -. schema / permission / budgets / fallback / score .-> Supervisor
-    Guard -.-> Evidence
-    Guard -.-> Impact
-    Guard -.-> Action
-    Guard -.-> Learning
-    Output --> Interfaces
+    IA -. schema / coverage failure only .-> Split --> Guard
+    Guard -. feedback / outcomes .-> Learning
+    Guard -. schema / permission / budgets / fallback / score .-> IA
+    Guard -.-> Split
 ```
 
-### Five-Agent responsibilities
+### Protected Five-Agent baseline responsibilities
 
 1. **SignalSupervisorAgent** — classifies each event and decides which downstream stages are required.
 2. **ContextEvidenceAgent** — plans bounded read-only tool requests, receives observations, and produces evidence/confidence.
@@ -102,6 +103,14 @@ flowchart LR
 5. **LearningPolicyAgent** — reads memory and proposes policy/skill/watchlist changes for review only. In real interactive scans its LLM reflection is deferred out of the latency-critical path; explicit calibration/learning flows still invoke the same Agent.
 
 Memory is infrastructure, not a sixth Agent.
+
+### Real SSE Trace and structured model-judgment summaries
+
+The Golden Demo no longer treats a hard-coded Agent animation as execution truth. `TraceRecorder` appends an LLM step with `status=running` before the provider call and updates the same Trace index when the validated result arrives. `StreamRunManager` forwards those real append/update events as SSE `trace.step / trace.step.updated`, and both the Scan control and the full Audit view consume that same Trace.
+
+Model Trace rows use native `<details>` disclosure. The expanded view exposes `structured-reasoning-v1`, derived only from explicit schema-validated output fields such as impact reasons, uncertainty, planning summaries, and `report_zh`, alongside schema/tool/permission/fallback/latency/token audit data. **It is not hidden chain-of-thought and does not expose raw provider responses or prompt text.**
+
+The UI also uses progressive disclosure: detailed project-importance rules are collapsed behind the project profile summary, the real Trace sits next to the Scan control, the legacy Trace table is replaced by a collapsible timeline, and the pipeline is computed from actual Trace stages rather than a fixed historical five-Agent diagram.
 
 ### Project Memory V2
 
@@ -113,7 +122,7 @@ Per-run output/trace remains isolated under `service-runs/<run_id>`, while persi
 
 ProfileRevision records purpose, stack, declared/resolved dependency-version evidence, runtime/protocol/provider, critical modules, evidence, and unknowns. Explicit user preferences use Critical / Important / Normal / Low / Ignore across dependency/provider/runtime/protocol/module/ecosystem/source/category/topic scopes. Auto profile refresh cannot overwrite explicit preferences; structured REST/UI controls and deterministic natural-language updates write the same preference model, and later ranking/Agent context consumes the resulting effective Profile.
 
-The Golden Demo can connect a browser-selected directory without arbitrary server filesystem access. The browser uploads only allowlisted manifest/lockfile text and relative path names, never source files or `.env`.
+The Golden Demo can connect either a pasted GitHub repository root URL or a browser-selected local directory. GitHub onboarding reads repository metadata, an allowlisted manifest/lockfile set, and a bounded path outline without executing repository code; local browser onboarding uploads only allowlisted manifest/lockfile text and relative path names, never source files or `.env`. Valid environment GitHub credentials take precedence; local `serve` onboarding can fall back to the already logged-in GitHub CLI/keyring credential without persisting or exposing it. Repository-root manifests/lockfiles define the primary profile when present, so nested example/demo manifests cannot overwrite the root project identity. A successful import immediately selects the new project. The scan window also accepts a custom 1–3650 day value in addition to the 7/14/30-day presets, and the numeric field is only shown after Custom is selected.
 
 ### Product Intelligence V1: CLI-first shared read model
 
@@ -129,7 +138,9 @@ uv run signal-harness change <change_id> --scan <scan_id> --json
 uv run signal-harness export --scan <scan_id> --mode report --out report.md
 ```
 
-In JSON mode, requested data stays on stdout; machine-readable errors go to stderr with a non-zero exit code. REST and Golden Demo delegate to the same `ProductIntelligenceService`. All Relevant Changes supports frozen pagination, search, analysis/decision/source/category filters, and rank/impact/newest sorting; Change Detail expands what/why/modules/actions/Before-After/evidence/audit.
+In JSON mode, requested data stays on stdout; machine-readable errors go to stderr with a non-zero exit code. REST and Golden Demo delegate to the same `ProductIntelligenceService`. All Relevant Changes first groups every frozen Change into a stable project-impact board (project code, dependencies/versions, security, API/protocol/docs, upstream issues/proposals, technology/ecosystem, or other), then supports frozen pagination, search, impact-board/analysis/decision/source/category filters, and rank/impact/newest sorting; Change Detail expands what/why/modules/actions/Before-After/evidence/audit.
+
+After guarded score/decision/evidence/permission state is fixed, a normal Agent scan runs one additional **presentation-only `ProjectNarrativeAgent`** call. It writes the human-facing Chinese environment brief plus what-changed / why-it-matters / recommended-action copy from the same frozen facts, but cannot modify scores or decisions. Priority cards show this copy directly while the full audit remains available separately. This presentation layer adds one LLM call and is not part of the decision-Agent chain.
 
 ### Candidate Funnel V2
 
@@ -253,6 +264,10 @@ Available tools:
 
 Nine retrieval tools are annotated read-only/idempotent/closed-world. `signalharness_start_scan` is explicitly non-read-only and non-idempotent, starts the same persistent `StreamRunManager` used by REST/SSE, and returns a run handle for later status/product/list/detail reads. Product reads delegate to the same `ProductIntelligenceService`; fixture paths remain allowlisted and real-provider readiness uses the existing provider catalog. CLI remains the preferred interface for developers and shell-capable coding agents; MCP exists for clients that benefit from tool discovery and typed schemas.
 
+The `signal-harness serve` FastAPI lifespan also runs the persistent Schedule manager. `/projects/{project_id}/schedules` creates/lists/disables 12h, 24h, or local-time schedules, while `/projects/{project_id}/inbox` exposes project Inbox/read state. When both `SIGNALHARNESS_WEBHOOK_URL` and `SIGNALHARNESS_WEBHOOK_SECRET` are present, high-priority Inbox items enter a durable HMAC-signed Webhook Outbox with an idempotency key; without that runtime configuration SignalHarness keeps Inbox only and does not dispatch externally.
+Golden Demo exposes the same continuous-monitoring state directly under Project Profile: create/disable schedules, inspect next-run/checkpoint, and read/mark Inbox items. The page delegates to the project REST/SQLite state rather than implementing a separate browser scheduler.
+Change Detail is also the real P8 evidence-entry surface: users can record usefulness/false-positive feedback and observed impact/action/helpfulness/resolution outcomes. These facts never auto-edit policy; fewer than three labeled Episodes, no measured gain, or any guarded regression keeps real-project promotion blocked.
+
 ## Golden Demo UI + SSE
 
 Start the same service and open `http://127.0.0.1:8000/demo`:
@@ -261,11 +276,13 @@ Start the same service and open `http://127.0.0.1:8000/demo`:
 uv run signal-harness serve --host 127.0.0.1 --port 8000
 ```
 
-The Golden Demo is dependency-free HTML/CSS/JS served by FastAPI. It opens in **Chinese by default** and can switch to English in place. A run first selects a **project**, then its data source, analysis path, and optional real-model provider. `configs/projects/*.yaml` is the Project Catalog; each entry binds a project profile to its own Watchlist. The public repo ships `SignalHarness` plus `Example · Agent API Service` to prove project switching without changing runtime code. `mock-agent` remains the default analysis path because it requires no API key while still exercising the real five-Agent orchestration, schemas, tool guard, trace, SSE, and Python scoring.
+The Golden Demo is a React + TypeScript + Tailwind SPA compiled by Vite and served as package-owned static assets by FastAPI. It opens in **Chinese by default** and can switch to English in place. A run first selects a **project**, then its data source, analysis path, and optional real-model provider. `configs/projects/*.yaml` is the Project Catalog; each entry binds a project profile to its own Watchlist. The public repo ships `SignalHarness` plus `Example · Agent API Service` to prove project switching without changing runtime code. `mock-agent` remains the default analysis path because it requires no API key while still exercising the real five-Agent orchestration, schemas, tool guard, trace, SSE, and Python scoring.
 
 Clicking **Run Golden Demo** creates and immediately starts a stream run. Queued/running input and status are persisted for bounded restart recovery; the browser may attach to SSE at any time to consume live `TraceRecorder` append/update events. The replay buffer itself remains in-process, reconnects can resume with `Last-Event-ID`, and disconnecting the browser does not cancel the workflow.
 
-The UI shows the selected project, its Watchlist, source-native change deltas, Agent stages, Python tool guard, schema/fallback/retry state, tool requests/execution/permission checks, final decisions, runtime health, the committed 40-case regression evidence, and the ten-tool MCP surface (nine read-only plus one scan starter). `signal-harness serve` automatically loads an optional project-root `.env` without overriding variables already exported by the caller. Real `agent` mode can select separately configured OpenAI, Qwen, Kimi, or DeepSeek OpenAI-compatible providers per run. Model profiles carry freshness metadata: known retired model aliases resolve to the current profile with a visible warning, while unknown overrides receive conservative capabilities instead of inheriting another model's JSON/context/pricing claims. `/demo/meta` exposes only non-secret project/provider metadata; it never returns API keys, base URLs, or local config paths, and readiness does not claim network connectivity before a run. `.env` is excluded from Git and the Docker build context. The execution metadata is locally recoverable, but the SSE replay buffer is intentionally in-process; SignalHarness does not claim a distributed durable queue or worker system.
+An LLM call now emits a real `status=running` Trace before the provider request and updates the same Trace on completion. The scan control can therefore show the current live phase and Agent/model through SSE (collect, route, evidence, impact, action, narrative) instead of waiting for an Agent to finish before reporting progress; the real Trace remains available after the Run completes for continued inspection.
+
+The UI shows the selected project, its Watchlist, source-native change deltas, Agent stages, Python tool guard, schema/fallback/retry state, tool requests/execution/permission checks, final decisions, runtime health, the committed 40-case regression evidence, and the ten-tool MCP surface (nine read-only plus one scan starter). `signal-harness serve` automatically loads an optional project-root `.env` without overriding variables already exported by the caller. Real `agent` mode can select separately configured OpenAI, Qwen, Kimi, or DeepSeek OpenAI-compatible providers per run. The current OpenAI profile uses `gpt-5.6-sol` with medium reasoning effort and is the default real provider in the locally configured environment; the old `gpt-4o-mini` profile remains only for compatibility. Model profiles carry freshness metadata: known retired model aliases resolve to the current profile with a visible warning, while unknown overrides receive conservative capabilities instead of inheriting another model's JSON/context/pricing claims. `/demo/meta` exposes only non-secret project/provider metadata; it never returns API keys, base URLs, or local config paths, and readiness does not claim network connectivity before a run. `.env` is excluded from Git and the Docker build context. The execution metadata is locally recoverable, but the SSE replay buffer is intentionally in-process; SignalHarness does not claim a distributed durable queue or worker system.
 
 ## REST API + MCP HTTP
 
@@ -319,7 +336,7 @@ cd /tmp
 /tmp/signalharness-wheel/bin/signal-harness project-eval --enforce
 ```
 
-Golden Demo no longer embeds the full HTML/CSS/JS payload in a Python raw string. `ui/demo.py` is now a small loader, while `ui/static/` owns the page, stylesheet, and JavaScript served under `/demo-assets/*`. The UI remains dependency-free while becoming independently testable and maintainable.
+Golden Demo source lives in `frontend/` (React + TypeScript + Tailwind). Vite compiles it into `src/signal_harness/ui/static/demo.html|css|js`, which `ui/demo.py` and FastAPI serve under `/demo-assets/*`. The compiled files are distribution assets; edit `frontend/src/`, not the generated/minified bundle. Narrative review remains a separate static surface in the same package directory.
 
 ## Docker
 
@@ -392,11 +409,15 @@ src/signal_harness/signal/              schemas, scoring, taxonomy, text semanti
 src/signal_harness/providers/           mock + OpenAI-compatible providers/model profiles
 src/signal_harness/resources.py          workspace-first packaged-resource fallback
 src/signal_harness/tools/web_snapshot.py safe public snapshot / visible-text diff
-src/signal_harness/ui/static/            Golden Demo HTML / CSS / JS
+frontend/                               React/TypeScript/Tailwind Golden Demo source
+src/signal_harness/ui/static/            compiled Golden Demo assets + Narrative review static assets
 src/signal_harness/mcp_server.py        thin MCP adapter over shared Scan/Product services
 src/signal_harness/service.py           FastAPI REST/SSE + MCP HTTP service
 src/signal_harness/service_streaming.py in-process stream-run/SSE replay manager
 src/signal_harness/evals.py             model and regression evaluation
+src/signal_harness/capability_eval.py   Capability Golden, fair baselines, nDCG, trajectory
+src/signal_harness/narrative_calibration.py blind human Narrative calibration gate
+src/signal_harness/golden_candidates.py production-failure candidate queue
 src/signal_harness/ui/                  Golden Demo + dashboard/digest/trace views
 configs/projects/                       project catalog entries
 configs/project_profiles/               additional project profiles
@@ -416,6 +437,32 @@ SignalHarness is maintained as its own project and the current package does not 
 - no database, queue, Redis, vector store, or embedding layer without a demonstrated need;
 - no provider-native tool execution that can bypass Python controls;
 - no autonomous high-risk policy mutation;
+## Capability Eval V1
+
+The 40-case suite is now explicitly **regression protection**, not a complete capability benchmark. `capability_golden_v1.json` adds 32 deliberately difficult cases with 0–3 relevance grades, hard negatives, partial/conflicting evidence, acceptable decisions, semantic fact/project/action rubrics, uncertainty/forbidden-claim checks, and optional trajectory contracts.
+
+`capability-eval` compares a one-call shared-evidence Agent against the split Impact → Action → Narrative stack while giving both sides the exact same Event, Project Profile, deterministic Route, and curated Evidence packet. Ranking uses nDCG@5/10 in addition to decision, grounding, project-specificity, action, uncertainty, language, and hard-negative metrics. Mock runs are `plumbing_only` and are intentionally allowed to fail Capability thresholds; they cannot select a production architecture.
+
+A valid Qwen `qwen-plus` run now provides the first repeated real-provider matrix: 32 cases × 3 trials at batch size 4, with all six variant-trial checkpoints coverage-complete, schema-valid, and zero-fallback. The split stack improves factual coverage (0.825 vs 0.799) and project specificity (0.728 vs 0.537), but costs roughly 3× the calls and 2.8× the tokens. This remains review evidence rather than authority to switch the production Harness. The attempted GPT-5.6 Sol run produced no valid Capability evidence because the configured OpenAI API account returned `credit_balance_exhausted`; DeepSeek heavy structured batches showed unacceptable timeout/long-tail behavior.
+
+Real Capability runs now persist per-trial checkpoints and batch progress. Resume accepts only coverage-complete, schema-valid, zero-fallback checkpoints whose experiment signature matches the Eval/Prompt/provider/model-profile/generation contract. Schema-valid outputs that omit event IDs receive one targeted semantic coverage repair for only the missing IDs before deterministic fallback. `capability-regrade` replays deterministic scoring over frozen real semantic checkpoints with zero provider calls. Under `guarded-scoring-v2`, the same Qwen outputs reach decision acceptance 1.000, nDCG@5 1.000, and nDCG@10 0.9202 for both variants while preserving the original Narrative text; the 40-case regression and 15-case real-world Harness corpora remain at 1.000.
+
+The real-agent default, `deterministic-evidence-impact-action`, uses deterministic routing/evidence, one merged Impact+Action LLM call, and one Narrative call. Both the 40-case regression corpus and the 15-case real-world corpus remain at decision/precision/recall 1.000/1.000/1.000, while LLM calls drop from 3 on `deterministic-evidence-resolver` to **2**. The offline Harness recommendation therefore moves to this candidate.
+
+SignalHarness does **not** pre-escalate every high-risk or uncertain event. Shadow routing over the frozen 3×32 Qwen outputs showed no decision/nDCG gain from uncertainty/risk pre-routing while estimated calls rose from 8 to about 15–16 per trial. Adaptive escalation is therefore contract-driven: merged schema or event-coverage failures fall back to the existing split Impact → Action path; provider timeout/error does not trigger extra calls. Trace metadata now records `failure_kind` as `schema_validation`, `coverage_validation`, `provider_timeout`, or `provider_error`. A paid Qwen `qwen-plus` production-style Analyzer smoke has now passed on four representative frozen real-world cases: decision/category match 4/4 and 4/4, two schema-valid calls, zero fallback/escalation, 10,597 provider-reported tokens, and 47.3s summed LLM latency. The local Qwen profile has no authoritative pricing metadata, so `$0.0` in trace is not treated as zero billing cost. This validates the Analyzer path over frozen real-world events, not a new live-source collection run. Real `agent` mode now defaults to this Harness; `mock-agent` retains five-Agent and `--harness-variant five-agent` remains an explicit rollback/comparison path. The smoke also exposed a legacy presentation leak: human-readable Radar/Alerts/Dashboard/Demo fallback surfaces now consume only presentation fields, while raw reason/action/score data remains in JSON/Trace audit outputs. `scan --mode agent` now loads the project `.env` consistently with `serve`; demo/mock modes do not load real credentials.
+
+`trajectory-eval` runs eight representative cases one by one through the full offline mock Harness and checks Agent/tool/schema/fallback behavior. Narrative evaluation is gated behind blind human calibration: `narrative-pair-export` produces anonymous A/B reviewer data plus a separate variant mapping. Mock pairs are never production-calibration eligible. At least 15 blind human labels from a valid real-provider comparison are required before a future judge-calibration experiment can begin, and the LLM judge stays disabled until agreement/bias checks exist and pass.
+
+The local service exposes the blind reviewer at `/eval/narrative`. It shows shared case/evidence context plus anonymous A/B `what changed / why relevant / actions`, while deliberately withholding variant identity, final decision, and impact score. Overall preference plus all seven rubric dimensions are required before atomic persistence. The A/B mapping stays in a separate file and is never returned by the reviewer API.
+
+A first quick human pass produced genuine **pre-fix** evidence: overall preferences for the first five blind pairs were `B/B/B/B/A`; after revealing the separately stored mapping, all five choices favored `split-impact-action-narrative`. The reviewer also identified weaker natural language and leaked runtime permission boilerplate (`Approval required before`, `is not enabled`, `Human approval`) on the other side. This is useful five-case evidence, not sufficient proof for a production architecture switch. Those labels are archived under `outputs/narrative-calibration-pre-presentation-v2/` and are never copied to changed outputs.
+
+`presentation-v2` now provides a deterministic product-copy boundary. Raw guarded `action_items` and Trace keep permission/audit information, while user-visible Chinese actions, Product Intelligence, and Capability review outputs are sanitized: substantive Chinese actions can be extracted from permission wrappers; internal identifiers, runtime boilerplate, and short action-category labels are removed. Prompts were also upgraded to `signal-harness-llm-v3`, but a real five-case Qwen diagnostic showed prompt instructions alone still generated raw permission boilerplate, so the deterministic presentation sanitizer is a required boundary. `capability-grader-v4` now treats these strings as internal leakage and avoids the previous false positive where normal Chinese “迁移影响分析” accidentally matched the debug phrase “影响分”.
+
+The canonical **post-fix** 16-pair review is reset to zero labels. Browser acceptance confirms the new first pair no longer exposes permission boilerplate; pre-fix choices are not reused because the evaluated output changed.
+
+Negative feedback (`not_useful`, `false_positive`, `too_generic`, `missed_signal`) freezes the corresponding Event/Assessment/revision into a project-scoped Golden candidate queue. `golden-review-draft` creates a human annotation worksheet; candidates never auto-promote into the canonical Capability set.
+
 - no claim that the 40-case regression fixture is a general LLM benchmark;
 - no claim that static dashboard/API/SSE service equals a horizontally scaled production platform;
 - no claim that the in-process SSE replay buffer is a durable job queue.

@@ -21,6 +21,7 @@ class HarnessVariant(StrEnum):
     DETERMINISTIC_SUPERVISOR = "deterministic-supervisor"
     DETERMINISTIC_SUPERVISOR_DEFERRED_LEARNING = "deterministic-supervisor-deferred-learning"
     DETERMINISTIC_EVIDENCE_RESOLVER = "deterministic-evidence-resolver"
+    DETERMINISTIC_EVIDENCE_IMPACT_ACTION = "deterministic-evidence-impact-action"
     SELECTIVE_EVIDENCE_RESEARCHER = "selective-evidence-researcher"
     SELECTIVE_EVIDENCE_IMPACT_ACTION = "selective-evidence-impact-action"
     SELECTIVE_EVIDENCE_IMPACT_ACTION_VERIFIER = "selective-evidence-impact-action-verifier"
@@ -32,6 +33,7 @@ class HarnessVariant(StrEnum):
             self.DETERMINISTIC_SUPERVISOR: "deterministic-router-agent-team-v1",
             self.DETERMINISTIC_SUPERVISOR_DEFERRED_LEARNING: "deterministic-router-deferred-learning-v1",
             self.DETERMINISTIC_EVIDENCE_RESOLVER: "deterministic-evidence-resolver-v1",
+            self.DETERMINISTIC_EVIDENCE_IMPACT_ACTION: "deterministic-evidence-impact-action-v1",
             self.SELECTIVE_EVIDENCE_RESEARCHER: "selective-evidence-researcher-v1",
             self.SELECTIVE_EVIDENCE_IMPACT_ACTION: "selective-evidence-impact-action-v1",
             self.SELECTIVE_EVIDENCE_IMPACT_ACTION_VERIFIER: "selective-evidence-impact-action-verifier-v1",

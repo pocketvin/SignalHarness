@@ -79,46 +79,55 @@ dependency_evidence:
     resolved_version: 0.141.1
     source_files: [pyproject.toml, uv.lock]
     confidence: verified
+    ecosystem: PyPI
   - name: httpx
     declared: httpx>=0.27.0
     resolved_version: 0.28.1
     source_files: [pyproject.toml, uv.lock]
     confidence: verified
+    ecosystem: PyPI
   - name: mcp
     declared: mcp>=2,<3
     resolved_version: 2.1.1
     source_files: [pyproject.toml, uv.lock]
     confidence: verified
+    ecosystem: PyPI
   - name: pydantic
     declared: pydantic>=2.0.0
     resolved_version: 2.13.4
     source_files: [pyproject.toml, uv.lock]
     confidence: verified
+    ecosystem: PyPI
   - name: python-dotenv
     declared: python-dotenv>=1,<2
     resolved_version: 1.2.3
     source_files: [pyproject.toml, uv.lock]
     confidence: verified
+    ecosystem: PyPI
   - name: pyyaml
     declared: pyyaml>=6.0
     resolved_version: 6.0.3
     source_files: [pyproject.toml, uv.lock]
     confidence: verified
+    ecosystem: PyPI
   - name: rich
     declared: rich>=13.0.0
     resolved_version: 15.0.0
     source_files: [pyproject.toml, uv.lock]
     confidence: verified
+    ecosystem: PyPI
   - name: typer
     declared: typer>=0.12.0
     resolved_version: 0.26.7
     source_files: [pyproject.toml, uv.lock]
     confidence: verified
+    ecosystem: PyPI
   - name: uvicorn
     declared: uvicorn>=0.35,<1
     resolved_version: 0.52.4
     source_files: [pyproject.toml, uv.lock]
     confidence: verified
+    ecosystem: PyPI
 evidence:
   manifest_files: [pyproject.toml, uv.lock]
 unknowns:

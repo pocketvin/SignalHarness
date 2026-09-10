@@ -14,7 +14,17 @@ import typer
 from dotenv import load_dotenv
 
 from signal_harness.utils.fs import atomic_write_text
+from signal_harness.agent_integration.harness import HarnessVariant
 from signal_harness.agent_integration.mode import RunMode
+from signal_harness.calibration import build_calibration_dataset, evaluate_calibration_replay
+from signal_harness.capability_eval import (
+    load_capability_suite,
+    regrade_capability_checkpoints,
+    run_capability_comparison,
+    run_offline_trajectory_eval,
+    write_capability_comparison,
+    write_trajectory_eval,
+)
 from signal_harness.agent_integration.runner import LLMAgentTeamRunner
 from signal_harness.agent_integration.schemas import LearningPolicyOutput, ReplayEvaluation
 from signal_harness.agent_team.learning_policy import LearningPolicyAgent
@@ -23,12 +33,24 @@ from signal_harness.generic_monitor_eval import (
     run_generic_monitor_eval,
     write_generic_monitor_eval_summary,
 )
+from signal_harness.golden_candidates import (
+    candidate_store_path,
+    load_candidates,
+    record_feedback_candidate,
+    write_review_draft,
+)
 from signal_harness.evals import (
     build_model_eval_summary,
     evaluate_regression_suite,
     load_regression_suite,
     write_model_eval_summary,
     write_regression_eval_summary,
+)
+from signal_harness.narrative_calibration import (
+    export_blind_narrative_pairs,
+    load_narrative_seed,
+    load_review_file,
+    narrative_calibration_status,
 )
 from signal_harness.memory import FeedbackMemory, MemoryBundle
 from signal_harness.persistence import ChangeLedger
@@ -41,6 +63,7 @@ from signal_harness.memory.replay import evaluate_policy_replay
 from signal_harness.learning import (
     apply_staged_learning,
     load_learning_staging,
+    rollback_policy_revision,
     stage_learning_proposal,
 )
 from signal_harness.project_evals import evaluate_project_context_suite
@@ -68,6 +91,7 @@ from signal_harness.signal.feedback import (
 )
 from signal_harness.signal.policy import (
     load_signal_policy,
+    load_yaml_mapping,
     render_policy_diff,
 )
 from signal_harness.signal.schemas import (
@@ -469,6 +493,14 @@ def scan(
     provider_id: str | None = typer.Option(
         None, "--provider", help="Configured real-model provider id"
     ),
+    harness_variant: HarnessVariant | None = typer.Option(
+        None,
+        "--harness-variant",
+        help=(
+            "Explicit analyzer Harness variant; agent defaults to adaptive 2-call, "
+            "mock-agent defaults to five-agent"
+        ),
+    ),
     cwd: Path = typer.Option(Path.cwd(), "--cwd", hidden=True),
     config_dir: Path = typer.Option(Path("configs"), "--config-dir"),
     output_dir: Path = typer.Option(Path("outputs"), "--output-dir"),
@@ -486,6 +518,8 @@ def scan(
     """Collect, normalize, assess, trace, and report project signals."""
 
     root = cwd.expanduser().resolve()
+    if mode is RunMode.AGENT:
+        _load_project_env(root)
     config = resolve_config_dir(root, config_dir)
     selected_project_id = project_id or default_project_id(config)
     try:
@@ -528,6 +562,7 @@ def scan(
         mode=mode,
         provider=provider,
         project_id=project.id,
+        harness_variant=harness_variant,
     )
 
     async def run_scan() -> Any:
@@ -1003,6 +1038,317 @@ def regression_eval(
         raise typer.Exit(code=1)
 
 
+@app.command("narrative-pair-export")
+def narrative_pair_export(
+    capability_summary: Path = typer.Option(
+        Path("outputs/capability-eval/capability_eval_summary.json"),
+        "--capability-summary",
+        help="Capability comparison containing observed variant narratives",
+    ),
+    suite: Path = typer.Option(
+        Path("examples/signal_harness/capability_golden_v1.json"),
+        "--suite",
+    ),
+    seed: Path = typer.Option(
+        Path("examples/signal_harness/narrative_calibration_seed.json"),
+        "--seed",
+    ),
+    output_dir: Path = typer.Option(
+        Path("outputs/narrative-calibration"), "--output-dir"
+    ),
+    cwd: Path = typer.Option(Path.cwd(), "--cwd", hidden=True),
+) -> None:
+    """Export blind A/B Narrative pairs; variant identities stay in a separate mapping."""
+
+    root = cwd.expanduser().resolve()
+    summary_path = _resolve(root, capability_summary)
+    if not summary_path.exists():
+        raise typer.BadParameter(
+            "Capability summary not found. Run `signal-harness capability-eval` first."
+        )
+    try:
+        paths = export_blind_narrative_pairs(
+            capability_summary_path=summary_path,
+            capability_suite=load_capability_suite(resolve_example_path(root, suite)),
+            seed=load_narrative_seed(resolve_example_path(root, seed)),
+            output_dir=_resolve(root, output_dir),
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    review = load_review_file(paths["review"])
+    typer.echo(
+        f"Narrative pairs: {len(review.pairs)}; "
+        f"calibration_eligible={review.calibration_eligible}"
+    )
+    typer.echo(f"Human review file: {paths['review']}")
+    typer.echo(f"Blind mapping file: {paths['mapping']}")
+
+
+@app.command("narrative-calibration-status")
+def narrative_calibration_status_command(
+    review_file: Path = typer.Option(
+        Path("outputs/narrative-calibration/narrative_pairs.review.json"),
+        "--review-file",
+    ),
+    json_output: bool = typer.Option(False, "--json"),
+    cwd: Path = typer.Option(Path.cwd(), "--cwd", hidden=True),
+) -> None:
+    """Report whether human labels are sufficient to start judge calibration."""
+
+    root = cwd.expanduser().resolve()
+    path = _resolve(root, review_file)
+    if not path.exists():
+        raise typer.BadParameter("Narrative review file not found")
+    status = narrative_calibration_status(load_review_file(path))
+    if json_output:
+        _emit_json(status.model_dump(mode="json"))
+        return
+    typer.echo(
+        f"Narrative calibration: labels={status.labeled_pairs}/{status.pair_count}; "
+        f"eligible={status.calibration_eligible}; "
+        f"ready={status.ready_for_judge_calibration}; "
+        f"judge_calibrated={status.judge_calibrated}; judge_enabled={status.judge_enabled}"
+    )
+    typer.echo(f"Blocker: {status.blocker}")
+
+
+@app.command("trajectory-eval")
+def trajectory_eval(
+    suite: Path = typer.Option(
+        Path("examples/signal_harness/capability_golden_v1.json"),
+        "--suite",
+        help="Capability Golden set containing trajectory behavior contracts",
+    ),
+    project_id: str | None = typer.Option(None, "--project", help="Project catalog id"),
+    enforce: bool = typer.Option(
+        False, "--enforce", help="Exit non-zero when any trajectory contract fails"
+    ),
+    cwd: Path = typer.Option(Path.cwd(), "--cwd", hidden=True),
+    config_dir: Path = typer.Option(Path("configs"), "--config-dir"),
+    output_dir: Path = typer.Option(Path("outputs/trajectory-eval"), "--output-dir"),
+) -> None:
+    """Check per-case Agent/tool behavior through the full offline Harness."""
+
+    root = cwd.expanduser().resolve()
+    config = resolve_config_dir(root, config_dir)
+    selected_project_id = project_id or default_project_id(config)
+    try:
+        project = project_option(selected_project_id, config)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    suite_data = load_capability_suite(resolve_example_path(root, suite))
+    summary = asyncio.run(
+        run_offline_trajectory_eval(
+            root=root,
+            config_dir=config,
+            suite=suite_data,
+            project_id=project.id,
+        )
+    )
+    paths = write_trajectory_eval(_resolve(root, output_dir), summary)
+    typer.echo(
+        f"Trajectory eval: {summary.passed_cases}/{summary.evaluated_cases}; "
+        f"pass_rate={summary.pass_rate:.3f}"
+    )
+    typer.echo(f"Trajectory eval JSON: {paths['json']}")
+    typer.echo(f"Trajectory eval Markdown: {paths['markdown']}")
+    if enforce and summary.pass_rate < 1.0:
+        raise typer.Exit(code=1)
+
+
+@app.command("capability-regrade")
+def capability_regrade(
+    checkpoint_dir: Path = typer.Option(
+        Path("outputs/capability-eval/checkpoints"),
+        "--checkpoint-dir",
+        help="Schema-valid real-provider Capability trial checkpoints",
+    ),
+    suite: Path = typer.Option(
+        Path("examples/signal_harness/capability_golden_v1.json"),
+        "--suite",
+    ),
+    trials: int = typer.Option(3, "--trials", min=1, max=10),
+    batch_size: int = typer.Option(4, "--batch-size", min=1, max=32),
+    project_id: str | None = typer.Option(None, "--project", help="Project catalog id"),
+    output_dir: Path = typer.Option(
+        Path("outputs/capability-regrade"), "--output-dir"
+    ),
+    cwd: Path = typer.Option(Path.cwd(), "--cwd", hidden=True),
+    config_dir: Path = typer.Option(Path("configs"), "--config-dir"),
+) -> None:
+    """Re-score frozen semantic checkpoints with zero provider calls."""
+
+    root = cwd.expanduser().resolve()
+    config = resolve_config_dir(root, config_dir)
+    selected_project_id = project_id or default_project_id(config)
+    try:
+        project = project_option(selected_project_id, config)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    try:
+        summary = regrade_capability_checkpoints(
+            checkpoint_dir=_resolve(root, checkpoint_dir),
+            suite=load_capability_suite(resolve_example_path(root, suite)),
+            project_profile=load_yaml_mapping(project.project_profile_path),
+            policy=load_signal_policy(config / "signal_policy.yaml"),
+            trials=trials,
+            batch_size=batch_size,
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    paths = write_capability_comparison(_resolve(root, output_dir), summary)
+    typer.echo(
+        f"Capability regrade: valid={summary.comparison_valid}; "
+        f"scoring={summary.scoring_version}; model_calls_executed=0"
+    )
+    for item in summary.variants:
+        typer.echo(
+            f"- {item.variant}: decision={item.decision_acceptance:.3f}; "
+            f"ndcg@5={item.ndcg_at_5:.3f}; ndcg@10={item.ndcg_at_10:.3f}; "
+            f"facts={item.fact_coverage:.3f}; project={item.project_specificity:.3f}"
+        )
+    typer.echo(f"Capability regrade JSON: {paths['json']}")
+    typer.echo(f"Capability regrade Markdown: {paths['markdown']}")
+
+
+@app.command("capability-eval")
+def capability_eval(
+    suite: Path = typer.Option(
+        Path("examples/signal_harness/capability_golden_v1.json"),
+        "--suite",
+        help="Capability Golden set with multidimensional rubrics",
+    ),
+    mode: RunMode = typer.Option(
+        RunMode.MOCK_AGENT,
+        "--mode",
+        help="mock-agent for plumbing or agent for a real-provider comparison",
+    ),
+    provider_id: str | None = typer.Option(
+        None, "--provider", help="Configured real-model provider id for --mode agent"
+    ),
+    trials: int = typer.Option(1, "--trials", min=1, max=10),
+    resume: bool = typer.Option(
+        True,
+        "--resume/--no-resume",
+        help="Reuse only schema-valid, no-fallback completed trial checkpoints",
+    ),
+    batch_size: int = typer.Option(
+        8,
+        "--batch-size",
+        min=1,
+        max=32,
+        help="Equal mini-batch size used by both semantic variants",
+    ),
+    project_id: str | None = typer.Option(
+        None, "--project", help="Project catalog id whose profile/policy define relevance"
+    ),
+    enforce: bool = typer.Option(
+        False,
+        "--enforce",
+        help="Exit non-zero when comparability or Capability thresholds fail",
+    ),
+    cwd: Path = typer.Option(Path.cwd(), "--cwd", hidden=True),
+    config_dir: Path = typer.Option(Path("configs"), "--config-dir"),
+    output_dir: Path = typer.Option(Path("outputs/capability-eval"), "--output-dir"),
+) -> None:
+    """Compare fair single-Agent and split semantic stacks on shared evidence."""
+
+    root = cwd.expanduser().resolve()
+    config = resolve_config_dir(root, config_dir)
+    selected_project_id = project_id or default_project_id(config)
+    try:
+        project = project_option(selected_project_id, config)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    if mode is RunMode.DEMO:
+        raise typer.BadParameter("capability-eval requires mock-agent or agent mode")
+    if mode is RunMode.MOCK_AGENT:
+        provider: AgentProvider = MockProvider()
+    elif provider_id is not None:
+        _load_project_env(root)
+        try:
+            provider = provider_from_selection(provider_id, config_dir=config)
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+    else:
+        _load_project_env(root)
+        selected_provider = default_provider_id(config)
+        if selected_provider is None:
+            _require_agent_key(RunMode.AGENT)
+            provider = provider_from_env(RunMode.AGENT, config_dir=config)
+        else:
+            provider = provider_from_selection(selected_provider, config_dir=config)
+    suite_data = load_capability_suite(resolve_example_path(root, suite))
+    project_profile = load_yaml_mapping(project.project_profile_path)
+    policy = load_signal_policy(config / "signal_policy.yaml")
+    resolved_output = _resolve(root, output_dir)
+    checkpoint_dir = resolved_output / "checkpoints"
+
+    def report_progress(event: dict[str, Any]) -> None:
+        stage = str(event.get("stage") or "")
+        variant = str(event.get("variant") or "")
+        trial_index = int(event.get("trial_index") or 0)
+        trial_count = int(event.get("trial_count") or trials)
+        if stage == "trial_started":
+            typer.echo(
+                f"Capability progress: trial {trial_index}/{trial_count} {variant} started"
+            )
+        elif stage == "trial_reused":
+            typer.echo(
+                f"Capability progress: trial {trial_index}/{trial_count} {variant} "
+                "reused valid checkpoint"
+            )
+        elif stage == "batch_completed":
+            typer.echo(
+                f"Capability progress: trial {trial_index}/{trial_count} {variant} "
+                f"batch {event.get('batch_index')}/{event.get('batch_count')} complete; "
+                f"coverage={event.get('batch_coverage_valid')}"
+            )
+        elif stage == "trial_completed":
+            typer.echo(
+                f"Capability progress: trial {trial_index}/{trial_count} {variant} complete; "
+                f"coverage={event.get('coverage_valid')}"
+            )
+
+    async def run_eval() -> Any:
+        try:
+            return await run_capability_comparison(
+                provider=provider,
+                mode=mode,
+                suite=suite_data,
+                project_profile=project_profile,
+                policy=policy,
+                trials=trials,
+                batch_size=batch_size,
+                checkpoint_dir=checkpoint_dir,
+                resume=resume,
+                progress_callback=report_progress,
+            )
+        finally:
+            await provider.close()
+
+    summary = asyncio.run(run_eval())
+    paths = write_capability_comparison(resolved_output, summary)
+    typer.echo(
+        f"Capability eval: valid={summary.comparison_valid}; "
+        f"state={summary.recommendation_state}; cases={summary.case_count}; "
+        f"trials={trials}; batch={summary.batch_size}"
+    )
+    for item in summary.variants:
+        typer.echo(
+            f"- {item.variant}: pass={item.passed}; decision={item.decision_acceptance:.3f}; "
+            f"ndcg@5={item.ndcg_at_5:.3f}; facts={item.fact_coverage:.3f}; "
+            f"project={item.project_specificity:.3f}; hardneg={item.hard_negative_accuracy:.3f}; "
+            f"calls={item.llm_call_count}; cost=${item.estimated_cost_usd:.6f}"
+        )
+    typer.echo(f"Capability eval JSON: {paths['json']}")
+    typer.echo(f"Capability eval Markdown: {paths['markdown']}")
+    if enforce and (
+        not summary.comparison_valid or any(not item.passed for item in summary.variants)
+    ):
+        raise typer.Exit(code=1)
+
+
 @app.command("harness-eval")
 def harness_eval(
     fixture: Path = typer.Option(
@@ -1199,6 +1545,44 @@ def feedback(
         migrate_legacy_default=True,
     )
     record = create_feedback_record(signal_id, label, note)
+    ledger_path = state / "change_ledger.sqlite3"
+    latest_scan: str | None = None
+    frozen_change: dict[str, Any] | None = None
+    if ledger_path.exists():
+        ledger = ChangeLedger(ledger_path)
+        latest_scan = ledger.latest_successful_scan_id(project_id=project.id)
+        attached = (
+            ledger.scan_change_for_event(scan_id=latest_scan, event_id=signal_id)
+            if latest_scan is not None
+            else None
+        )
+        ledger.record_calibration_feedback(
+            project_id=project.id,
+            scan_id=latest_scan,
+            change_id=(str(attached["change_id"]) if attached is not None else None),
+            event_revision_id=(
+                int(attached["event_revision_id"]) if attached is not None else None
+            ),
+            event_id=signal_id,
+            label=record.feedback.value,
+            note=record.note,
+            source="cli",
+            created_at=record.created_at,
+        )
+        if latest_scan is not None and attached is not None:
+            frozen_change = ledger.scan_change(
+                scan_id=latest_scan, change_id=str(attached["change_id"])
+            )
+    golden_candidate = record_feedback_candidate(
+        project_state=state,
+        project_id=project.id,
+        run_id=latest_scan,
+        event_id=signal_id,
+        label=record.feedback,
+        note=record.note,
+        source="cli",
+        frozen_change=frozen_change,
+    )
     FeedbackMemory(state / "feedback_memory.json").append(record)
     proposal = generate_policy_proposal(
         load_feedback_history(state / "feedback_memory.json"),
@@ -1208,7 +1592,72 @@ def feedback(
     save_policy_proposal(state / "signal_policy_update_proposal.json", proposal)
     typer.echo(f"Saved feedback: {record.feedback.value} for {record.event_id}")
     typer.echo(f"Generated proposal: {proposal.proposal_id}")
+    if golden_candidate is not None:
+        typer.echo(f"Queued Golden candidate: {golden_candidate.candidate_id}")
     typer.echo("Policy was not modified.")
+
+
+@app.command("golden-candidates")
+def golden_candidates(
+    project_id: str | None = typer.Option(None, "--project", help="Project catalog id"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+    cwd: Path = typer.Option(Path.cwd(), "--cwd", hidden=True),
+    config_dir: Path = typer.Option(Path("configs"), "--config-dir"),
+    state_dir: Path = typer.Option(Path(".signal-harness"), "--state-dir"),
+) -> None:
+    """List real-run failures queued for human Golden review."""
+
+    root = cwd.expanduser().resolve()
+    config = resolve_config_dir(root, config_dir)
+    selected = project_id or default_project_id(config)
+    try:
+        project = project_option(selected, config)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    state = prepare_project_state(
+        _resolve(root, state_dir), project.id, migrate_legacy_default=True
+    )
+    items = load_candidates(candidate_store_path(state))
+    if json_output:
+        _emit_json([item.model_dump(mode="json") for item in items])
+        return
+    typer.echo(f"Golden candidates: {len(items)}")
+    for item in items:
+        typer.echo(
+            f"- {item.candidate_id} | {item.feedback_label.value} | "
+            f"event={item.event_id} | run={item.run_id or '-'} | status={item.status}"
+        )
+
+
+@app.command("golden-review-draft")
+def golden_review_draft(
+    candidate_id: str = typer.Argument(..., help="Golden candidate id"),
+    project_id: str | None = typer.Option(None, "--project", help="Project catalog id"),
+    output_dir: Path = typer.Option(Path("outputs/golden-review"), "--output-dir"),
+    cwd: Path = typer.Option(Path.cwd(), "--cwd", hidden=True),
+    config_dir: Path = typer.Option(Path("configs"), "--config-dir"),
+    state_dir: Path = typer.Option(Path(".signal-harness"), "--state-dir"),
+) -> None:
+    """Write a human annotation worksheet; never auto-promote a candidate to Golden."""
+
+    root = cwd.expanduser().resolve()
+    config = resolve_config_dir(root, config_dir)
+    selected = project_id or default_project_id(config)
+    try:
+        project = project_option(selected, config)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    state = prepare_project_state(
+        _resolve(root, state_dir), project.id, migrate_legacy_default=True
+    )
+    output = _resolve(root, output_dir) / f"{candidate_id}.review.json"
+    try:
+        path = write_review_draft(
+            project_state=state, candidate_id=candidate_id, output_path=output
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(f"Golden review draft: {path}")
 
 
 @app.command()
@@ -1278,6 +1727,26 @@ def calibrate(
         old_policy=policy,
         proposed_policy=proposal.new_policy,
     )
+    durable_replay = None
+    ledger_path = state / "change_ledger.sqlite3"
+    if ledger_path.exists():
+        ledger = ChangeLedger(ledger_path)
+        dataset = build_calibration_dataset(ledger=ledger, project_id=project.id)
+        latest_profile = ledger.latest_profile_revision(project_id=project.id)
+        replay_profile = (
+            dict(latest_profile["effective_profile"])
+            if latest_profile is not None
+            else dict(snapshot["project_memory"]["project_profile"])
+        )
+        durable_replay = evaluate_calibration_replay(
+            dataset,
+            project_profile=replay_profile,
+            old_policy=policy,
+            proposed_policy=proposal.new_policy,
+        )
+        durable_payload = durable_replay.model_dump(mode="json")
+        _write_json(state / "calibration_replay.json", durable_payload)
+        _write_json(resolved_outputs / "latest_calibration_replay.json", durable_payload)
     _save_learning_artifacts(
         state,
         resolved_outputs,
@@ -1294,6 +1763,13 @@ def calibrate(
     typer.echo(f"Proposal: {proposal.proposal_id}")
     typer.echo(render_policy_diff(proposal.old_policy, proposal.new_policy))
     typer.echo(f"Replay recommendation: {replay.recommendation}")
+    if durable_replay is not None:
+        typer.echo(
+            "Durable calibration: "
+            f"{durable_replay.recommendation}; "
+            f"labeled={durable_replay.labeled_count}; "
+            f"promotion_allowed={str(durable_replay.promotion_allowed).lower()}"
+        )
     if not apply:
         typer.echo(
             "Review the proposal; use learning-stage, learning-review, and "
@@ -1402,6 +1878,29 @@ def learning_apply(
     except (PermissionError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(f"Applied staged learning proposal to {path}")
+
+
+@app.command("learning-rollback")
+def learning_rollback(
+    revision_id: str = typer.Option(..., "--revision-id"),
+    yes: bool = typer.Option(False, "--yes", help="Explicitly approve policy rollback"),
+    cwd: Path = typer.Option(Path.cwd(), "--cwd", hidden=True),
+    config_dir: Path = typer.Option(Path("configs"), "--config-dir"),
+    state_dir: Path = typer.Option(Path(".signal-harness"), "--state-dir"),
+) -> None:
+    """Rollback one applied policy revision if no newer policy has replaced it."""
+
+    root = cwd.expanduser().resolve()
+    try:
+        path = rollback_policy_revision(
+            state_dir=_resolve(root, state_dir),
+            config_dir=resolve_config_dir(root, config_dir),
+            revision_id=revision_id,
+            yes=yes,
+        )
+    except (PermissionError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(f"Rolled back policy revision {revision_id} at {path}")
 
 
 if __name__ == "__main__":

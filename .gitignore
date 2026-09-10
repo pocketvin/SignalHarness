@@ -40,3 +40,8 @@ outputs/*
 # OS
 .DS_Store
 Thumbs.db
+
+# Frontend dependencies and local Vite caches
+node_modules/
+frontend/node_modules/
+frontend/.vite/

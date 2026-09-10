@@ -21,6 +21,8 @@ class ProjectChangeState:
     event_version: str | None = None
     version_relation: VersionRelation = "not_applicable"
     protocol_name: str | None = None
+    provider_name: str | None = None
+    runtime_name: str | None = None
     issue_fixed_for_installed_major: bool = False
 
     @property
@@ -43,9 +45,19 @@ def resolve_project_change_state(
     """Resolve direct-entity identity and conservative installed-version applicability."""
 
     protocol = _matched_protocol(event, project_profile)
+    provider = _matched_named_profile_entity(
+        event, project_profile, entity_type="provider", profile_key="providers"
+    )
+    runtime = _matched_named_profile_entity(
+        event, project_profile, entity_type="runtime", profile_key="runtimes"
+    )
     dependency = _matched_dependency(event, project_profile, protocol_name=protocol)
     if dependency is None:
-        return ProjectChangeState(protocol_name=protocol)
+        return ProjectChangeState(
+            protocol_name=protocol,
+            provider_name=provider,
+            runtime_name=runtime,
+        )
 
     resolved = _resolved_dependency_version(dependency, project_profile)
     relation: VersionRelation = "not_applicable"
@@ -64,6 +76,8 @@ def resolve_project_change_state(
         event_version=event.current_version,
         version_relation=relation,
         protocol_name=protocol,
+        provider_name=provider,
+        runtime_name=runtime,
         issue_fixed_for_installed_major=fixed,
     )
 
@@ -76,7 +90,12 @@ def project_preference_importance(
 
     candidates = {
         _normalize_identifier(value)
-        for value in (state.dependency_name, state.protocol_name)
+        for value in (
+            state.dependency_name,
+            state.protocol_name,
+            state.provider_name,
+            state.runtime_name,
+        )
         if value
     }
     if not candidates:
@@ -100,12 +119,31 @@ def _matched_dependency(
     *,
     protocol_name: str | None,
 ) -> str | None:
-    if event.source_type not in {"github_release", "github_issue", "package_registry"}:
-        return None
-    source_aliases = _source_aliases(event)
     dependencies = project_profile.get("dependencies", [])
     if not isinstance(dependencies, list):
         return None
+    bound_type, bound_name = _bound_entity(event)
+    if bound_type == "dependency":
+        target = _normalize_identifier(bound_name)
+        for value in dependencies:
+            name = _dependency_name(value)
+            if name and _normalize_identifier(name) == target:
+                return name
+        return None
+    if bound_type:
+        # A source-owned non-dependency identity must not be reinterpreted as a
+        # dependency merely because page text or a source name overlaps.
+        if protocol_name:
+            for value in dependencies:
+                name = _dependency_name(value)
+                if name and _normalize_identifier(name) == _acronym(protocol_name):
+                    return name
+        return None
+    if event.source_type not in {
+        "github_release", "github_issue", "package_registry", "security_advisory"
+    }:
+        return None
+    source_aliases = _source_aliases(event)
     for value in dependencies:
         name = _dependency_name(value)
         if not name:
@@ -119,6 +157,13 @@ def _matched_dependency(
 
 
 def _matched_protocol(event: SignalEvent, project_profile: dict[str, Any]) -> str | None:
+    bound_type, _ = _bound_entity(event)
+    if bound_type == "protocol":
+        return _matched_named_profile_entity(
+            event, project_profile, entity_type="protocol", profile_key="protocols"
+        )
+    if bound_type:
+        return None
     source_aliases = _source_aliases(event)
     protocols = project_profile.get("protocols", [])
     if not isinstance(protocols, list):
@@ -133,12 +178,42 @@ def _matched_protocol(event: SignalEvent, project_profile: dict[str, Any]) -> st
     return None
 
 
+def _matched_named_profile_entity(
+    event: SignalEvent,
+    project_profile: dict[str, Any],
+    *,
+    entity_type: str,
+    profile_key: str,
+) -> str | None:
+    bound_type, bound_name = _bound_entity(event)
+    if bound_type != entity_type or not bound_name:
+        return None
+    values = project_profile.get(profile_key, [])
+    if not isinstance(values, list):
+        return None
+    target = _normalize_identifier(bound_name)
+    for value in values:
+        name = str(value).strip()
+        if name and _normalize_identifier(name) == target:
+            return name
+    return None
+
+
+def _bound_entity(event: SignalEvent) -> tuple[str, str]:
+    entity_type = str(event.raw_payload.get("entity_type") or "").strip().lower()
+    entity_name = str(event.raw_payload.get("entity_name") or "").strip()
+    if entity_type not in {"dependency", "provider", "protocol", "runtime"}:
+        return "", ""
+    return entity_type, entity_name
+
+
 def _source_aliases(event: SignalEvent) -> set[str]:
     values = [
         event.source_name,
         str(event.raw_payload.get("repository") or ""),
         str(event.raw_payload.get("repo") or ""),
         str(event.raw_payload.get("package_name") or ""),
+        str(event.raw_payload.get("matched_package") or ""),
     ]
     aliases: set[str] = set()
     for value in values:

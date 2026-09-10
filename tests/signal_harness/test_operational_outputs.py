@@ -47,8 +47,14 @@ def _assessment(event_id: str = "alert-001") -> SignalAssessment:
         affected_modules=["core-provider-permission"],
         evidence_urls=["https://example.test/release"],
         source_quality=SourceQuality.OFFICIAL,
-        reason="Major provider release.",
-        action_items=["Review provider permission handling."],
+        reason="Deterministic fallback: Approval required before provider review.",
+        action_items=[
+            "Review provider permission handling.",
+            "Human approval is required before execution.",
+        ],
+        what_changed_zh="Provider 发布了会改变核心权限处理的版本。",
+        why_relevant_zh="当前项目的 provider 与 permission 模块会直接受影响。",
+        action_items_zh=["先回归验证 provider 权限处理链路。"],
         decision=SignalDecision.ACTION_REQUIRED,
         cross_source_confidence=0.8,
     )
@@ -76,9 +82,15 @@ def test_alert_outputs_and_state_deduplicate(tmp_path: Path) -> None:
     state = json.loads((state_dir / "alert_state.json").read_text(encoding="utf-8"))
     assert len(alerts) == 1
     assert "alert-001" in state["alerted_event_ids"]
-    assert "Security-sensitive provider release" in (
-        output_dir / "alerts.md"
-    ).read_text(encoding="utf-8")
+    alert_markdown = (output_dir / "alerts.md").read_text(encoding="utf-8")
+    assert "Security-sensitive provider release" in alert_markdown
+    assert "SignalHarness 重点提醒" in alert_markdown
+    assert "Provider 发布了会改变核心权限处理的版本。" in alert_markdown
+    assert "当前项目的 provider 与 permission 模块会直接受影响。" in alert_markdown
+    assert "先回归验证 provider 权限处理链路。" in alert_markdown
+    assert "decision=action_required" not in alert_markdown
+    assert "Approval required before" not in alert_markdown
+    assert "Human approval" not in alert_markdown
 
     write_alert_outputs(
         output_dir=output_dir,
@@ -283,6 +295,9 @@ def test_dashboard_and_digest_outputs_include_expected_sections(tmp_path: Path) 
     assert "Learning proposals are review-only" in html
     assert "No learning was applied automatically" in html
     assert "Learning staging" in html
+    assert "先回归验证 provider 权限处理链路。" in html
+    assert "Review provider permission handling." not in html
+    assert "Human approval is required before execution." not in html
     assert "proposal-1" in html
     for digest in (daily, weekly):
         text = digest.read_text(encoding="utf-8")
