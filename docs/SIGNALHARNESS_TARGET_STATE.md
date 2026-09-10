@@ -50,6 +50,8 @@ The scan-time semantic budget and the on-demand Deep Dive budget are different c
 
 Keep **Observed corpus**, **Relevant projection**, **Featured projection**, and **On-demand Deep Dive state** distinct. Weak individual observations may still combine into a supported emerging direction, while raw source noise must not be mislabeled as project-relevant.
 
+Project-owned activity and external-environment evidence are also distinct. Project activity may explain why an external Direction matters to the current codebase, but it must never establish that external Direction. Issue/discussion observations must retain a “reported/discussed” evidence posture rather than being promoted to shipped or confirmed behavior.
+
 A compact change row/card should show only the user-facing change type, a short Chinese summary, and one sentence of likely project impact. **Numeric relevance/impact scores are internal ranking/audit data and are not a primary product-facing concept.** Full details are progressive disclosure: what happened, why it is relevant, affected modules/capabilities, recommended actions, Before/After when real evidence exists, sources/evidence, and optional audit reasoning/score/trace.
 
 The normal Web product surface must not expose test/runtime implementation choices such as `mock-agent`, fixture mode, deterministic fallback mode, Harness variant names, raw SSE counts, or Agent-count internals. Those belong in explicit developer/audit surfaces. Normal live progress should use product milestones (collecting, aggregating, interpreting Changes, forming Directions, report ready), while raw Trace remains available behind Audit.

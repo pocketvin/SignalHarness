@@ -86,7 +86,8 @@ def test_product_post_runs_full_pipeline_without_legacy_deep_agents(intelligence
     run, report = run_scan(client, project)
     assert report["counts"]["changes"] == report["counts"]["interpreted"] == 42
     assert report["counts"]["automatic_deep_dives"] == 0
-    assert len(calls) == 4
+    assert sum(call.agent_name == "ChangeInterpreter" for call in calls) == 4
+    assert sum(call.agent_name == "EnvironmentSynthesizer" for call in calls) == 1
     assert len(calls[-1].input_payload["corpus"]) == 42
     assert {call.agent_name for call in calls} == {"ChangeInterpreter", "EnvironmentSynthesizer"}
     assert run["window"]["first_use"] is True

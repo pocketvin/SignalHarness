@@ -1,6 +1,6 @@
 # 方向优先的环境情报：首个可运行闭环
 
-更新日期：2026-09-11。实现范围：`environment-v1.1`。这是第一轮工程闭环，不代表完整产品质量验收已经结束。
+更新日期：2026-09-11。当前实现范围：`environment-v1.5`。这是第一轮工程闭环，不代表完整产品质量验收已经结束。
 
 ## 正常产品流程
 
@@ -8,7 +8,7 @@
 共享来源采集（GitHub / Local Git / PyPI / OSV / RSS / Web）
 → Event 身份与内容修订
 → 确定性跨来源 Change 聚合 + 冻结 ChangeRevision / 证据
-→ 全量 Change 分批浅层理解（默认每批最多 20 条，另有输入大小上限）
+→ 全量 Change 分批浅层理解（默认每批最多 12 条，另有输入大小上限）
 → Python 构造完整紧凑语料，保留弱相关与解释失败条目
 → 一次 EnvironmentSynthesizer 调用
    同时输出方向、整体报告、风险/机会和最多 5 条 Featured
@@ -98,7 +98,7 @@ GET/POST/DELETE /intelligence/projects/{project_id}/schedules[/schedule_id]
 
 ## 版本、真实性和权限边界
 
-SQLite schema 升级为 v7，新增 ChangeRevision / 证据关联、ScanInsight、InsightCache、EnvironmentReport、DirectionRevision、DeepDiveJob。不是新增第二种数据库。
+SQLite schema 升级为 v8，新增 ChangeRevision / 证据关联、ScanInsight、InsightCache、EnvironmentReport、DirectionRevision、DeepDiveJob。不是新增第二种数据库。
 
 - 已发布报告与其 ProfileRevision 不因后续偏好、来源更新或 Deep Dive 被覆盖。
 - 已提交报告恢复时直接读取快照，不重新采集/调用模型。未提交的中断扫描仍是有界整轮重试，不是任意节点精确恢复。
@@ -122,9 +122,70 @@ SQLite schema 升级为 v7，新增 ChangeRevision / 证据关联、ScanInsight�
 
 结果目录：`outputs/p0-environment-20260911/`。隔离验收状态、日志与截图在 `work/p0-environment-20260911/`；没有将回放结果写入用户正式 `.signal-harness`。
 
+## 2026-09-11 P0 语义质量收口（environment-v1.5）
+
+这一轮不是增加 Agent，而是把“什么可以成为环境方向证据”变成可测试的产品边界。
+
+### 外部环境与项目自身活动分离
+
+所有 Change 仍然做浅层理解，但新增 `corpus_role`：
+
+- `external_environment`：可进入环境 Brief、Direction 和 Featured；
+- `project_activity`：只用于说明“为什么这个外部方向与当前项目有关”，不能反过来证明外部环境正在形成趋势。
+
+真实历史来源回放中，71 条已保存观察确定性整理为 67 个 Change，其中 63 个是外部环境变化、4 个是项目自身活动。67 条全部完成浅层解释，48 条进入相关变化投影。项目自身 4 条在 Web 中有单独入口，没有混入“全部环境变化”。
+
+### Direction 质量门
+
+`intelligence/quality.py` 只拦截可以从冻结数据确定为不合法的输出，不尝试替模型判断趋势真伪：
+
+- Direction 只能引用外部环境 Change；
+- 默认至少跨两个实体；如果只围绕同一实体，则至少 3 个 Change 且来自 2 个来源；
+- 高度共享同一证据集、且文本主题相近的 Direction 必须合并；
+- “同日/当天”必须与全部引用日期一致；“短时间内/短期内”必须有完整日期且跨度不超过 7 天；
+- “加速/增强/减弱/同比/环比”等跨期状态不能由单次模型直接写入 Direction 标题/解释，状态由可比历史窗口确定性计算；
+- 项目文案禁止暴露 `critical_modules`、`dependencies`、`chg-...` 等内部字段/标识；
+- GitHub Issue 只代表报告、提议或讨论，不等于缺陷已确认、功能已发布或修复已落地。
+
+Direction 还增加确定性 `evidence_posture`：`reported_issue / mixed / observed_change`。Web 对应显示“问题 / 讨论信号”“混合证据”“已观察变化”。同时显示支持变化数与来源数；`authoritative_source_count` 单独保存，来源权威性由已有 `event_source_quality()` 计算，而不是让模型自报。
+
+### 输出更少、职责更清楚
+
+V1 删除了强模型输出 Schema 中独立的 `risks` / `opportunities` 字段。风险、机会和下一步观察统一收进对应 Direction 的 `watch_next`；`EnvironmentReport` 仍保留空数组字段以兼容旧读者。这样减少第二套自由发挥的结论，也避免和 Direction 重复。
+
+浅层和全局综合的版本身份已经分开：当前浅层缓存继续使用 `environment-v1.3`，报告为 `environment-v1.5`，综合 Prompt/Schema 单独版本化。因此修改 Direction 质量规则时可以复用已验证的 ChangeInsight，不必重新支付几十条浅层模型调用。当前浅层默认 12 条/批；大批失败会确定性二分后局部重试，仍不会退回 Top-K。
+
+### 真实保存来源回放结果
+
+本轮使用过去真实采集并保存在本地的 71 条来源观察进行隔离回放；它不是 2026-09-11 当下的重新采集，因此不能用来证明当前外部世界仍完全相同。
+
+最终 `environment-v1.5`：
+
+```text
+71 source observations
+→ 67 Change
+→ 63 external + 4 project activity
+→ 67 / 67 shallow ready
+→ 48 relevant
+→ ONE global synthesis over all 63 external ChangeInsights
+→ 5 Directions + 5 Featured
+→ 0 automatic Deep Dive
+```
+
+中间失败同样保留为验收证据，而不是只记录最终通过：
+
+- v1.3：全局综合未通过旧质量门，保存 degraded 报告；
+- v1.4：DeepSeek 两次被 `direction_source_diversity` 拒绝，说明同一仓库/同一实体的 Issue 聚集仍被模型误写为环境方向；没有放宽 guard，而是增加定向修复提示；
+- v1.5：DeepSeek 第一次被 `temporal_window_mismatch` 拒绝，第二次按明确失败类型修复后通过；成功综合调用约 46,838 provider tokens、约 144 秒；
+- Kimi K3 在此前备用实测仍出现 provider-level 失败，不能写成“已稳定通过”。
+
+最终 5 个 Direction 的证据集合两两重叠率为 0；没有项目自身 Change 支撑 Direction/Brief，没有内部字段或 Change ID 泄漏，没有已知错误“同日”断言。该结果是**结构化语义质量门通过**，不是对所有结论真实性的独立人工/网页复核。
+
+浏览器验收覆盖方向证据姿态、外部/项目自身分区、方向证据导航和移动端。主页面不再展示独立风险/机会块，也没有模型选择、mock、影响分或 raw Change ID。
+
 ## 本轮未宣称完成的能力
 
-1. 尚未以 100–500 条真实、跨主题、跨来源语料验证 Direction 的准确性、非重复性和覆盖率。当前实现支持这条数据流，但不应把测试条数当语义质量证据。
+1. 已用 71 条真实保存来源观察（67 Change）验证当前结构门和方向非重复性，但尚未以 100–500 条**重新采集且人工抽检**的真实语料验证 Direction 的准确率、召回、漏掉的重要方向和跨期稳定性。
 2. 无强 ID 的语义去重/纠错暂未实现；优先保留两条可能相关的 Change，而不是误合并。
 3. 超出全局容量时明确降级，尚未实现可追溯的分层综合；不得默默截取 Top-K。
 4. Code Usage 只是有界引用匹配，尚非完整调用图、跨语言可达性或执行过的兼容性测试。

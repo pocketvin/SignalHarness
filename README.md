@@ -12,6 +12,8 @@ SignalHarness 会实时监听项目本地 Git、GitHub、PyPI package registry�
 
 用户明确点击某条变化，才创建独立、可缓存的 Deep Dive。前端不选择分析模型，不显示分数、mock 模式或原始 Trace 控制台。服务端模型策略位于 `configs/intelligence_policy.yaml`。
 
+当前环境报告还会区分 **外部环境变化** 与 **项目自身活动**：后者只用于解释项目关联，不能制造外部趋势。Direction 会显示证据姿态（问题/讨论信号、混合证据、已观察变化），避免把 GitHub Issue 当成已经发布的事实。
+
 ```bash
 cd /Users/yu0/Workspace/10-Projects/SignalHarness
 uv run signal-harness environment --project signalharness --window since_last

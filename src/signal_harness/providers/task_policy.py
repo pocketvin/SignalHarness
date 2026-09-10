@@ -19,10 +19,12 @@ TaskRole = Literal["shallow", "synthesis", "deep_dive"]
 @dataclass(frozen=True)
 class TaskPolicy:
     config_dir: Path
-    batch_size: int = 20
+    version: str = "environment-model-policy-v1"
+    batch_size: int = 12
     batch_input_bytes: int = 60000
     global_input_bytes: int = 700000
     max_provider_attempts: int = 2
+    retry_split_min_batch: int = 4
     roles: dict[str, Any] | None = None
     models: dict[str, str] | None = None
 
@@ -33,10 +35,12 @@ class TaskPolicy:
         raw = raw if isinstance(raw, dict) else {}
         return cls(
             config_dir=config_dir,
-            batch_size=max(1, min(24, int(raw.get("batch_size", 20)))),
+            version=str(raw.get("version") or "environment-model-policy-v1"),
+            batch_size=max(1, min(24, int(raw.get("batch_size", 12)))),
             batch_input_bytes=max(2000, min(100000, int(raw.get("batch_input_bytes", 60000)))),
             global_input_bytes=max(10000, min(1000000, int(raw.get("global_input_bytes", 700000)))),
             max_provider_attempts=max(1, min(2, int(raw.get("max_provider_attempts", 2)))),
+            retry_split_min_batch=max(1, min(8, int(raw.get("retry_split_min_batch", 4)))),
             models=raw.get("models", {}),
             roles={name: raw.get(name, {}) for name in ("shallow", "synthesis", "deep_dive")},
         )
@@ -64,6 +68,7 @@ class TaskPolicy:
         }
         return json.dumps(
             {
+                "version": self.version,
                 "role": role,
                 "providers": [(name, models.get(name)) for name in self.providers(role)],
                 "policy": self.roles,

@@ -22,7 +22,7 @@ from signal_harness.signal.source_identity import (
     security_advisory_identity,
 )
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 
 @dataclass(frozen=True)
@@ -124,6 +124,15 @@ class ChangeLedger:
             connection.executescript(INTELLIGENCE_SCHEMA)
             if "intelligence_pipeline" not in {row["name"] for row in connection.execute("PRAGMA table_info(schedules)")}:
                 connection.execute("ALTER TABLE schedules ADD COLUMN intelligence_pipeline INTEGER NOT NULL DEFAULT 0")
+            if "corpus_role" not in {row["name"] for row in connection.execute("PRAGMA table_info(scan_intelligence)")}:
+                connection.execute(
+                    "ALTER TABLE scan_intelligence ADD COLUMN corpus_role TEXT NOT NULL "
+                    "DEFAULT 'external_environment'"
+                )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_scan_intelligence_role "
+                "ON scan_intelligence(scan_id, corpus_role, interpreted, published_at)"
+            )
             self._ensure_scan_columns(connection)
             connection.execute(
                 "INSERT INTO schema_meta(key, value) VALUES('schema_version', ?) "

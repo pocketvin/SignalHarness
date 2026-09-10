@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS scan_intelligence(
     relevant INTEGER NOT NULL DEFAULT 0,
     featured INTEGER NOT NULL DEFAULT 0,
     attention TEXT NOT NULL DEFAULT 'normal',
+    corpus_role TEXT NOT NULL DEFAULT 'external_environment',
     interpreted INTEGER NOT NULL DEFAULT 0,
     published_at TEXT,
     search_text TEXT NOT NULL DEFAULT '',
@@ -127,8 +128,15 @@ class IntelligenceRepository:
                         ),
                     )
                 db.execute(
-                    "INSERT OR IGNORE INTO scan_intelligence(scan_id,change_id,revision_id,published_at) VALUES(?,?,?,?)",
-                    (scan_id, item.change_id, item.revision_id, item.published_at),
+                    "INSERT OR IGNORE INTO scan_intelligence("
+                    "scan_id,change_id,revision_id,published_at,corpus_role) VALUES(?,?,?,?,?)",
+                    (
+                        scan_id,
+                        item.change_id,
+                        item.revision_id,
+                        item.published_at,
+                        item.corpus_role,
+                    ),
                 )
 
     def save_insight(self, scan_id: str, item: ProductChange) -> None:
@@ -148,13 +156,14 @@ class IntelligenceRepository:
             ).fetchone():
                 raise ValueError("Historical scan intelligence is frozen")
             result = db.execute(
-                "UPDATE scan_intelligence SET insight_json=?,relevant=?,featured=?,attention=?,interpreted=?,search_text=? "
+                "UPDATE scan_intelligence SET insight_json=?,relevant=?,featured=?,attention=?,corpus_role=?,interpreted=?,search_text=? "
                 "WHERE scan_id=? AND change_id=? AND revision_id=?",
                 (
                     item.model_dump_json(),
                     int(item.relevant),
                     int(item.featured),
                     item.attention,
+                    item.corpus_role,
                     int(item.interpretation_status == "ready"),
                     text,
                     scan_id,
@@ -250,17 +259,21 @@ class IntelligenceRepository:
         if (
             not 1 <= limit <= 500
             or offset < 0
-            or view not in {"relevant", "all", "featured", "unavailable"}
+            or view not in {"relevant", "all", "featured", "activity", "unavailable"}
         ):
             raise ValueError("Invalid change pagination")
         clauses = ["scan_id=?", "insight_json IS NOT NULL"]
         params: list[Any] = [scan_id]
         if view == "relevant":
-            clauses.append("relevant=1")
+            clauses.extend(("relevant=1", "corpus_role='external_environment'"))
+        elif view == "all":
+            clauses.append("corpus_role='external_environment'")
         elif view == "featured":
-            clauses.append("featured=1")
+            clauses.extend(("featured=1", "corpus_role='external_environment'"))
+        elif view == "activity":
+            clauses.append("corpus_role='project_activity'")
         elif view == "unavailable":
-            clauses.append("interpreted=0")
+            clauses.extend(("interpreted=0", "corpus_role='external_environment'"))
         if query.strip():
             escaped = (
                 query.strip()

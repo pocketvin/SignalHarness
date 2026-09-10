@@ -1513,3 +1513,31 @@
     flex-wrap: wrap;
   }
 }
+
+.direction-tags {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.posture-tag {
+  font-size: 11px;
+  padding: 3px 7px;
+  border: 1px solid #d6e1e5;
+  border-radius: 5px;
+  color: #607681;
+  background: #f7fafb;
+}
+.posture-tag.reported_issue {
+  border-style: dashed;
+  color: #78643f;
+  background: #fbf7ee;
+}
+.posture-tag.mixed {
+  color: #536e78;
+  background: #f1f6f7;
+}
+.posture-tag.observed_change {
+  color: #3f7160;
+  background: #eef7f2;
+}

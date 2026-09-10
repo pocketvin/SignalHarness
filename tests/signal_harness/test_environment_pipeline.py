@@ -59,6 +59,8 @@ class ScriptedIntelligenceProvider:
                 results = results[:-1]
             if self.fault == "foreign_evidence":
                 results[0]["evidence_ids"] = ["evr-nonexistent"]
+            if self.fault == "large_batch" and len(payload["changes"]) > 4:
+                results = results[:-1]
             return json.dumps({"results": results}, ensure_ascii=False)
         if call.output_schema == SynthesisOutput.__name__:
             ids = [item["change_id"] for item in payload["corpus"]]
@@ -90,8 +92,6 @@ class ScriptedIntelligenceProvider:
                         {"text": "本期多条更新涉及工具注册版本。", "supporting_change_ids": refs}
                     ],
                     "directions": directions,
-                    "risks": [],
-                    "opportunities": [],
                     "featured_change_ids": ids[:5],
                 },
                 ensure_ascii=False,
@@ -173,7 +173,10 @@ def test_300_changes_all_reach_global_model_without_topk(
     assert report.status == "complete"
     assert report.counts["interpreted"] == report.counts["changes"] == 300
     assert report.counts["automatic_deep_dives"] == 0
-    assert len(calls) == 16  # 15 batches of 20 + ONE synthesis, never a per-item call.
+    expected_batches = (
+        300 + engine.caller.policy.batch_size - 1
+    ) // engine.caller.policy.batch_size
+    assert len(calls) == expected_batches + 1  # bounded batches + ONE synthesis, never per-item.
     assert len(calls[-1].input_payload["corpus"]) == 300
     assert len({c["change_id"] for c in calls[-1].input_payload["corpus"]}) == 300
     assert set(report.directions[0].supporting_change_ids).isdisjoint(
@@ -190,7 +193,7 @@ def test_300_changes_all_reach_global_model_without_topk(
     assert not repo.changes("scan-test", offset=295)["has_more"]
     assert repo.changes("scan-test", query="变更 0299")["count"] == 1
     assert asyncio.run(engine.run(**kwargs)).report_id == report.report_id
-    assert len(calls) == 16  # reload/restart of a committed report incurs no calls.
+    assert len(calls) == expected_batches + 1  # committed report reload incurs no calls.
 
 
 @pytest.mark.parametrize("fault", ["missing", "foreign_evidence"])
@@ -357,3 +360,329 @@ def test_production_runtime_and_providers_do_not_import_eval(project_root: Path)
                 if any(set(module.split(".")) & forbidden for module in modules):
                     violations.append(f"{path.relative_to(root)}:{node.lineno}")
     assert violations == []
+
+
+def _product_change(
+    change_id: str,
+    *,
+    entity: str,
+    date: str,
+    source: str,
+    corpus_role: str = "external_environment",
+):
+    from signal_harness.intelligence.contracts import Evidence, ProductChange
+
+    return ProductChange(
+        change_id=change_id,
+        revision_id="rev-" + change_id,
+        title=f"{entity} 更新",
+        entity=entity,
+        kind="github_release",
+        published_at=date,
+        corpus_role=corpus_role,
+        summary=f"{entity} 发布了新的上游变化。",
+        what_changed=f"{entity} 的公开资料出现了新的版本或接口变化。",
+        project_relation="context",
+        relation_reason="项目使用相关生态，需要关注兼容性。",
+        attention="normal",
+        topics=["工具协议"],
+        uncertainty="尚未深入核实具体代码影响。",
+        interpretation_status="ready",
+        relevant=corpus_role == "external_environment",
+        evidence=[
+            Evidence(
+                evidence_id="ev-" + change_id,
+                event_revision_id=int(change_id.removeprefix("c")),
+                source_name=source,
+                source_type="github_release",
+                url=f"https://example.com/{change_id}",
+                authority="official",
+                excerpt="官方资料中的变化说明。",
+                project_owned=corpus_role == "project_activity",
+            )
+        ],
+    )
+
+
+def test_project_owned_change_is_context_not_environment_direction(tmp_path: Path):
+    from signal_harness.intelligence.contracts import DirectionCandidate, SynthesisOutput
+    from signal_harness.intelligence.quality import validate_synthesis_semantics
+
+    external = _product_change(
+        "c1", entity="OpenAI", date="2026-09-07T00:00:00+00:00", source="openai"
+    )
+    own = _product_change(
+        "c2",
+        entity="SignalHarness",
+        date="2026-09-08T00:00:00+00:00",
+        source="signalharness",
+        corpus_role="project_activity",
+    )
+    output = SynthesisOutput(
+        brief=[{"text": "外部接口出现兼容性变化。", "supporting_change_ids": ["c1"]}],
+        directions=[
+            DirectionCandidate(
+                topic_key="tool-runtime",
+                title="工具运行接口出现共同调整",
+                explanation="不同主体都在调整工具运行接口。",
+                supporting_change_ids=["c1", "c2"],
+            )
+        ],
+        featured_change_ids=["c1"],
+    )
+    with pytest.raises(ValueError, match="external-environment"):
+        validate_synthesis_semantics(output, {"c1": external, "c2": own})
+
+
+def test_temporal_same_day_claim_must_match_cited_dates():
+    from signal_harness.intelligence.contracts import SynthesisOutput
+    from signal_harness.intelligence.quality import validate_synthesis_semantics
+
+    changes = {
+        "c1": _product_change("c1", entity="MCP", date="2026-09-07T00:00:00+00:00", source="pypi"),
+        "c2": _product_change(
+            "c2", entity="OpenAI", date="2026-09-08T00:00:00+00:00", source="github"
+        ),
+    }
+    output = SynthesisOutput(
+        brief=[{"text": "两个变化在同日发布。", "supporting_change_ids": ["c1", "c2"]}],
+        featured_change_ids=["c1"],
+    )
+    with pytest.raises(ValueError, match="same-day"):
+        validate_synthesis_semantics(output, changes)
+
+
+def test_direction_overlap_and_velocity_are_rejected():
+    from signal_harness.intelligence.contracts import DirectionCandidate, SynthesisOutput
+    from signal_harness.intelligence.quality import validate_synthesis_semantics
+
+    changes = {
+        "c1": _product_change(
+            "c1", entity="OpenAI", date="2026-09-07T00:00:00+00:00", source="openai"
+        ),
+        "c2": _product_change(
+            "c2", entity="Anthropic", date="2026-09-08T00:00:00+00:00", source="anthropic"
+        ),
+        "c3": _product_change("c3", entity="MCP", date="2026-09-09T00:00:00+00:00", source="mcp"),
+    }
+    velocity = SynthesisOutput(
+        brief=[{"text": "工具接口出现多项变化。", "supporting_change_ids": ["c1", "c2"]}],
+        directions=[
+            DirectionCandidate(
+                topic_key="tools",
+                title="工具接口调整正在加速",
+                explanation="多个主体都在调整工具接口。",
+                supporting_change_ids=["c1", "c2"],
+            )
+        ],
+        featured_change_ids=["c1"],
+    )
+    with pytest.raises(ValueError, match="trend state"):
+        validate_synthesis_semantics(velocity, changes)
+
+    overlap = SynthesisOutput(
+        brief=[{"text": "工具接口出现多项变化。", "supporting_change_ids": ["c1", "c2"]}],
+        directions=[
+            DirectionCandidate(
+                topic_key="tools-a",
+                title="工具接口兼容性出现共同调整",
+                explanation="多个工具接口出现兼容性和流式解析调整。",
+                supporting_change_ids=["c1", "c2"],
+            ),
+            DirectionCandidate(
+                topic_key="tools-b",
+                title="工具接口兼容与解析出现共同变化",
+                explanation="多个工具接口都涉及兼容性以及流式解析变化。",
+                supporting_change_ids=["c1", "c3"],
+            ),
+        ],
+        featured_change_ids=["c1"],
+    )
+    with pytest.raises(ValueError, match="overlapping"):
+        validate_synthesis_semantics(overlap, changes)
+
+
+def test_product_copy_rejects_internal_contract_vocabulary():
+    from signal_harness.intelligence.contracts import SynthesisOutput
+    from signal_harness.intelligence.model_calls import validate_product_language
+
+    output = SynthesisOutput(
+        brief=[
+            {
+                "text": "项目的 critical_modules 中包含 MCP，需要关注上游变化。",
+                "supporting_change_ids": ["c1"],
+            }
+        ]
+    )
+    with pytest.raises(ValueError, match="internal_contract"):
+        validate_product_language(output)
+
+
+def test_product_copy_rejects_change_id_even_when_attached_to_chinese_text():
+    from signal_harness.intelligence.contracts import SynthesisOutput
+    from signal_harness.intelligence.model_calls import validate_product_language
+
+    output = SynthesisOutput(
+        brief=[
+            {
+                "text": "这个变化与chg-deadbeef123456属同类问题。",
+                "supporting_change_ids": ["c1"],
+            }
+        ]
+    )
+    with pytest.raises(ValueError, match="internal_contract"):
+        validate_product_language(output)
+
+
+def test_project_activity_is_shallowly_interpreted_but_not_featured(
+    tmp_path: Path, project_root: Path
+):
+    engine, kwargs, calls, repo, *_ = setup_engine(tmp_path, project_root, 3)
+    digests = list(kwargs["digests"])
+    digests[0] = digests[0].model_copy(update={"corpus_role": "project_activity"})
+    kwargs["digests"] = digests
+    report = asyncio.run(engine.run(**kwargs))
+    assert report.counts["changes"] == 3
+    assert report.counts["external_changes"] == 2
+    assert report.counts["project_activity"] == 1
+    assert report.counts["interpreted"] == 3
+    assert len(calls[-1].input_payload["corpus"]) == 2
+    assert len(calls[-1].input_payload["project_activity"]) == 1
+    assert all(item.corpus_role == "external_environment" for item in report.featured)
+    assert repo.changes("scan-test", view="all")["count"] == 2
+    assert repo.changes("scan-test", view="activity")["count"] == 1
+    activity = repo.changes("scan-test", view="activity")["items"][0]
+    assert activity["interpretation_status"] == "ready"
+    assert activity["relevant"] is False
+
+
+def test_project_owned_event_is_assembled_as_project_activity(tmp_path: Path):
+    ledger = ChangeLedger(tmp_path / "ledger.sqlite3")
+    event = SignalEvent(
+        event_id="own-commit",
+        source_type="github_commit",
+        source_name="owner/project",
+        title="Refactor runtime",
+        content="internal project change",
+        url="https://github.com/owner/project/commit/abc",
+        collected_at=NOW,
+        published_at=NOW,
+        raw_payload={"project_owned": True, "source_authority": "official"},
+    )
+    digest = assemble_changes([event], ledger.persist_observations([event]))[0]
+    assert digest.corpus_role == "project_activity"
+    assert digest.evidence[0].project_owned is True
+
+
+def test_schema_v8_migrates_existing_scan_intelligence_role_column(tmp_path: Path):
+    import sqlite3
+
+    path = tmp_path / "old.sqlite3"
+    with sqlite3.connect(path) as db:
+        db.execute(
+            "CREATE TABLE scan_intelligence("
+            "scan_id TEXT NOT NULL, change_id TEXT NOT NULL, revision_id TEXT NOT NULL, "
+            "insight_json TEXT, relevant INTEGER NOT NULL DEFAULT 0, featured INTEGER NOT NULL DEFAULT 0, "
+            "attention TEXT NOT NULL DEFAULT 'normal', interpreted INTEGER NOT NULL DEFAULT 0, "
+            "published_at TEXT, search_text TEXT NOT NULL DEFAULT '', PRIMARY KEY(scan_id,change_id))"
+        )
+    ChangeLedger(path)
+    with sqlite3.connect(path) as db:
+        columns = {row[1] for row in db.execute("PRAGMA table_info(scan_intelligence)")}
+        version = db.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[
+            0
+        ]
+    assert "corpus_role" in columns
+    assert version == "8"
+
+
+def test_large_shallow_batch_splits_without_losing_full_corpus(tmp_path: Path, project_root: Path):
+    engine, kwargs, calls, _, *_ = setup_engine(tmp_path, project_root, 12, "large_batch")
+    report = asyncio.run(engine.run(**kwargs))
+    assert report.status == "complete"
+    assert report.counts["interpreted"] == 12
+    shallow_calls = [call for call in calls if call.output_schema == InsightBatch.__name__]
+    assert any(len(call.input_payload["changes"]) == 12 for call in shallow_calls)
+    assert any(len(call.input_payload["changes"]) <= 3 for call in shallow_calls)
+    assert len(calls[-1].input_payload["corpus"]) == 12
+
+
+def test_direction_evidence_posture_and_source_authority_are_deterministic(tmp_path: Path):
+    from signal_harness.intelligence.contracts import DirectionCandidate, ShallowInsight
+    from signal_harness.intelligence.corpus import finalize_direction, project_change
+
+    ledger = ChangeLedger(tmp_path / "ledger.sqlite3")
+    issue_a = SignalEvent(
+        event_id="issue-a",
+        source_type="github_issue",
+        source_name="org/repo-a",
+        title="Streaming parse problem",
+        content="Reporter describes a streaming failure.",
+        url="https://github.com/org/repo-a/issues/1",
+        collected_at=NOW,
+        published_at=NOW,
+        raw_payload={"author_association": "NONE"},
+    )
+    issue_b = SignalEvent(
+        event_id="issue-b",
+        source_type="github_issue",
+        source_name="org/repo-b",
+        title="Related stream problem",
+        content="Another project reports a streaming failure.",
+        url="https://github.com/org/repo-b/issues/2",
+        collected_at=NOW,
+        published_at=NOW,
+        raw_payload={"author_association": "MEMBER"},
+    )
+    events = [issue_a, issue_b]
+    digests = assemble_changes(events, ledger.persist_observations(events))
+    assert {d.evidence[0].authority for d in digests} == {"community", "maintainer"}
+    products = {}
+    for digest in digests:
+        insight = ShallowInsight(
+            change_id=digest.change_id,
+            summary="两个项目都报告了流式解析问题。",
+            what_changed="公开 Issue 描述了流式解析失败。",
+            project_relation="context",
+            relation_reason="项目包含流式处理，需要关注上游问题信号。",
+            attention="watch",
+            topics=["流式解析"],
+            evidence_ids=[digest.evidence[0].evidence_id],
+        )
+        products[digest.change_id] = project_change(digest, insight, {})
+    candidate = DirectionCandidate(
+        topic_key="streaming-reports",
+        title="多个项目报告流式解析问题",
+        explanation="两个独立项目的 Issue 都描述了流式解析异常。",
+        supporting_change_ids=list(products),
+    )
+    direction = finalize_direction(
+        candidate,
+        changes=products,
+        project_id="demo",
+        scan_id="scan",
+        previous=None,
+        window={"from": None, "to": NOW.isoformat()},
+        coverage="complete",
+        sources=[],
+    )
+    assert direction.evidence_posture == "reported_issue"
+    assert direction.independent_source_count == 2
+    assert direction.authoritative_source_count == 1
+
+
+def test_official_rss_authority_uses_deterministic_source_quality(tmp_path: Path):
+    ledger = ChangeLedger(tmp_path / "ledger.sqlite3")
+    event = SignalEvent(
+        event_id="official-news",
+        source_type="rss",
+        source_name="Official News",
+        title="New release announced",
+        content="The official feed announces a release.",
+        url="https://example.com/release",
+        collected_at=NOW,
+        published_at=NOW,
+        raw_payload={"official": True},
+    )
+    digest = assemble_changes([event], ledger.persist_observations([event]))[0]
+    assert digest.evidence[0].authority == "official"

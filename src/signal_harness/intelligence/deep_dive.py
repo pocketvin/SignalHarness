@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from signal_harness.intelligence.contracts import INTELLIGENCE_VERSION, DeepDiveOutput
+from signal_harness.intelligence.contracts import DEEP_DIVE_VERSION, DeepDiveOutput
 from signal_harness.intelligence.corpus import identity
 from signal_harness.intelligence.engine import project_context
 from signal_harness.intelligence.model_calls import BoundedModelCaller
@@ -79,7 +79,7 @@ class DeepDiveManager:
                 project_id,
                 change["revision_id"],
                 frozen["profile_revision_id"],
-                INTELLIGENCE_VERSION,
+                DEEP_DIVE_VERSION,
                 policy.fingerprint("deep_dive"),
                 usage["fingerprint"],
                 int(time.time() // (6 * 3600)),

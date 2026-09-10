@@ -6,11 +6,18 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-INTELLIGENCE_VERSION = "environment-v1.1"
+INTELLIGENCE_VERSION = "environment-v1.5"
+CHANGE_INSIGHT_VERSION = "environment-v1.3"  # keep v1.3 shallow-cache identity stable
+SYNTHESIS_VERSION = "environment-synthesis-v1.5"
+DEEP_DIVE_VERSION = "environment-v1.3"  # deep-dive cache unchanged by report-only evolution
 
 
 class Contract(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+CorpusRole = Literal["external_environment", "project_activity"]
+EvidencePosture = Literal["reported_issue", "mixed", "observed_change"]
 
 
 class Evidence(Contract):
@@ -22,6 +29,7 @@ class Evidence(Contract):
     authority: str
     excerpt: str
     excerpt_truncated: bool = False
+    project_owned: bool = False
 
 
 class ChangeDigest(Contract):
@@ -32,6 +40,7 @@ class ChangeDigest(Contract):
     kind: str
     published_at: str | None
     current_version: str | None = None
+    corpus_role: CorpusRole = "external_environment"
     evidence: list[Evidence]
 
 
@@ -73,8 +82,6 @@ class SynthesisOutput(Contract):
 
     brief: list[GroundedClaim] = Field(default_factory=list, max_length=5)
     directions: list[DirectionCandidate] = Field(default_factory=list, max_length=6)
-    risks: list[GroundedClaim] = Field(default_factory=list, max_length=4)
-    opportunities: list[GroundedClaim] = Field(default_factory=list, max_length=4)
     featured_change_ids: list[str] = Field(default_factory=list, max_length=5)
 
 
@@ -89,6 +96,8 @@ class Direction(Contract):
     supporting_change_ids: list[str]
     contradicting_change_ids: list[str]
     independent_source_count: int
+    authoritative_source_count: int = 0
+    evidence_posture: EvidencePosture = "observed_change"
     previous_support_count: int | None = None
     project_connection: str
     watch_next: list[str]
@@ -102,6 +111,7 @@ class ProductChange(Contract):
     entity: str
     kind: str
     published_at: str | None
+    corpus_role: CorpusRole = "external_environment"
     summary: str
     what_changed: str
     project_relation: Literal["direct", "context", "none", "unknown"]

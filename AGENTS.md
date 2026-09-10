@@ -43,6 +43,8 @@ npm --prefix frontend run build
 Rules:
 
 - New product scans must process every Change through bounded shallow batches, then ONE global model call. Never use Featured or Top-K as the global model's corpus.
+- Project-owned Changes are still shallowly interpreted but may only inform project-connection context; they must never support an external EnvironmentDirection/Brief/Featured item.
+- GitHub Issue/discussion evidence must retain a reported/discussed posture unless stronger release/official evidence independently establishes shipped behavior. Do not weaken Direction diversity/temporal/overlap guards merely to obtain a non-empty report.
 - No automatic evidence-heavy Deep Dive in Scan. Only explicit POST/click starts it; GET/hover do not. Deep Dive must not overwrite a Scan/Profile/Report snapshot.
 - Production provider/runtime modules must not import capability_eval or other eval implementations. Shared data contracts belong outside eval.
 - Model selection belongs to the backend task policy; do not add model/mock/score controls back to the normal Web UI.

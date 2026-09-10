@@ -116,13 +116,15 @@ function ChangeRow({
       <span
         className={`attention ${item.interpretation_status === "unavailable" ? "unknown" : item.attention}`}
       >
-        {item.interpretation_status === "unavailable"
-          ? "解释待完成"
-          : item.attention === "watch"
-            ? "值得关注"
-            : item.project_relation === "none"
-              ? "环境背景"
-              : "了解变化"}
+        {item.corpus_role === "project_activity"
+          ? "项目自身"
+          : item.interpretation_status === "unavailable"
+            ? "解释待完成"
+            : item.attention === "watch"
+              ? "值得关注"
+              : item.project_relation === "none"
+                ? "环境背景"
+                : "了解变化"}
       </span>
       <ChevronRight size={17} />
     </button>
@@ -138,10 +140,22 @@ function DirectionCard({
   return (
     <article className="direction-card">
       <div className="direction-top">
-        <span className={`state-tag ${item.state}`}>
-          {states[item.state] || "持续观察"}
+        <div className="direction-tags">
+          <span className={`state-tag ${item.state}`}>
+            {states[item.state] || "持续观察"}
+          </span>
+          <span className={`posture-tag ${item.evidence_posture}`}>
+            {item.evidence_posture === "reported_issue"
+              ? "问题 / 讨论信号"
+              : item.evidence_posture === "mixed"
+                ? "混合证据"
+                : "已观察变化"}
+          </span>
+        </div>
+        <span>
+          {item.supporting_change_ids.length} 个变化 ·{" "}
+          {item.independent_source_count} 个来源
         </span>
-        <span>{item.supporting_change_ids.length} 个独立变化</span>
       </div>
       <h3>{item.title}</h3>
       <p className="direction-explanation">{item.explanation}</p>
@@ -455,8 +469,20 @@ export default function Workspace() {
                 </span>
                 <p>
                   {report.counts.observations} 条观察，整理为{" "}
-                  <strong>{report.counts.changes}</strong> 个独立变化，其中{" "}
-                  <strong>{report.counts.relevant}</strong> 个与项目有关。
+                  <strong>
+                    {report.counts.external_changes ?? report.counts.changes}
+                  </strong>{" "}
+                  个外部环境变化，其中 <strong>{report.counts.relevant}</strong>{" "}
+                  个与项目有关。
+                  {(report.counts.project_activity ?? 0) > 0 && (
+                    <>
+                      {" "}
+                      另参考 <strong>
+                        {report.counts.project_activity}
+                      </strong>{" "}
+                      个项目自身变化。
+                    </>
+                  )}
                 </p>
               </div>
               <label>
@@ -477,6 +503,13 @@ export default function Workspace() {
                 </select>
               </label>
             </div>
+            {!/^environment-v1\.[3-9]|^environment-v[2-9]/.test(
+              report.contract_version || "",
+            ) && (
+              <div className="notice">
+                这是旧分析规则生成的历史报告；方向可能尚未区分项目自身活动，也未应用当前的方向重叠与时间事实校验。
+              </div>
+            )}
             {report.notices.map((notice, i) => (
               <div className="notice" key={i}>
                 {notice}
@@ -487,7 +520,7 @@ export default function Workspace() {
                 <section className="directions-section">
                   <div className="section-heading">
                     <h2>本期值得关注的方向</h2>
-                    <span>由完整变化集综合形成</span>
+                    <span>只由外部环境变化形成；项目自身活动仅作关联背景</span>
                   </div>
                   {report.directions.length ? (
                     <div className="direction-grid">
@@ -505,12 +538,18 @@ export default function Workspace() {
                       <h3>
                         {report.status === "degraded"
                           ? "本期方向仍待形成"
-                          : "暂时没有足够证据支持新的方向"}
+                          : (report.counts.external_changes ??
+                                report.counts.changes) === 0
+                            ? "本期没有新的外部环境变化"
+                            : "暂时没有足够证据支持新的方向"}
                       </h3>
                       <p>
                         {report.status === "degraded"
                           ? "已取得的变化与证据仍保留在列表中，分析失败不代表没有重要变化。"
-                          : "这不等于没有变化。系统不会为了凑数，把零散消息写成趋势。"}
+                          : (report.counts.external_changes ??
+                                report.counts.changes) === 0
+                            ? "项目自身活动仍保留在单独列表，但不会被拿来制造外部趋势。"
+                            : "这不等于没有变化。系统不会为了凑数，把零散消息写成趋势。"}
                       </p>
                       <button
                         className="text-button"
@@ -537,38 +576,37 @@ export default function Workspace() {
                               {item.supporting_change_ids.length} 个变化
                             </summary>
                             <div>
-                              {item.supporting_change_ids.map((id) => (
-                                <button
-                                  key={id}
-                                  className="text-button"
-                                  onClick={() =>
-                                    void api
-                                      .change(sh.projectId, report.scan_id, id)
-                                      .then((item) => sh.openChange(item))
-                                      .catch((e) => sh.setError(e.message))
-                                  }
-                                >
-                                  查看并核实 {id.slice(-6)}
-                                </button>
-                              ))}
+                              {item.supporting_change_ids.map(
+                                (id, evidenceIndex) => (
+                                  <button
+                                    key={id}
+                                    className="text-button"
+                                    onClick={() =>
+                                      void api
+                                        .change(
+                                          sh.projectId,
+                                          report.scan_id,
+                                          id,
+                                        )
+                                        .then((item) => sh.openChange(item))
+                                        .catch((e) => sh.setError(e.message))
+                                    }
+                                  >
+                                    查看证据变化 {evidenceIndex + 1}
+                                  </button>
+                                ),
+                              )}
                             </div>
                           </details>
                         </div>
                       ))
                     ) : (
                       <p className="quiet-note">
-                        {report.counts.changes
+                        {(report.counts.external_changes ??
+                        report.counts.changes)
                           ? "全局综合未完成，暂不展示推测性总结。"
-                          : "本期已连接来源没有取得可整理的新变化。"}
+                          : "本期没有取得新的外部环境变化；项目自身活动不会替代环境总结。"}
                       </p>
-                    )}
-                    {!!report.risks.length && (
-                      <div className="brief-callout">
-                        <h3>注意风险</h3>
-                        {report.risks.map((item, i) => (
-                          <p key={i}>{item.text}</p>
-                        ))}
-                      </div>
                     )}
                     {!!report.opportunities.length && (
                       <div className="brief-callout opportunity">
@@ -664,6 +702,9 @@ export default function Workspace() {
                     {[
                       ["relevant", "与项目有关"],
                       ["all", "全部环境变化"],
+                      ...((report.counts.project_activity ?? 0) > 0
+                        ? [["activity", "项目自身"]]
+                        : []),
                       ["unavailable", "解释待完成"],
                     ].map(([value, label]) => (
                       <button
@@ -719,7 +760,7 @@ export default function Workspace() {
                   ))}
                   {sh.page && !sh.page.items.length && (
                     <p className="empty-list">
-                      当前范围内没有匹配的变化。可以切换到“全部环境变化”或修改搜索词。
+                      当前范围内没有匹配的变化。可以切换范围或修改搜索词。
                     </p>
                   )}
                 </div>

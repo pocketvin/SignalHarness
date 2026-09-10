@@ -154,7 +154,7 @@ def intelligence_router(
     async def changes(
         project_id: str,
         scan_id: str,
-        view: Literal["all", "relevant", "featured", "unavailable"] = "relevant",
+        view: Literal["all", "relevant", "featured", "activity", "unavailable"] = "relevant",
         query: str = Query(default="", max_length=400),
         offset: int = Query(default=0, ge=0),
         limit: int = Query(default=25, ge=1, le=100),

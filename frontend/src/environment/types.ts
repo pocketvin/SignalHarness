@@ -26,6 +26,7 @@ export interface Change {
   entity: string;
   kind: string;
   published_at: string | null;
+  corpus_role: "external_environment" | "project_activity";
   summary: string;
   what_changed: string;
   project_relation: string;
@@ -48,6 +49,8 @@ export interface Direction {
   supporting_change_ids: string[];
   contradicting_change_ids: string[];
   independent_source_count: number;
+  authoritative_source_count: number;
+  evidence_posture: "reported_issue" | "mixed" | "observed_change";
   project_connection: string;
   watch_next: string[];
   uncertainty: string;
@@ -64,6 +67,8 @@ export interface Source {
   output_count: number;
 }
 export interface Report {
+  contract_version: string;
+  data_origin?: "live" | "replay";
   report_id: string;
   scan_id: string;
   project_id: string;

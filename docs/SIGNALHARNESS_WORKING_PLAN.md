@@ -6,6 +6,21 @@
 
 This document records where construction should go next and how each phase should be verified. It is intentionally mutable. After every completed phase, update Current State, Retrospective, Acceptance evidence, and the next phase before continuing.
 
+## P0 SEMANTIC QUALITY CHECKPOINT — 2026-09-11
+
+**Implemented and structurally accepted on a saved-real-source replay; broader live semantic eval remains next.**
+
+- Added deterministic corpus role separation: 71 saved live observations → 67 Changes → 63 external environment + 4 project activity. All 67 were shallowly interpreted; project activity is excluded from Direction/Brief/Featured evidence.
+- Added structural semantic quality gate for Direction source/entity diversity, pairwise evidence overlap, temporal claims, unverified trend-velocity wording, external-only evidence and internal product-copy leakage.
+- Added deterministic evidence posture (`reported_issue / mixed / observed_change`) and real source counts to Direction; GitHub Issue clusters are surfaced as problem/discussion signals rather than shipped facts.
+- Removed standalone model-generated Risk/Opportunity sections from the V1 synthesis schema; `watch_next` owns bounded forward-looking guidance.
+- Separated shallow-cache, synthesis and deep-dive versions. Direction-only changes reuse ChangeInsights. Default shallow batch is 12 with deterministic split-on-failure instead of dropping a failed large batch or reverting to Top-K.
+- Real cached v1.5 global synthesis: first DeepSeek output rejected for `temporal_window_mismatch`; targeted retry passed. Final output has 5 Directions, 5 Featured, 48 Relevant and zero automatic Deep Dives. Pairwise Direction evidence overlap = 0; no project-owned support/internal copy leak/bad same-day claim in deterministic audit.
+- Import-cycle audit remains at 0 strongly connected components. Do not perform cosmetic large-file refactors while semantic behavior is still being calibrated.
+- Full verification after this checkpoint: 420 Python tests passed; Ruff, mypy (133 source files), TypeScript/Vite, wheel/sdist, and isolated legacy scan/trace/calibrate all passed. Browser acceptance also passed the v1.5 evidence-posture/project-activity views at desktop/mobile widths.
+
+**Next accepted scope:** run a genuinely fresh live-source scan, freeze a broader 100–500 Change corpus, and establish a small human-labelled Direction eval for precision/coverage/non-duplication before adding semantic de-duplication or deeper code reachability. No new Agent/framework is justified by this checkpoint.
+
 ## P0 IMPLEMENTATION CHECKPOINT — 2026-09-11
 
 **Implemented: first end-to-end direction-first product slice, not final V1 acceptance.**

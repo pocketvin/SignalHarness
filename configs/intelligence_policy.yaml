@@ -1,16 +1,17 @@
 # Server-only task routing. No provider/model selector in the product UI.
-version: environment-model-policy-v1
-batch_size: 20
-batch_input_bytes: 60000
+version: environment-model-policy-v2
+batch_size: 12
+batch_input_bytes: 42000
 global_input_bytes: 700000
 max_provider_attempts: 2
+retry_split_min_batch: 4
 models:
   qwen: qwen-plus
   kimi: kimi-k3
   deepseek: deepseek-v4-pro
 shallow:
   providers: [qwen, kimi, deepseek]
-  timeout_seconds: 100
+  timeout_seconds: 75
   max_output_tokens: 8192
 synthesis:
   providers: [deepseek, kimi, qwen]

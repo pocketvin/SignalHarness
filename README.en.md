@@ -10,6 +10,8 @@ SignalHarness watches project-local Git, GitHub, the PyPI package registry, OSV 
 
 The normal `/demo` Web surface now uses the `/intelligence/*` contract: full-corpus batched shallow interpretation → ONE global synthesis → versioned Directions/brief/Featured ≤5. Deep Dive begins only after an explicit Change click/POST. Model routing is server-owned in `configs/intelligence_policy.yaml`; normal UI has no model, mock, or numeric-score controls.
 
+The current report separates external-environment Changes from project-owned activity. Project activity may explain relevance but cannot establish an external Direction. Directions also carry a deterministic evidence posture so issue/discussion signals are not presented as shipped behavior.
+
 Use `signal-harness environment --project signalharness --window since_last` for the new product flow, and `signal-harness environment-report --project signalharness` for no-model readback. Existing `scan` and MCP tools remain protected compatibility paths. See [implementation scope and honest acceptance boundaries](docs/ENVIRONMENT_INTELLIGENCE_V1.md).
 
 The older architecture sections below describe that compatibility baseline, not the new Web workflow.

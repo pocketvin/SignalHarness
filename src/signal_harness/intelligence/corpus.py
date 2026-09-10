@@ -7,17 +7,18 @@ import json
 import re
 from datetime import datetime
 from typing import Any
-from urllib.parse import urlsplit
 
 from signal_harness.intelligence.contracts import (
     ChangeDigest,
     Direction,
     DirectionCandidate,
     Evidence,
+    EvidencePosture,
     ProductChange,
     ShallowInsight,
 )
 from signal_harness.signal.schemas import SignalEvent
+from signal_harness.signal.source_authority import event_source_quality
 from signal_harness.signal.source_identity import release_package_identity
 from signal_harness.tools.web_snapshot import normalize_web_text
 
@@ -53,7 +54,7 @@ def assemble_changes(
         evidence: list[Evidence] = []
         for event, revision in sorted(rows, key=lambda row: row[1]):
             text = normalize_web_text(event.content or event.title)
-            authority = str(event.raw_payload.get("source_authority") or "unverified")
+            authority = event_source_quality(event).value
             evidence.append(
                 Evidence(
                     evidence_id=f"evr-{revision}",
@@ -64,6 +65,7 @@ def assemble_changes(
                     authority=authority,
                     excerpt=text[:1800],
                     excerpt_truncated=len(text) > 1800,
+                    project_owned=bool(event.raw_payload.get("project_owned", False)),
                 )
             )
         # Prefer original/maintainer evidence for presentation, without throwing other sources away.
@@ -84,6 +86,11 @@ def assemble_changes(
                 kind=primary.source_type,
                 published_at=primary.published_at.isoformat() if primary.published_at else None,
                 current_version=primary.current_version,
+                corpus_role=(
+                    "project_activity"
+                    if any(bool(event.raw_payload.get("project_owned", False)) for event, _ in rows)
+                    else "external_environment"
+                ),
                 evidence=evidence,
             )
         )
@@ -155,8 +162,11 @@ def project_change(
         else "watch"
         if explicit_interest
         else insight.attention,
-        relevant=not ignored
-        and (explicit_interest or insight.project_relation in {"direct", "context"}),
+        relevant=(
+            digest.corpus_role == "external_environment"
+            and not ignored
+            and (explicit_interest or insight.project_relation in {"direct", "context"})
+        ),
         interpretation_status="ready",
     )
 
@@ -170,6 +180,7 @@ def corpus_payload(changes: list[ProductChange]) -> list[dict[str, Any]]:
             "entity": item.entity,
             "kind": item.kind,
             "published_at": item.published_at,
+            "corpus_role": item.corpus_role,
             "summary": item.summary,
             "what_changed": item.what_changed,
             "topics": item.topics,
@@ -201,6 +212,8 @@ def finalize_direction(
     contradictions = list(dict.fromkeys(candidate.contradicting_change_ids))
     if len(supports) < 2 or not set(supports + contradictions) <= changes.keys():
         raise ValueError("Direction must cite at least two distinct existing Changes")
+    if any(changes[change_id].corpus_role != "external_environment" for change_id in supports):
+        raise ValueError("Project activity cannot establish an external EnvironmentDirection")
     if set(supports) & set(contradictions):
         raise ValueError("Direction support and contradiction sets overlap")
     prior: dict[str, Any] | None = None
@@ -266,12 +279,25 @@ def finalize_direction(
         or any(changes[c].interpretation_status != "ready" for c in supports)
     ):
         state, reason = "uncertain", "存在反向证据、解释缺失或来源覆盖缺口，暂不判定增强或减弱。"
-    source_domains = {
-        urlsplit(e.url).hostname or e.source_name
+    source_identities = {
+        (e.source_type.casefold(), e.source_name.casefold())
+        for change_id in supports
+        for e in changes[change_id].evidence
+    }
+    authoritative_source_identities = {
+        (e.source_type.casefold(), e.source_name.casefold())
         for change_id in supports
         for e in changes[change_id].evidence
         if e.authority in {"official", "maintainer"}
     }
+    support_kinds = {changes[change_id].kind for change_id in supports}
+    evidence_posture: EvidencePosture = (
+        "reported_issue"
+        if support_kinds == {"github_issue"}
+        else "mixed"
+        if "github_issue" in support_kinds
+        else "observed_change"
+    )
     return Direction(
         direction_id=direction_id,
         revision_id=identity("dr-", [scan_id, direction_id, supports]),
@@ -282,7 +308,9 @@ def finalize_direction(
         state_reason=reason,
         supporting_change_ids=supports,
         contradicting_change_ids=contradictions,
-        independent_source_count=len(source_domains),
+        independent_source_count=len(source_identities),
+        authoritative_source_count=len(authoritative_source_identities),
+        evidence_posture=evidence_posture,
         previous_support_count=old_count,
         project_connection=candidate.project_connection,
         watch_next=candidate.watch_next,

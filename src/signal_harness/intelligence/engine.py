@@ -7,6 +7,7 @@ from collections.abc import Callable
 from typing import Any
 
 from signal_harness.intelligence.contracts import (
+    CHANGE_INSIGHT_VERSION,
     INTELLIGENCE_VERSION,
     ChangeDigest,
     EnvironmentReport,
@@ -24,27 +25,53 @@ from signal_harness.intelligence.corpus import (
     project_change,
 )
 from signal_harness.intelligence.model_calls import BoundedModelCaller
+from signal_harness.intelligence.quality import validate_synthesis_semantics
 from signal_harness.persistence.intelligence import IntelligenceRepository, utc_now
 
 ProgressListener = Callable[[Progress], None]
 
 
 def project_context(profile: dict[str, Any]) -> dict[str, Any]:
-    allowed = (
-        "project_name",
-        "purpose",
-        "goal",
-        "tech_stack",
-        "runtimes",
-        "dependencies",
-        "providers",
-        "protocols",
-        "critical_modules",
-        "monitored_ecosystem",
-        "importance_preferences",
-        "unknowns",
-    )
-    return {key: profile[key] for key in allowed if key in profile}
+    """Expose project meaning to models without leaking backend field vocabulary into prose."""
+    importance_labels = {
+        "critical": "重点关注",
+        "important": "重要",
+        "normal": "正常",
+        "low": "降低关注",
+        "ignore": "忽略",
+    }
+    scope_labels = {
+        "dependency": "依赖",
+        "provider": "外部服务",
+        "runtime": "运行环境",
+        "protocol": "协议",
+        "module": "模块",
+        "ecosystem": "生态",
+        "source": "来源",
+        "category": "类别",
+        "topic": "主题",
+    }
+    preferences = [
+        {
+            "对象类型": scope_labels.get(str(item.get("scope_type")), "主题"),
+            "对象": str(item.get("scope_key") or ""),
+            "关注程度": importance_labels.get(str(item.get("importance")), "正常"),
+        }
+        for item in profile.get("importance_preferences", [])
+        if item.get("scope_key")
+    ]
+    return {
+        "项目名称": profile.get("project_name"),
+        "用途": profile.get("purpose") or profile.get("goal"),
+        "主要技术": profile.get("tech_stack", []),
+        "运行环境": profile.get("runtimes", []),
+        "使用的依赖": profile.get("dependencies", []),
+        "外部服务": profile.get("providers", []),
+        "协议": profile.get("protocols", []),
+        "重点模块": profile.get("critical_modules", []),
+        "关注生态": profile.get("monitored_ecosystem", []),
+        "用户明确关注": preferences,
+    }
 
 
 class EnvironmentEngine:
@@ -85,19 +112,31 @@ class EnvironmentEngine:
             return EnvironmentReport.model_validate(existing)
         self.repository.freeze(scan_id, digests)
         changes, cache_hits = await self._interpret(scan_id, profile_revision_id, profile, digests)
-        previous = self.repository.latest_report(project_id, before=window.get("from"))
+        previous = (
+            self.repository.latest_report(project_id, before=str(window["from"]))
+            if window.get("from")
+            else None
+        )
+        external_changes = [item for item in changes if item.corpus_role == "external_environment"]
+        project_activity = [item for item in changes if item.corpus_role == "project_activity"]
         payload = {
             "window": window,
             "project": project_context(profile),
             "coverage_status": coverage_status,
             "sources": sources,
-            "corpus": corpus_payload(changes),
+            "corpus": corpus_payload(external_changes),
+            "project_activity": corpus_payload(project_activity),
             "previous_report": {
                 key: previous[key] for key in ("window", "directions", "coverage_status")
             }
             if previous
             else None,
-            "manifest": {"all_change_ids": [c.change_id for c in changes], "count": len(changes)},
+            "manifest": {
+                "external_change_ids": [c.change_id for c in external_changes],
+                "project_activity_ids": [c.change_id for c in project_activity],
+                "external_count": len(external_changes),
+                "project_activity_count": len(project_activity),
+            },
         }
         by_id = {item.change_id: item for item in changes}
         notices: list[str] = []
@@ -115,21 +154,15 @@ class EnvironmentEngine:
         self.progress("forming_directions", "正在把全部变化综合为本期方向", 0, len(changes))
         directions = []
         synthesis = SynthesisOutput()
-        synthesis_ok = not changes
-        if changes:
+        synthesis_ok = not external_changes
+        if external_changes:
             try:
                 encoded_size = len(json.dumps(payload, ensure_ascii=False).encode())
                 if encoded_size > self.caller.policy.global_input_bytes:
                     raise ValueError("global_context_budget_exceeded")
 
                 def validate(output: SynthesisOutput) -> None:
-                    if not output.brief:
-                        raise ValueError("Nonempty corpus requires a grounded brief")
-                    for claim in [*output.brief, *output.risks, *output.opportunities]:
-                        if not set(claim.supporting_change_ids) <= by_id.keys():
-                            raise ValueError("Report cites unknown Change IDs")
-                    if not set(output.featured_change_ids) <= by_id.keys():
-                        raise ValueError("Featured references unknown Changes")
+                    validate_synthesis_semantics(output, by_id)
                     seen: set[str] = set()
                     for candidate in output.directions:
                         direction = finalize_direction(
@@ -171,7 +204,11 @@ class EnvironmentEngine:
         featured: list[ProductChange] = []
         for change_id in dict.fromkeys(synthesis.featured_change_ids):
             item = by_id[change_id]
-            if item.relevant and item.interpretation_status == "ready":
+            if (
+                item.corpus_role == "external_environment"
+                and item.relevant
+                and item.interpretation_status == "ready"
+            ):
                 featured.append(item.model_copy(update={"featured": True}))
         # Featured is presentation only. No deep-dive job is ever created here.
         for item in featured:
@@ -189,6 +226,8 @@ class EnvironmentEngine:
             counts={
                 "observations": observed_count,
                 "changes": len(changes),
+                "external_changes": len(external_changes),
+                "project_activity": len(project_activity),
                 "interpreted": len(changes) - failed,
                 "unavailable": failed,
                 "relevant": sum(c.relevant for c in changes),
@@ -199,8 +238,8 @@ class EnvironmentEngine:
             },
             brief=synthesis.brief,
             directions=directions,
-            risks=synthesis.risks,
-            opportunities=synthesis.opportunities,
+            risks=[],
+            opportunities=[],
             featured=featured,
             notices=notices,
             sources=sources,
@@ -240,7 +279,7 @@ class EnvironmentEngine:
                 [
                     d.revision_id,
                     profile_revision_id,
-                    INTELLIGENCE_VERSION,
+                    CHANGE_INSIGHT_VERSION,
                     self.caller.policy.fingerprint("shallow"),
                 ],
             )
@@ -260,7 +299,8 @@ class EnvironmentEngine:
             pending.append(digest)
         hits = len(products)
         self.progress("interpreting_changes", "正在逐批理解每一个变化", hits, len(digests))
-        for batch in self._batches(pending):
+
+        async def interpret_batch(batch: list[ChangeDigest]) -> None:
             expected = {d.change_id for d in batch}
             digest_by_id = {d.change_id: d for d in batch}
             validated_products: dict[str, ProductChange] = {}
@@ -279,7 +319,6 @@ class EnvironmentEngine:
                     "shallow",
                     {
                         "project": project_context(profile),
-                        "profile_revision_id": profile_revision_id,
                         "changes": [compact_digest(d) for d in batch],
                     },
                     InsightBatch,
@@ -297,6 +336,14 @@ class EnvironmentEngine:
                     )
                     self.repository.save_insight(scan_id, item)
             except (RuntimeError, ValueError):
+                # Large structured batches can fail even when smaller subsets are healthy.
+                # Split deterministically; never drop to Top-K and never recurse to one call/item
+                # unless the original failing batch is already very small.
+                if len(batch) > self.caller.policy.retry_split_min_batch:
+                    middle = len(batch) // 2
+                    await interpret_batch(batch[:middle])
+                    await interpret_batch(batch[middle:])
+                    return
                 for digest in batch:
                     item = project_change(digest, None, profile)
                     products[digest.change_id] = item
@@ -304,6 +351,9 @@ class EnvironmentEngine:
             self.progress(
                 "interpreting_changes", "正在逐批理解每一个变化", len(products), len(digests)
             )
+
+        for batch in self._batches(pending):
+            await interpret_batch(batch)
         return [products[d.change_id] for d in digests], hits
 
     def _batches(self, digests: list[ChangeDigest]) -> list[list[ChangeDigest]]:
