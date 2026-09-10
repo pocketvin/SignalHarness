@@ -16,6 +16,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from signal_harness.intelligence.deep_dive import DeepDiveManager
+from signal_harness.service_intelligence import intelligence_router
 from signal_harness.agent_integration.mode import RunMode
 from signal_harness.calibration import build_calibration_dataset, evaluate_calibration_replay
 from signal_harness.capability_eval import load_capability_suite
@@ -364,6 +366,7 @@ def create_app(
         output_dir=paths.output_dir,
         state_dir=paths.state_dir,
     )
+    deep_dives = DeepDiveManager(paths.config_dir, paths.state_dir)
     schedules = ScheduleManager(
         stream_manager=streams,
         config_dir=paths.config_dir,
@@ -381,11 +384,13 @@ def create_app(
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         del app
         async with mcp.session_manager.run():
+            await deep_dives.startup()
             await streams.recover_pending()
             await schedules.start()
             try:
                 yield
             finally:
+                await deep_dives.shutdown()
                 await schedules.shutdown()
                 await streams.shutdown()
 
@@ -395,6 +400,8 @@ def create_app(
         description="Local API for bounded SignalHarness runs, trace, signals, and feedback.",
         lifespan=lifespan,
     )
+    app.include_router(intelligence_router(config_dir=paths.config_dir, streams=streams, deep_dives=deep_dives, schedules=schedules))
+    app.state.deep_dive_manager = deep_dives
     app.state.stream_manager = streams
     app.state.schedule_manager = schedules
 

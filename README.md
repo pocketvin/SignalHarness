@@ -6,7 +6,25 @@
 
 SignalHarness 会实时监听项目本地 Git、GitHub、PyPI package registry、OSV 安全公告、RSS 与配置化网页快照等工程信号；它判断这些变化是否真正影响当前选择的项目，并把结果转成**可解释、可审计、可回归验证**的决策，而不是再做一个信息聚合器或聊天机器人。
 
-## 30 秒看懂这个项目
+## 当前产品主线：方向优先，按需核实
+
+正常网页已经改为 **环境方向 → 整体报告 → 建议先看的变化 → 全部相关变化**。扫描时先整理去重，再为全部 Change 分批浅分析，最后让强模型一次综合完整语料；不再自动深挖 Top 12。
+
+用户明确点击某条变化，才创建独立、可缓存的 Deep Dive。前端不选择分析模型，不显示分数、mock 模式或原始 Trace 控制台。服务端模型策略位于 `configs/intelligence_policy.yaml`。
+
+```bash
+cd /Users/yu0/Workspace/10-Projects/SignalHarness
+uv run signal-harness environment --project signalharness --window since_last
+uv run signal-harness environment-report --project signalharness
+uv run signal-harness serve --host 127.0.0.1 --port 8001
+# Web: /demo
+```
+
+本轮的实际实现、验收证据和未完成边界见 [环境情报 V1 实现说明](docs/ENVIRONMENT_INTELLIGENCE_V1.md)。300 条全量测试是数据流测试；真实接口另用保存的来源小样本回放验收，不能混同为完整真实环境质量评估。
+
+以下既有 Agent/Harness、评测和 MCP 说明保留为 **兼容/回归链路的历史说明**；默认 `scan` 与旧 MCP 还没有被悄悄改成新产品流程。新主入口是 `environment` 与 `/intelligence/*`。
+
+## 30 秒看懂既有 Agent 基线
 
 普通爬虫擅长“收集”，普通 Dashboard 擅长“展示”，普通 LLM 擅长“推理”，但真实 Agent 系统还需要回答：
 

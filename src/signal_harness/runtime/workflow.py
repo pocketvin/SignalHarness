@@ -11,6 +11,11 @@ from pathlib import Path
 from typing import Any, Literal, cast
 from uuid import uuid4
 
+from signal_harness.intelligence.contracts import Progress
+from signal_harness.intelligence.corpus import source_revision_events
+from signal_harness.intelligence.engine import ProgressListener
+from signal_harness.intelligence.model_calls import BoundedModelCaller
+from signal_harness.runtime.environment_scan import complete_environment_scan
 from signal_harness.utils.fs import atomic_write_text
 from signal_harness.agent_integration.harness import (
     HarnessVariant,
@@ -24,6 +29,7 @@ from signal_harness.alerts import AlertPolicy, write_alert_outputs
 from signal_harness.agents import SupervisorAgent
 from signal_harness.memory import MemoryBundle
 from signal_harness.persistence import ChangeLedger
+from signal_harness.persistence.intelligence import IntelligenceRepository
 from signal_harness.providers.adapter import AgentProvider
 from signal_harness.providers.factory import provider_from_env
 from signal_harness.providers.mock_provider import MockProvider
@@ -126,7 +132,13 @@ class SignalHarnessWorkflow:
         project_id: str | None = None,
         harness_variant: HarnessVariant | str | None = None,
         offline_fixture_source_tools: bool = False,
+        intelligence_pipeline: bool = False,
+        progress_listener: ProgressListener | None = None,
+        environment_caller: BoundedModelCaller | None = None,
     ) -> None:
+        self.intelligence_pipeline = intelligence_pipeline
+        self.progress_listener = progress_listener
+        self.environment_caller = environment_caller
         self.cwd = Path(cwd).expanduser().resolve()
         self.config_dir = resolve_config_dir(self.cwd, config_dir or "configs")
         self.project_profile_path = self._resolve(
@@ -182,6 +194,7 @@ class SignalHarnessWorkflow:
         until: datetime | None = None,
         consumer_id: str = "local-owner",
         interactive: bool = True,
+        frozen_window: ResolvedScanWindow | None = None,
     ) -> ScanResult:
         if max_events is not None and max_events < 1:
             raise ValueError("max_events must be a positive integer")
@@ -189,7 +202,31 @@ class SignalHarnessWorkflow:
             raise ValueError("max_events_per_source must be a positive integer")
         run_id = f"run-{uuid4().hex[:12]}"
         active_scan_id = scan_id or f"scan-{uuid4().hex[:12]}"
-        window = resolve_scan_window(
+        if self.intelligence_pipeline and scan_id:
+            saved_repository = IntelligenceRepository(self.ledger.path)
+            saved = saved_repository.report(scan_id)
+            if saved:
+                if saved["project_id"] != self.project_id:
+                    raise ValueError("Saved report does not belong to this project")
+                raw_window = saved["window"]
+                restored_window = ResolvedScanWindow(
+                    mode=cast(WindowMode, raw_window["mode"]),
+                    lower=datetime.fromisoformat(raw_window["from"]) if raw_window.get("from") else None,
+                    upper=datetime.fromisoformat(raw_window["to"]),
+                    first_use=bool(raw_window.get("first_use")),
+                    checkpoint_eligible=bool(raw_window.get("checkpoint_eligible")),
+                )
+                self.ledger.complete_scan(scan_id=scan_id, analyzed_count=0,
+                                          relevant_count=saved["counts"]["relevant"], coverage_status=saved["coverage_status"])
+                if self.progress_listener:
+                    self.progress_listener(Progress(stage="complete", message="已恢复保存的环境报告，没有重复调用模型", status="complete" if saved["status"] == "complete" else "degraded"))
+                return ScanResult(
+                    scan_id, restored_window, saved["coverage_status"], saved["counts"]["changes"],
+                    [SignalEvent.model_validate(item) for item in saved_repository.snapshot_events(scan_id)],
+                    [], self.output_dir, self.trace, [],
+                    [SourceTask.model_validate(item) for item in saved["sources"]],
+                )
+        window = frozen_window or resolve_scan_window(
             ledger=self.ledger,
             project_id=self.project_id,
             mode=window_mode,
@@ -213,6 +250,8 @@ class SignalHarnessWorkflow:
         guard = SignalPermissionGuard(policy)
         learning_observation: LearningPolicyOutput | None = None
 
+        if self.progress_listener:
+            self.progress_listener(Progress(stage="collecting_sources", message="正在检查已连接的环境来源"))
         with self.trace.step("collect_signals") as state:
             if fixture is not None:
                 guard.require("read_mock_web_change")
@@ -262,6 +301,8 @@ class SignalHarnessWorkflow:
                     f"Partial collection failure: {len(collection.failed_sources)} source(s)"
                 )
 
+        if self.progress_listener:
+            self.progress_listener(Progress(stage="organizing_changes", message=f"已获取 {len(raw_events)} 条观察，正在去重整理"))
         with self.trace.step("normalize", input_count=len(raw_events)) as state:
             events = [self._normalize_collected(item) for item in raw_events]
             state["output_count"] = len(events)
@@ -286,8 +327,12 @@ class SignalHarnessWorkflow:
             if dropped_window:
                 state["detail"] = f"Removed {dropped_window} event(s) outside frozen [L,U)."
 
+        duplicate_ids: list[str]
         with self.trace.step("deduplicate", input_count=len(events)) as state:
-            events, duplicate_ids = deduplicate_events(events)
+            if self.intelligence_pipeline:
+                events, duplicate_ids = source_revision_events(events), []
+            else:
+                events, duplicate_ids = deduplicate_events(events)
             events = annotate_release_lineage(events)
             state["output_count"] = len(events)
             if duplicate_ids:
@@ -311,6 +356,21 @@ class SignalHarnessWorkflow:
         )
         event_change_ids = self.ledger.persist_observations(all_events)
         all_change_count = len({change_id for change_id, _ in event_change_ids.values()})
+
+        if self.intelligence_pipeline:
+            coverage = self._coverage_status(collection.source_tasks, collection.failed_sources)
+            await complete_environment_scan(
+                ledger=self.ledger, config_dir=self.config_dir, state_dir=self.state_dir,
+                output_dir=self.output_dir, project_id=self.project_id, scan_id=active_scan_id,
+                window=window, profile_revision=profile_revision, policy=policy, events=all_events,
+                event_change_ids=event_change_ids, observed_count=len(raw_events),
+                source_tasks=collection.source_tasks, coverage_status=coverage,
+                checkpoint_safe=self._checkpoint_safe(collection.source_tasks, collection.failed_sources),
+                interactive=interactive, fixture=fixture is not None, consumer_id=consumer_id,
+                trace=self.trace, listener=self.progress_listener, caller=self.environment_caller,
+            )
+            return ScanResult(active_scan_id, window, coverage, all_change_count, all_events, [],
+                              self.output_dir, self.trace, collection.failed_sources, collection.source_tasks)
 
         signal_memory_path = self.state_dir / "signal_memory.json"
         feedback_path = self.state_dir / "feedback_memory.json"

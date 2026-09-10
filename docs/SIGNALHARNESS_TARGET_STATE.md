@@ -40,7 +40,7 @@ Connect project
 
 The primary result page should show, in this order:
 
-1. A visible summary of how SignalHarness currently understands the project.
+1. A compact project identity and period selector, with project understanding in its own Settings view.
 2. The **current EnvironmentDirections**: what patterns are forming, strengthening, weakening, or newly appearing, with supporting Changes and practical watch points.
 3. A natural Chinese overall environment report synthesized from the full frozen period corpus.
 4. A **Featured 5** set of Changes worth reading first. Featured is a presentation projection only; it does not automatically receive expensive deep analysis.
@@ -132,7 +132,8 @@ L0  deterministic identity / revision / aggregation / source authority
  ↓
 L1  batched ChangeInterpreter over the full Change corpus
  ↓
-L2  EnvironmentDirectionSynthesizer + ReportComposer over the full shallow corpus
+L2  ONE EnvironmentSynthesizer call over the full shallow corpus
+    returns Directions + overall brief + risks/opportunities + Featured IDs
  ↓
      Relevant view + Featured 5 presentation
 
@@ -144,6 +145,8 @@ L3  DeepDiveAnalyzer
      ├─ Impact + verification/action reasoning
      └─ optional SelectiveVerifier only when uncertainty warrants it
 ```
+
+V1 deliberately combines Direction synthesis and report composition in one structured model call. No separate Narrative Agent or model-selecting frontend is required. Task/model routing is server-owned in `configs/intelligence_policy.yaml`.
 
 The names above describe responsibilities, not a requirement that each box be a separately autonomous Agent. Prefer ordinary functions/services and bounded model calls when autonomy adds no value. There is no scan-time Supervisor LLM deciding which Agent runs next. The deterministic runtime owns stage order, batching, budgets, persistence, permissions, retries, and cache validity.
 
@@ -157,6 +160,8 @@ The current five-Agent implementation remains a regression baseline during migra
 - `ProjectNarrativeAgent`: replace its scan-time product role with full-corpus EnvironmentDirection synthesis and report composition; it must not summarize only a Featured subset.
 
 The cheap ChangeInterpreter must be batch-friendly and schema-bounded so 100–500 Changes can be processed predictably. “Every Change receives shallow interpretation” does **not** mean one provider call per Change: compact multiple ChangeDigests into bounded batches, preserve `change_id` identity in every output row, retry/repair by failed batch or failed item, and persist results independently. It may output a short display summary and lightweight relevance/attention classification, but it may not fabricate source evidence, code reachability, exact affected modules, or detailed remediation. Those claims belong to Deep Dive after evidence is actually resolved.
+
+Current implementation and deliberate limits are documented in `docs/ENVIRONMENT_INTELLIGENCE_V1.md`; the target below must not be read as a claim that every capability is implemented.
 
 EnvironmentDirection synthesis should normally receive the **entire compact ChangeInsight corpus for the Scan** so the model can connect weak signals across batches. If the corpus exceeds the selected model's safe context/budget, use an explicit hierarchical reduction whose intermediate summaries retain supporting Change IDs; never silently truncate to Featured or Top-K.
 

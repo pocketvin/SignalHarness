@@ -6,6 +6,14 @@
 
 SignalHarness watches project-local Git, GitHub, the PyPI package registry, OSV advisories matched to resolved dependency versions, RSS, and configured public-page snapshots, decides whether those changes matter to a project, and turns them into durable, auditable project intelligence instead of another noisy feed. Multi-agent orchestration, single-agent analysis, rules, search, and scoring are implementation techniques rather than the product identity. Real `agent` scans now default to the adaptive two-call Analyzer; the five-Agent path remains a protected evaluation/rollback baseline and is still the default for `mock-agent`.
 
+## Direction-first product path (2026-09-11)
+
+The normal `/demo` Web surface now uses the `/intelligence/*` contract: full-corpus batched shallow interpretation → ONE global synthesis → versioned Directions/brief/Featured ≤5. Deep Dive begins only after an explicit Change click/POST. Model routing is server-owned in `configs/intelligence_policy.yaml`; normal UI has no model, mock, or numeric-score controls.
+
+Use `signal-harness environment --project signalharness --window since_last` for the new product flow, and `signal-harness environment-report --project signalharness` for no-model readback. Existing `scan` and MCP tools remain protected compatibility paths. See [implementation scope and honest acceptance boundaries](docs/ENVIRONMENT_INTELLIGENCE_V1.md).
+
+The older architecture sections below describe that compatibility baseline, not the new Web workflow.
+
 ## At a glance
 
 | Area | What is implemented |

@@ -25,11 +25,11 @@ from signal_harness.agent_integration.mode import RunMode
 from signal_harness.agent_integration.prompts import PROMPT_VERSION, build_agent_call
 from signal_harness.agent_integration.runner import AgentLoopLimits
 from signal_harness.agent_integration.schemas import (
-    ActionItem,
     ActionOutput,
+    SharedEvidenceSingleItem,
+    SharedEvidenceSingleOutput,
     ContextEvidenceItem,
     ContextEvidenceOutput,
-    ImpactItem,
     ImpactOutput,
     ProjectNarrativeOutput,
     SupervisorOutput,
@@ -354,26 +354,6 @@ class CapabilitySuite(BaseModel):
         if len(ids) != len(set(ids)):
             raise ValueError("capability case ids must be unique")
         return cases
-
-
-class SharedEvidenceSingleItem(BaseModel):
-    """One-pass semantic baseline result over the exact shared evidence packet."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    event_id: str
-    impact: ImpactItem
-    action: ActionItem
-    what_changed_zh: str = Field(min_length=1)
-    why_relevant_zh: str = Field(min_length=1)
-    recommended_actions_zh: list[str] = Field(default_factory=list)
-
-
-class SharedEvidenceSingleOutput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    report_zh: str = Field(min_length=1)
-    results: list[SharedEvidenceSingleItem]
 
 
 class CapabilityCaseScore(BaseModel):

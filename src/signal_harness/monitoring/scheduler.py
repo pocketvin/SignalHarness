@@ -114,6 +114,7 @@ class ScheduleManager:
         max_events: int | None,
         max_events_per_source: int | None,
         now: datetime | None = None,
+        intelligence_pipeline: bool = False,
     ) -> dict[str, Any]:
         project_option(project_id, self.config_dir)
         current = _utc(now or datetime.now(timezone.utc))
@@ -134,6 +135,7 @@ class ScheduleManager:
             provider_id=provider_id,
             max_events=max_events,
             max_events_per_source=max_events_per_source,
+            intelligence_pipeline=intelligence_pipeline,
             next_run_at=next_run,
         )
 
@@ -228,6 +230,7 @@ class ScheduleManager:
                             if schedule.get("max_events_per_source") is not None
                             else None
                         ),
+                        intelligence_pipeline=bool(schedule.get("intelligence_pipeline", False)),
                         interactive=False,
                         consumer_id=f"schedule:{schedule['schedule_id']}",
                         schedule_id=str(schedule["schedule_id"]),
@@ -328,6 +331,10 @@ class ScheduleManager:
         window = payload.get("window") if isinstance(payload.get("window"), dict) else {}
         checkpoint = _optional_datetime(window.get("to")) if isinstance(window, dict) else None
         error = str(payload.get("error") or payload.get("error_class") or "")
+        if payload.get("intelligence_pipeline") and payload.get("intelligence_status") != "complete":
+            checkpoint = None
+            coverage = "partial"
+            error = error or "Environment interpretation incomplete; checkpoint retained."
         self.ledger(project.id).complete_schedule_run(
             project_id=project.id,
             schedule_id=str(schedule["schedule_id"]),

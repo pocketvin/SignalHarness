@@ -89,15 +89,14 @@ def test_demo_page_and_metadata(
         assert javascript.status_code == 200
         assert stylesheet.status_code == 200
         assert "EventSource" in javascript.text
-        assert "/stream-runs" in javascript.text
+        assert "/intelligence/projects/" in javascript.text
         assert "/projects/connect/github" in javascript.text
         assert "/preferences/natural-language" in javascript.text
-        assert "/product?top=12&all_limit=20" in javascript.text
-        assert "/schedules" in javascript.text
-        assert "/inbox" in javascript.text
         assert "/outcomes" in javascript.text
-        assert "reasoning_summary" in javascript.text
-        assert "reasoning_items" in javascript.text
+        assert "product.progress" in javascript.text
+        assert "deep.updated" in javascript.text
+        assert "mock-agent" not in javascript.text
+        assert "impact_score" not in javascript.text
         assert "Approval required before" not in javascript.text
         assert "--color-canvas" in stylesheet.text
         assert "prefers-reduced-motion" in stylesheet.text

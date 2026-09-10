@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Iterable
 from uuid import uuid4
 
+from signal_harness.persistence.intelligence import INTELLIGENCE_SCHEMA
 from signal_harness.projects.preferences import PreferenceInput, apply_preferences
 from signal_harness.signal.candidates import candidate_score
 from signal_harness.signal.schemas import SignalAssessment, SignalEvent, SourceTask
@@ -21,7 +22,7 @@ from signal_harness.signal.source_identity import (
     security_advisory_identity,
 )
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 
 @dataclass(frozen=True)
@@ -120,6 +121,9 @@ class ChangeLedger:
     def _initialize(self) -> None:
         with self._connect() as connection:
             connection.executescript(_SCHEMA)
+            connection.executescript(INTELLIGENCE_SCHEMA)
+            if "intelligence_pipeline" not in {row["name"] for row in connection.execute("PRAGMA table_info(schedules)")}:
+                connection.execute("ALTER TABLE schedules ADD COLUMN intelligence_pipeline INTEGER NOT NULL DEFAULT 0")
             self._ensure_scan_columns(connection)
             connection.execute(
                 "INSERT INTO schema_meta(key, value) VALUES('schema_version', ?) "
@@ -396,6 +400,7 @@ class ChangeLedger:
         max_events: int | None,
         max_events_per_source: int | None,
         next_run_at: datetime,
+        intelligence_pipeline: bool = False,
     ) -> dict[str, Any]:
         schedule_id = f"schedule-{uuid4().hex[:12]}"
         now = _utc_now()
@@ -406,13 +411,13 @@ class ChangeLedger:
                     schedule_id, project_id, cadence, interval_minutes, local_time,
                     timezone, mode, provider_id, max_events, max_events_per_source,
                     enabled, checkpoint_at, next_run_at, last_run_id, last_status,
-                    last_error, created_at, updated_at
-                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, NULL, 'idle', NULL, ?, ?)
+                    last_error, created_at, updated_at, intelligence_pipeline
+                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, NULL, 'idle', NULL, ?, ?, ?)
                 """,
                 (
                     schedule_id, project_id, cadence, interval_minutes, local_time,
                     timezone_name, mode, provider_id, max_events, max_events_per_source,
-                    next_run_at.astimezone(timezone.utc).isoformat(), now, now,
+                    next_run_at.astimezone(timezone.utc).isoformat(), now, now, int(intelligence_pipeline),
                 ),
             )
             row = connection.execute(
@@ -538,6 +543,7 @@ class ChangeLedger:
             ),
             "local_time": str(row["local_time"]) if row["local_time"] is not None else None,
             "timezone": str(row["timezone"]),
+            "intelligence_pipeline": bool(row["intelligence_pipeline"]),
             "mode": str(row["mode"]),
             "provider_id": (str(row["provider_id"]) if row["provider_id"] is not None else None),
             "max_events": int(row["max_events"]) if row["max_events"] is not None else None,

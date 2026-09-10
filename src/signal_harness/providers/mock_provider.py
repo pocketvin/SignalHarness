@@ -502,7 +502,7 @@ class MockProvider:
     def _scripted_shared_evidence_single(
         self, payload: dict[str, Any], *, project_profile: dict[str, Any]
     ) -> str:
-        from signal_harness.capability_eval import (
+        from signal_harness.agent_integration.schemas import (
             SharedEvidenceSingleItem,
             SharedEvidenceSingleOutput,
         )

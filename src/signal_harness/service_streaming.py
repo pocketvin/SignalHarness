@@ -11,13 +11,16 @@ from pathlib import Path
 from typing import Any, Literal, cast
 from uuid import uuid4
 
+from signal_harness.intelligence.contracts import Progress
+from signal_harness.persistence import ChangeLedger
+from signal_harness.persistence.intelligence import IntelligenceRepository
 from signal_harness.agent_integration.mode import RunMode
 from signal_harness.providers.catalog import provider_from_selection
 from signal_harness.projects.catalog import ProjectOption, default_project_id, project_option
 from signal_harness.projects.state import prepare_project_state
 from signal_harness.runtime.tracing import TraceChangeKind
 from signal_harness.runtime.workflow import SignalHarnessWorkflow
-from signal_harness.runtime.windows import WindowMode
+from signal_harness.runtime.windows import ResolvedScanWindow, WindowMode, resolve_scan_window
 from signal_harness.signal.schemas import SourceTask, TraceStep
 from signal_harness.utils.fs import atomic_write_text
 
@@ -49,6 +52,9 @@ class StreamRunSession:
     project: ProjectOption
     max_events: int | None
     max_events_per_source: int | None
+    intelligence_pipeline: bool = False
+    frozen_window: dict[str, Any] | None = None
+    progress: dict[str, Any] | None = None
     interactive: bool = True
     consumer_id: str = "local-owner"
     schedule_id: str | None = None
@@ -101,6 +107,8 @@ class StreamRunSession:
                 yield event
                 if event.event in _TERMINAL_EVENTS:
                     return
+            if self.events and self.events[-1].event in _TERMINAL_EVENTS and cursor >= self.events[-1].id:
+                return
             # Terminal delivery is event-driven. Do not exit only because status flipped:
             # the terminal event may be queued a scheduling tick later.
             while True:
@@ -118,6 +126,8 @@ class StreamRunSession:
         return {
             "run_id": self.run_id,
             "status": self.status,
+            "intelligence_pipeline": self.intelligence_pipeline,
+            "progress": self.progress,
             "mode": self.mode.value,
             "source_mode": self.source_mode,
             "provider_id": self.provider_id,
@@ -175,6 +185,7 @@ class StreamRunManager:
         project: ProjectOption | None = None,
         max_events: int | None = None,
         max_events_per_source: int | None = None,
+        intelligence_pipeline: bool = False,
         interactive: bool = True,
         consumer_id: str = "local-owner",
         schedule_id: str | None = None,
@@ -207,10 +218,20 @@ class StreamRunManager:
             project=selected_project,
             max_events=max_events,
             max_events_per_source=max_events_per_source,
+            intelligence_pipeline=intelligence_pipeline,
             interactive=interactive,
             consumer_id=consumer_id,
             schedule_id=schedule_id,
         )
+        if intelligence_pipeline:
+            frozen = resolve_scan_window(
+                ledger=ChangeLedger(session.state_dir / "change_ledger.sqlite3"),
+                project_id=selected_project.id, mode=window_mode,
+                custom_from=since if window_mode == "custom" else None,
+                custom_to=until, legacy_since=since, consumer_id=consumer_id,
+            )
+            session.frozen_window = frozen.public_payload()
+            session.since, session.until = frozen.lower, frozen.upper
         self.sessions[assigned_run_id] = session
         session.publish("run.created", session.public_payload())
         self._persist_session(session)
@@ -220,6 +241,9 @@ class StreamRunManager:
         return {
             "run_id": session.run_id,
             "status": session.status,
+            "intelligence_pipeline": session.intelligence_pipeline,
+            "frozen_window": session.frozen_window,
+            "progress": session.progress,
             "mode": session.mode.value,
             "source_mode": session.source_mode,
             "provider_id": session.provider_id,
@@ -278,6 +302,9 @@ class StreamRunManager:
                         int(payload["max_events_per_source"])
                         if payload.get("max_events_per_source") is not None else None
                     ),
+                    intelligence_pipeline=bool(payload.get("intelligence_pipeline", False)),
+                    frozen_window=payload.get("frozen_window"),
+                    progress=payload.get("progress"),
                     interactive=bool(payload.get("interactive", True)),
                     consumer_id=str(payload.get("consumer_id") or "local-owner"),
                     schedule_id=(
@@ -338,7 +365,7 @@ class StreamRunManager:
         session.publish("run.started", session.public_payload())
         provider = None
         try:
-            if session.mode is RunMode.AGENT:
+            if session.mode is RunMode.AGENT and not session.intelligence_pipeline:
                 if session.provider_id is None:
                     raise ValueError("agent stream run requires provider_id")
                 provider = provider_from_selection(
@@ -357,6 +384,8 @@ class StreamRunManager:
                     provider=provider,
                     trace_listener=session.on_trace_change,
                     project_id=session.project.id,
+                    intelligence_pipeline=session.intelligence_pipeline,
+                    progress_listener=lambda progress: self._on_progress(session, progress),
                 )
                 result = await workflow.scan(
                     fixture=session.fixture,
@@ -368,12 +397,18 @@ class StreamRunManager:
                     until=session.until,
                     consumer_id=session.consumer_id,
                     interactive=session.interactive,
+                    frozen_window=self._frozen_window(session),
                 )
+            intelligence_report = IntelligenceRepository(workflow.ledger.path).report(session.run_id) if session.intelligence_pipeline else None
             session.completed_at = datetime.now(timezone.utc).isoformat()
             source_summary = _source_summary(result.source_tasks, result.failed_sources)
             session.result = {
                 "run_id": session.run_id,
                 "status": "success",
+                "intelligence_pipeline": session.intelligence_pipeline,
+                "intelligence_status": intelligence_report.get("status") if intelligence_report else None,
+                "frozen_window": session.frozen_window,
+                "progress": session.progress,
                 "mode": session.mode.value,
                 "source_mode": session.source_mode,
                 "provider_id": session.provider_id,
@@ -421,6 +456,9 @@ class StreamRunManager:
             session.result = {
                 "run_id": session.run_id,
                 "status": "error",
+                "intelligence_pipeline": session.intelligence_pipeline,
+                "frozen_window": session.frozen_window,
+                "progress": session.progress,
                 "mode": session.mode.value,
                 "source_mode": session.source_mode,
                 "provider_id": session.provider_id,
@@ -440,6 +478,25 @@ class StreamRunManager:
         finally:
             if provider is not None:
                 await provider.close()
+
+    def _on_progress(self, session: StreamRunSession, progress: Progress) -> None:
+        session.progress = progress.model_dump(mode="json")
+        session.publish("product.progress", session.progress)
+        self._persist_session(session)
+
+    @staticmethod
+    def _frozen_window(session: StreamRunSession) -> ResolvedScanWindow | None:
+        frozen = session.frozen_window
+        if not frozen:
+            return None
+        upper = _optional_datetime(frozen.get("to"))
+        if upper is None:
+            raise ValueError("Frozen scan upper bound missing")
+        return ResolvedScanWindow(
+            mode=cast(WindowMode, frozen["mode"]), lower=_optional_datetime(frozen.get("from")),
+            upper=upper, first_use=bool(frozen.get("first_use")),
+            checkpoint_eligible=bool(frozen.get("checkpoint_eligible")),
+        )
 
     def _trim_completed(self) -> None:
         if len(self.sessions) < self.max_sessions:

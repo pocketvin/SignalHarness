@@ -1,12 +1,28 @@
 # SignalHarness Working Plan
 
 > Status: Rolling construction plan
-> Updated: 2026-09-09
+> Updated: 2026-09-11
 > Governing target: `docs/SIGNALHARNESS_TARGET_STATE.md`
 
 This document records where construction should go next and how each phase should be verified. It is intentionally mutable. After every completed phase, update Current State, Retrospective, Acceptance evidence, and the next phase before continuing.
 
-## CURRENT STATE
+## P0 IMPLEMENTATION CHECKPOINT — 2026-09-11
+
+**Implemented: first end-to-end direction-first product slice, not final V1 acceptance.**
+
+- New `/demo` frontend now consumes `/intelligence/*`: Directions → full brief → Featured ≤5 → all/relevant Changes → clicked read-only Deep Dive. No model/mode/mock/score selector.
+- Production Web, new `environment` CLI, and newly created product schedules run full-corpus shallow batches followed by ONE global synthesis call. Old `scan`/MCP remain compatibility baselines.
+- SQLite v7 persists aggregated ChangeRevision evidence, shallow results, versioned reports/Directions, cache and separate Deep Dive jobs. SQL implements list filters/sort/pagination.
+- ID coverage/citation guards, Chinese-prose validation, provider fallback, frozen POST-time window, history immutability, idempotent click jobs and no-auto-deep contracts are tested.
+- Removed Mock Provider → capability_eval import by relocating shared schemas; production providers no longer import eval.
+- Verified 300-item dataflow using scripted Provider (15 batches + 1 global); real Provider replay uses 8 saved observations → 6 Changes → 3 Directions. These are different evidence levels.
+- Current task preferences: Qwen Plus shallow; DeepSeek V4 Pro strong; Kimi K3 fallback. First Kimi live request failed. Chinese validation was added after a structurally valid English result, then the real replay passed.
+- Verification: 409 offline tests, Ruff, mypy (132 files), frontend typecheck/build, wheel/sdist, isolated legacy scan/trace/calibrate, desktop/mobile browser flows passed. One real deep dive completed but remote source refresh was unavailable; no code-impact correctness claim.
+- Detailed boundaries, actual entry points and remaining work: `docs/ENVIRONMENT_INTELLIGENCE_V1.md`.
+
+**Next accepted scope:** read and evaluate the new UI with a genuine larger environment corpus; improve overlapping/weakly grounded Directions, preserve weak signals, audit source dedup and partial coverage. Do not add Agent counts or frameworks. Do not claim call-site reachability, semantic de-duplication, hierarchical synthesis, Direction notifications or full CLI/MCP convergence are done.
+
+## HISTORICAL BASELINE (before this P0 slice)
 
 Current repository baseline at planning time:
 
@@ -90,7 +106,7 @@ Expose meaningful progress/count deltas and newly formed themes/changes without 
 - Reduce legacy UI/output fallback paths once the Product Intelligence contract is proven.
 - Retire scan-time LLM Supervisor routing. Stage ownership belongs to deterministic Runtime, not a model deciding which Agent runs next.
 - Move evidence, code-usage inspection, impact/action reasoning, and selective verification out of the normal Scan and behind lazy `DeepDiveAnalysis`.
-- Replace the current per-event narrative boundary with batch-friendly `ChangeInterpreter` plus `EnvironmentDirectionSynthesizer/ReportComposer` responsibilities. These are responsibilities, not a mandate for more autonomous Agents.
+- Replace the current per-event narrative boundary with batch-friendly `ChangeInterpreter` plus `single EnvironmentSynthesizer (directions + report)` responsibilities. These are responsibilities, not a mandate for more autonomous Agents.
 - Preserve the existing five-Agent code only as a regression/eval baseline until the new contracts are green; do not let baseline code continue owning production product semantics.
 - Enforce one domain responsibility per production module during migration: collection never decides relevance; Change assembly never writes presentation copy; shallow interpretation never performs evidence research; Direction synthesis never mutates Change truth; Deep Dive never rewrites Scan history; frontend never recomputes backend ranking/analysis; persistence repositories never import eval code.
 - Break the current production/eval import cycle (`capability_eval ↔ runtime.workflow ↔ providers`) as part of convergence. Eval may depend on stable runtime interfaces; production runtime/provider modules must not depend back on eval modules.

@@ -45,3 +45,6 @@ Thumbs.db
 node_modules/
 frontend/node_modules/
 frontend/.vite/
+
+# Local construction scripts and acceptance screenshots
+work/

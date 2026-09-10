@@ -317,3 +317,23 @@ class LearningPolicyOutput(BaseModel):
         if proposal.get("requires_approval") is not True:
             raise ValueError("watchlist proposals must require approval")
         return proposal
+
+
+class SharedEvidenceSingleItem(BaseModel):
+    """One-pass semantic baseline result over the exact shared evidence packet."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    event_id: str
+    impact: ImpactItem
+    action: ActionItem
+    what_changed_zh: str = Field(min_length=1)
+    why_relevant_zh: str = Field(min_length=1)
+    recommended_actions_zh: list[str] = Field(default_factory=list)
+
+
+class SharedEvidenceSingleOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    report_zh: str = Field(min_length=1)
+    results: list[SharedEvidenceSingleItem]

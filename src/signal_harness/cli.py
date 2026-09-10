@@ -11,6 +11,8 @@ from tempfile import TemporaryDirectory
 from typing import Any, cast
 
 import typer
+
+from signal_harness.cli_environment import register_environment_commands
 from dotenv import load_dotenv
 
 from signal_harness.utils.fs import atomic_write_text
@@ -360,6 +362,10 @@ def parse_window_mode(value: str | None) -> WindowMode:
         )
     return cast(WindowMode, normalized)
 
+
+
+
+register_environment_commands(app)
 
 @app.command("project-draft")
 def project_draft(

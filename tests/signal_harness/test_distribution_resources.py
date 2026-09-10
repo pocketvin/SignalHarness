@@ -96,7 +96,10 @@ def test_compiled_react_demo_assets_are_packaged_with_ui() -> None:
     assert '/demo-assets/demo.js' in html
     assert '/demo-assets/demo.css' in html
     assert "EventSource" in javascript
-    assert "/stream-runs" in javascript
+    assert "/intelligence/projects/" in javascript
+    assert "product.progress" in javascript
+    assert "mock-agent" not in javascript
+    assert "impact_score" not in javascript
     assert "--color-canvas" in stylesheet
 
 

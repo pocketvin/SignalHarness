@@ -34,6 +34,7 @@ class OpenAICompatibleProvider:
         model_profile: str | None = None,
         provider_label: str | None = None,
     ) -> None:
+        self.request_options: dict[str, Any] = {}
         self.model = profile.model
         self.profile = profile
         self.provider = provider_label or profile.provider
@@ -125,6 +126,9 @@ class OpenAICompatibleProvider:
         if self._owns_client:
             await self._client.aclose()
 
+    def set_timeout(self, seconds: float) -> None:
+        self._client.timeout = httpx.Timeout(seconds)
+
     def _chat_completions_url(self) -> str:
         if self.base_url.endswith("/v1"):
             return f"{self.base_url}/chat/completions"
@@ -154,6 +158,9 @@ class OpenAICompatibleProvider:
         payload[self.profile.output_token_parameter] = self.profile.max_output_tokens
         if self.profile.supports_json_mode:
             payload["response_format"] = {"type": "json_object"}
+        for key in ("enable_thinking", "thinking", "reasoning_effort"):
+            if key in self.request_options:
+                payload[key] = self.request_options[key]
         return payload
 
 

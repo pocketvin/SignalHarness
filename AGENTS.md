@@ -1,7 +1,7 @@
 # SignalHarness Agent Guide
 
-SignalHarness currently contains a standalone LLM-enhanced routed multi-agent signal
-intelligence implementation.
+SignalHarness now has a direction-first product path plus a protected legacy multi-agent
+baseline. The Web product is NOT the legacy Top-K Agent runner.
 
 For future product direction and construction planning, `docs/SIGNALHARNESS_TARGET_STATE.md`
 and `docs/SIGNALHARNESS_WORKING_PLAN.md` take precedence over older fixed-five-Agent
@@ -10,18 +10,27 @@ baseline until an evidence-based Analyzer/Harness migration is implemented and v
 
 Key directories:
 
-- `agent_team/`: five domain LLM Agents
+- `intelligence/`: full-corpus interpretation, ONE global synthesis, lazy clicked Deep Dive
+- `persistence/intelligence.py`: additive versioned intelligence in the existing Ledger
+- `service_intelligence.py`: model-free product request contract
+- `providers/task_policy.py` + `configs/intelligence_policy.yaml`: backend model routing
+- `agent_team/`: legacy domain LLM Agents for regression/compatibility
 - `agent_integration/`: prompts, schemas, context, runner, trace
 - `providers/`: scripted mock adapter and optional provider integration
 - `memory/`: Project, Signal, Feedback, and Policy infrastructure
 - `signal/`: deterministic normalization, noise, clustering, scoring
 - `runtime/`: workflow, cache, permissions, tools, trace
-- `frontend/`: React + TypeScript + Tailwind source for `/demo`; Vite compiles into `src/signal_harness/ui/static/demo.*`
+- `frontend/src/environment/`: primary direction-first product source for `/demo`;
+- `frontend/`: React + TypeScript source; Vite compiles into `src/signal_harness/ui/static/demo.*`
 - `ui/static/`: package-owned compiled Demo assets plus the separate Narrative review static surface
 
 Run with:
 
 ```bash
+# Product path (live-provider credentials required, never run in offline CI):
+uv run signal-harness environment --project signalharness --window since_last
+uv run signal-harness environment-report --project signalharness
+# Legacy/offline baseline:
 uv run signal-harness scan --mode demo|mock-agent|agent
 uv run signal-harness trace
 uv run signal-harness calibrate --mode mock-agent
@@ -32,6 +41,13 @@ npm --prefix frontend run build
 ```
 
 Rules:
+
+- New product scans must process every Change through bounded shallow batches, then ONE global model call. Never use Featured or Top-K as the global model's corpus.
+- No automatic evidence-heavy Deep Dive in Scan. Only explicit POST/click starts it; GET/hover do not. Deep Dive must not overwrite a Scan/Profile/Report snapshot.
+- Production provider/runtime modules must not import capability_eval or other eval implementations. Shared data contracts belong outside eval.
+- Model selection belongs to the backend task policy; do not add model/mock/score controls back to the normal Web UI.
+- The source/ID/Chinese guards do not prove semantic truth. Mark partial/unavailable analysis visibly; never fill it with fake successful model output.
+- Before claiming full acceptance, distinguish 300-item offline contract tests from real-provider replay and from actual live-source collection. Keep real/model smoke artifacts isolated under project work/outputs.
 
 - Do not add LangGraph, CrewAI, AutoGen, Redis, Postgres, Celery, VectorDB, or
   embedding databases.
