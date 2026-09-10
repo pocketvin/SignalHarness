@@ -182,6 +182,7 @@ class BoundedModelCaller:
                     "duration_ms_sum": 0,
                     "max_attempt_ms": 0,
                     "usage_unknown_attempts": 0,
+                    "pricing_unknown_attempts": 0,
                 },
             )
             bucket["attempts"] += 1
@@ -195,8 +196,11 @@ class BoundedModelCaller:
             duration = int(item.get("duration_ms") or 0)
             bucket["duration_ms_sum"] += duration
             bucket["max_attempt_ms"] = max(int(bucket["max_attempt_ms"]), duration)
-            if not str(item.get("usage_source") or "").startswith("provider_reported"):
+            usage_source = str(item.get("usage_source") or "")
+            if not usage_source.startswith("provider_reported"):
                 bucket["usage_unknown_attempts"] += 1
+            if usage_source == "provider_reported_no_pricing":
+                bucket["pricing_unknown_attempts"] += 1
         total = {
             "attempts": sum(int(value["attempts"]) for value in by_role.values()),
             "prompt_tokens": sum(int(value["prompt_tokens"]) for value in by_role.values()),
@@ -209,7 +213,13 @@ class BoundedModelCaller:
             "usage_unknown_attempts": sum(
                 int(value["usage_unknown_attempts"]) for value in by_role.values()
             ),
+            "pricing_unknown_attempts": sum(
+                int(value["pricing_unknown_attempts"]) for value in by_role.values()
+            ),
         }
+        total["estimated_cost_complete"] = (
+            total["usage_unknown_attempts"] == 0 and total["pricing_unknown_attempts"] == 0
+        )
         return {"total": total, "by_role": by_role}
 
     async def complete(

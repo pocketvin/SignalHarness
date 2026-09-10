@@ -191,6 +191,41 @@ V1 删除了强模型输出 Schema 中独立的 `risks` / `opportunities` 字段
 
 浏览器验收覆盖方向证据姿态、外部/项目自身分区、方向证据导航和移动端。主页面不再展示独立风险/机会块，也没有模型选择、mock、影响分或 raw Change ID。
 
+## 2026-09-11 真实成本观察（受控 12h fresh scan）
+
+这一轮先执行 collect-only preflight，不调用模型。24h 窗口得到 96 Change，其中 88 条需要 semantic、8 个弱 Batch、约 106 KB semantic 输入，超过实验闸门，因此**没有启动 24h 的付费模型扫描**。缩到固定 12h 后为 53 Change：7 deterministic + 46 semantic、4 个弱 Batch、约 55.7 KB semantic 输入，才允许继续。
+
+实际模型 run 使用隔离 state、`interactive=false`、固定 custom window；Qwen 只负责 shallow，DeepSeek V4 Pro 只负责 synthesis，关闭本轮 Kimi fallback。最终 53/53 Insight ready，46 external + 7 project activity，32 Relevant、3 Featured、4 Direction、0 auto Deep Dive；没有 batch split、repair 或 fallback。
+
+Provider 返回的真实 usage：
+
+```text
+Qwen shallow       4 attempts
+prompt             18,509
+completion         10,709
+total              29,218
+
+DeepSeek synthesis 1 attempt
+prompt             10,423
+completion          8,585
+total              19,008
+
+All model attempts
+prompt             28,932
+completion         19,294
+total              48,226 tokens
+```
+
+这次 shallow 占总 token 的约 **60.6%**。46 条 semantic Change 平均每条分摊约 635 provider-reported tokens（包含共享 Prompt/Schema/Project Context 的 batch 开销），因此后续若继续省 token，应优先减少 shallow 的重复输入/输出，而不是继续压已经很小的 Global Digest。
+
+全局侧：完整 ProductChange 序列化约 133,537 bytes；DirectionDigest corpus 约 17,388 bytes（约 13.0%）；带 Project / source / manifest 等完整 strong request 约 28,925 bytes。说明“强模型看完整环境”当前没有依赖 Top-K，也没有再次吞完整 Evidence。
+
+成本审计现在会统计成功调用以及**已经返回但被结构/语义 guard 拒绝**的 provider usage；如果 provider 异常前 SDK 已拿到 usage，也尽可能记录。Qwen/DeepSeek 当前 model profile 没有单价字段，`usage_source=provider_reported_no_pricing`，因此 USD 成本是**未知**，不能把 `estimated_cost_usd=0` 理解为免费。
+
+本次浅层 46 条的平均文案长度约为：summary 51 字、what_changed 113 字、relation_reason 127 字；后者最明显重复 Project Profile。离线截断模拟显示把 summary/what_changed/relation_reason 分别约束在 60/120/80 字并限制 3 个 topics，可将这些用户文本字符数减少约 18.4%，但这只是**零 API 容量估算**，尚未证明模型按新契约生成时语义质量不下降，所以本轮不改 shallow Prompt/Schema、不再跑第二次真实模型。
+
+来源侧另发现 OpenAI News RSS 一次返回 1,189 个 raw item；冻结 12h 窗口最终只保留整体 60 条 observation，因此它没有直接放大模型 token，但会浪费采集带宽/解析成本。RSS/Web 当前 coverage 保守为 `unknown`，所以本次 Direction state 均为 `uncertain`；这是来源覆盖语义，不应该靠模型改写成“确定趋势”。
+
 ## 2026-09-11 P0 成本感知主链（environment-v1.6）
 
 新的产品不变量是：**全量理解不等于全量调用模型。每个 Change 必须得到 ChangeInsight，但 Insight 的来源可以是 cache、deterministic 或 semantic。**

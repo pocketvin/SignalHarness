@@ -1391,6 +1391,8 @@ def test_model_usage_counts_invalid_attempt_and_success(tmp_path: Path, project_
     assert summary["total"]["total_tokens"] == 300
     assert summary["total"]["estimated_cost_usd"] == pytest.approx(0.003)
     assert summary["total"]["usage_unknown_attempts"] == 0
+    assert summary["total"]["pricing_unknown_attempts"] == 0
+    assert summary["total"]["estimated_cost_complete"] is True
     assert caller.audit[0]["status"] == "invalid_output"
     assert caller.audit[0]["total_tokens"] == 150
     assert caller.audit[1]["status"] == "success"

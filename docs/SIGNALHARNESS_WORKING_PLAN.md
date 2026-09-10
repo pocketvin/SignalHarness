@@ -6,6 +6,22 @@
 
 This document records where construction should go next and how each phase should be verified. It is intentionally mutable. After every completed phase, update Current State, Retrospective, Acceptance evidence, and the next phase before continuing.
 
+## P0 FRESH COST OBSERVATION — 2026-09-11
+
+**One bounded real-provider run completed after a collect-only preflight; no model matrix or fallback fan-out was used.**
+
+- Added complete usage accounting: provider-reported prompt/completion/total tokens and pricing source are now retained for successful calls, invalid structured outputs, and provider failures whenever the SDK has usage. Report audit includes an aggregate `model_usage` view. A zero USD estimate is explicitly incomplete when model-profile pricing is absent.
+- A fresh 24h collect-only preflight found 1,336 raw observations → 103 in-window observations → 96 Changes, with 88 semantic Changes / 8 planned weak batches / ~106 KB semantic input. It failed the experiment guard (72 semantic / 6 batches / 100 KB), so **no 24h model run was started**.
+- The window was reduced to 12h. The collect-only preflight passed: 1,301 raw observations → 60 in-window observations → 53 Changes; 7 deterministic + 46 semantic; 4 planned weak batches; ~55.7 KB semantic payload. Most raw volume came from an RSS feed returning historical items and was removed by the frozen time-window filter before model analysis.
+- The one real run was isolated from the formal `.signal-harness` state and used a custom frozen 12h window with checkpoint advancement disabled. Qwen was the only shallow provider and DeepSeek V4 Pro the only synthesis provider; Kimi fallback was deliberately disabled for this cost observation.
+- Result: 53/53 ChangeInsights ready, 46 external + 7 project activity, 32 Relevant, 3 Featured, 4 Directions, 0 automatic Deep Dives. No weak split retry, model repair, or provider fallback occurred.
+- Actual provider-reported usage: **48,226 total tokens** = Qwen shallow **29,218** (18,509 prompt + 10,709 completion; 4 attempts) + DeepSeek synthesis **19,008** (10,423 prompt + 8,585 completion; 1 attempt). Shallow therefore accounts for ~60.6% of this run's token usage. Pricing is unavailable in the current Qwen/DeepSeek model profiles, so dollar cost is unknown rather than $0.
+- Global context compression is working: full ProductChange serialization was ~133.5 KB, DirectionDigest corpus ~17.4 KB (~13.0%), and the complete synthesis request ~28.9 KB. The next token target is therefore the shallow semantic output/input contract, not further global truncation.
+- Fresh shallow shape: across 46 semantic Changes, average summary ~51 chars, `what_changed` ~113 chars, `relation_reason` ~127 chars. A zero-API clipping simulation (60 / 120 / 80 chars + ≤3 topics) suggests ~18.4% user-text reduction, but **no prompt/schema change is authorized from this simulation alone**.
+- Coverage remained `unknown` because several RSS/Web source tasks intentionally do not claim exhaustive coverage; Direction states therefore remained `uncertain`. Do not “fix” this through Prompt wording. Source-side `since` filtering for RSS is a separate collection-efficiency opportunity because one feed returned 1,189 raw items before the window filter.
+
+**Decision after the observation:** keep batch size 12 and concurrency 3 for now; do not increase batch size just to reduce repeated prompt overhead. Do not run another real-provider experiment in this checkpoint. If token optimization continues, first shorten/restructure shallow project-relation output using the frozen 46-Change result, then validate with a tiny anchor set rather than rerunning the whole corpus.
+
 ## P0 COST-AWARE INTELLIGENCE CHECKPOINT — 2026-09-11
 
 **Implemented offline-first; no new real-provider eval was spent for this checkpoint.**

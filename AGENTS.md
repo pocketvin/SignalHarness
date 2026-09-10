@@ -52,6 +52,7 @@ Rules:
 - Model selection belongs to the backend task policy; do not add model/mock/score controls back to the normal Web UI.
 - The source/ID/Chinese guards do not prove semantic truth. Mark partial/unavailable analysis visibly; never fill it with fake successful model output.
 - Before claiming full acceptance, distinguish 300-item offline contract tests from real-provider replay and from actual live-source collection. Keep real/model smoke artifacts isolated under project work/outputs.
+- Real-provider cost observations must count provider-reported usage from successful calls **and** model responses rejected by schema/semantic guards. `estimated_cost_usd=0` is not “free” when `usage_source=provider_reported_no_pricing`; report dollar cost as unknown unless pricing metadata is complete. Use collect-only preflight guards before intentionally billable live experiments.
 
 - Do not add LangGraph, CrewAI, AutoGen, Redis, Postgres, Celery, VectorDB, or
   embedding databases.
