@@ -77,12 +77,21 @@ def assemble_changes(
             ),
         )
         package = release_package_identity(primary)
+        security_package = (
+            str(
+                primary.raw_payload.get("package_name")
+                or primary.raw_payload.get("matched_package")
+                or ""
+            ).strip()
+            if primary.source_type == "security_advisory"
+            else ""
+        )
         result.append(
             ChangeDigest(
                 change_id=change_id,
                 revision_id=identity("cr-", [change_id, sorted({r for _, r in rows})]),
                 title=primary.title,
-                entity=package.name if package else primary.source_name,
+                entity=package.name if package else security_package or primary.source_name,
                 kind=primary.source_type,
                 published_at=primary.published_at.isoformat() if primary.published_at else None,
                 current_version=primary.current_version,

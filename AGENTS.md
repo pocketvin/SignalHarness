@@ -42,8 +42,10 @@ npm --prefix frontend run build
 
 Rules:
 
-- New product scans must process every Change through bounded shallow batches, then ONE global model call. Never use Featured or Top-K as the global model's corpus.
+- Every Change must receive a persisted ChangeInsight, but that Insight may come from validated cache, deterministic FactCapsule routing, or the semantic ChangeInterpreter. Only semantic misses enter bounded batches. ONE global model call still receives every compact external DirectionDigest; never use Featured or Top-K as the global corpus.
 - Project-owned Changes are still shallowly interpreted but may only inform project-connection context; they must never support an external EnvironmentDirection/Brief/Featured item.
+- Shallow semantic batches use deterministic diversity-aware planning and bounded concurrency (current default 3). Batch failures may split into smaller batches, but concurrency remains bounded and failed semantic items stay visibly unavailable.
+- Tiny strong-only processing is currently a decision point/audit signal only; do not activate it until a bounded real-model comparison justifies skipping the weak model for whole tiny corpora. A large corpus with only a few cache misses is never a Tiny corpus.
 - GitHub Issue/discussion evidence must retain a reported/discussed posture unless stronger release/official evidence independently establishes shipped behavior. Do not weaken Direction diversity/temporal/overlap guards merely to obtain a non-empty report.
 - No automatic evidence-heavy Deep Dive in Scan. Only explicit POST/click starts it; GET/hover do not. Deep Dive must not overwrite a Scan/Profile/Report snapshot.
 - Production provider/runtime modules must not import capability_eval or other eval implementations. Shared data contracts belong outside eval.

@@ -21,8 +21,12 @@ class TaskPolicy:
     config_dir: Path
     version: str = "environment-model-policy-v1"
     batch_size: int = 12
-    batch_input_bytes: int = 60000
-    global_input_bytes: int = 700000
+    batch_input_bytes: int = 42000
+    shallow_concurrency: int = 3
+    global_input_bytes: int = 450000
+    tiny_fast_path_max_changes: int = 4
+    tiny_fast_path_max_input_bytes: int = 24000
+    direction_fact_chars: int = 88
     max_provider_attempts: int = 2
     retry_split_min_batch: int = 4
     roles: dict[str, Any] | None = None
@@ -37,8 +41,15 @@ class TaskPolicy:
             config_dir=config_dir,
             version=str(raw.get("version") or "environment-model-policy-v1"),
             batch_size=max(1, min(24, int(raw.get("batch_size", 12)))),
-            batch_input_bytes=max(2000, min(100000, int(raw.get("batch_input_bytes", 60000)))),
-            global_input_bytes=max(10000, min(1000000, int(raw.get("global_input_bytes", 700000)))),
+            batch_input_bytes=max(2000, min(100000, int(raw.get("batch_input_bytes", 42000)))),
+            shallow_concurrency=max(1, min(8, int(raw.get("shallow_concurrency", 3)))),
+            global_input_bytes=max(10000, min(1000000, int(raw.get("global_input_bytes", 450000)))),
+            tiny_fast_path_max_changes=max(
+                1, min(12, int(raw.get("tiny_fast_path_max_changes", 4)))
+            ),
+            tiny_fast_path_max_input_bytes=max(
+                2000, min(100000, int(raw.get("tiny_fast_path_max_input_bytes", 24000)))
+            ),
             max_provider_attempts=max(1, min(2, int(raw.get("max_provider_attempts", 2)))),
             retry_split_min_batch=max(1, min(8, int(raw.get("retry_split_min_batch", 4)))),
             models=raw.get("models", {}),

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Callable
 from typing import Any
@@ -9,6 +10,7 @@ from typing import Any
 from signal_harness.intelligence.contracts import (
     CHANGE_INSIGHT_VERSION,
     INTELLIGENCE_VERSION,
+    LEGACY_CHANGE_INSIGHT_VERSIONS,
     ChangeDigest,
     EnvironmentReport,
     InsightBatch,
@@ -17,14 +19,20 @@ from signal_harness.intelligence.contracts import (
     ShallowInsight,
     SynthesisOutput,
 )
-from signal_harness.intelligence.corpus import (
-    compact_digest,
-    corpus_payload,
-    finalize_direction,
-    identity,
-    project_change,
+from signal_harness.intelligence.batch_planner import BalancedBatchPlanner
+from signal_harness.intelligence.corpus import finalize_direction, identity, project_change
+from signal_harness.intelligence.direction_digest import organize_direction_corpus
+from signal_harness.intelligence.fact_capsule import (
+    build_fact_capsule,
+    capsule_semantic_payload,
+    deterministic_insight,
 )
-from signal_harness.intelligence.model_calls import BoundedModelCaller
+from signal_harness.intelligence.model_calls import BoundedModelCaller, validate_product_language
+from signal_harness.intelligence.semantic_router import (
+    SemanticWorkItem,
+    route_capsule,
+    tiny_fast_path_candidate,
+)
 from signal_harness.intelligence.quality import validate_synthesis_semantics
 from signal_harness.persistence.intelligence import IntelligenceRepository, utc_now
 
@@ -111,7 +119,9 @@ class EnvironmentEngine:
             # Restart after report commit: do not replay billable model calls.
             return EnvironmentReport.model_validate(existing)
         self.repository.freeze(scan_id, digests)
-        changes, cache_hits = await self._interpret(scan_id, profile_revision_id, profile, digests)
+        changes, insight_stats = await self._interpret(
+            scan_id, profile_revision_id, profile, digests
+        )
         previous = (
             self.repository.latest_report(project_id, before=str(window["from"]))
             if window.get("from")
@@ -119,26 +129,40 @@ class EnvironmentEngine:
         )
         external_changes = [item for item in changes if item.corpus_role == "external_environment"]
         project_activity = [item for item in changes if item.corpus_role == "project_activity"]
+        external_corpus = organize_direction_corpus(
+            external_changes, fact_chars=self.caller.policy.direction_fact_chars
+        )
+        activity_corpus = organize_direction_corpus(
+            project_activity, fact_chars=self.caller.policy.direction_fact_chars
+        )
         payload = {
             "window": window,
             "project": project_context(profile),
             "coverage_status": coverage_status,
             "sources": sources,
-            "corpus": corpus_payload(external_changes),
-            "project_activity": corpus_payload(project_activity),
+            "corpus_legend": external_corpus["legend"],
+            "corpus_index": external_corpus["index"],
+            "corpus": external_corpus["items"],
+            "project_activity_index": activity_corpus["index"],
+            "project_activity": activity_corpus["items"],
             "previous_report": {
                 key: previous[key] for key in ("window", "directions", "coverage_status")
             }
             if previous
             else None,
             "manifest": {
-                "external_change_ids": [c.change_id for c in external_changes],
-                "project_activity_ids": [c.change_id for c in project_activity],
                 "external_count": len(external_changes),
                 "project_activity_count": len(project_activity),
             },
         }
         by_id = {item.change_id: item for item in changes}
+        direction_digest_bytes = len(
+            json.dumps(external_corpus["items"], ensure_ascii=False, separators=(",", ":")).encode()
+        )
+        evidence_excerpt_bytes = sum(
+            len(evidence.excerpt.encode()) for item in changes for evidence in item.evidence
+        )
+        full_product_change_bytes = sum(len(item.model_dump_json().encode()) for item in changes)
         notices: list[str] = []
         if data_origin == "replay":
             notices.append("资料回放验证：本报告基于已保存来源，不是本期完整实时采集。")
@@ -233,7 +257,7 @@ class EnvironmentEngine:
                 "relevant": sum(c.relevant for c in changes),
                 "featured": len(featured),
                 "directions": len(directions),
-                "cache_hits": cache_hits,
+                "cache_hits": insight_stats["cache_hits"],
                 "automatic_deep_dives": 0,
             },
             brief=synthesis.brief,
@@ -253,6 +277,13 @@ class EnvironmentEngine:
                 "full_corpus_hash": identity("corpus-", payload),
                 "shallow_policy": self.caller.policy.fingerprint("shallow"),
                 "synthesis_policy": self.caller.policy.fingerprint("synthesis"),
+                "insight_routing": insight_stats,
+                "direction_digest_bytes": direction_digest_bytes,
+                "source_evidence_excerpt_bytes": evidence_excerpt_bytes,
+                "full_product_change_bytes": full_product_change_bytes,
+                "synthesis_input_bytes": len(
+                    json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
+                ),
             },
         )
         self.progress(
@@ -270,39 +301,93 @@ class EnvironmentEngine:
         profile_revision_id: str,
         profile: dict[str, Any],
         digests: list[ChangeDigest],
-    ) -> tuple[list[ProductChange], int]:
+    ) -> tuple[list[ProductChange], dict[str, Any]]:
         products: dict[str, ProductChange] = {}
-        pending: list[ChangeDigest] = []
-        keys = {
-            d.change_id: identity(
+        semantic_items: list[SemanticWorkItem] = []
+        all_work_items: list[SemanticWorkItem] = []
+        policy_fingerprint = self.caller.policy.fingerprint("shallow")
+
+        def cache_key(digest: ChangeDigest, version: str) -> str:
+            return identity(
                 "insight-",
-                [
-                    d.revision_id,
-                    profile_revision_id,
-                    CHANGE_INSIGHT_VERSION,
-                    self.caller.policy.fingerprint("shallow"),
-                ],
+                [digest.revision_id, profile_revision_id, version, policy_fingerprint],
             )
-            for d in digests
+
+        current_keys = {
+            digest.change_id: cache_key(digest, CHANGE_INSIGHT_VERSION) for digest in digests
         }
+        stats: dict[str, Any] = {
+            "cache_hits": 0,
+            "legacy_cache_hits": 0,
+            "deterministic": 0,
+            "semantic": 0,
+            "unavailable": 0,
+            "semantic_batch_attempts": 0,
+            "semantic_batch_splits": 0,
+            "planned_semantic_batches": 0,
+            "shallow_concurrency": self.caller.policy.shallow_concurrency,
+            "tiny_fast_path_candidate": False,
+            "tiny_fast_path_activated": False,
+        }
+
         for digest in digests:
-            cached = self.repository.get_cached_insight(keys[digest.change_id])
-            if cached is not None:
+            capsule = build_fact_capsule(digest, profile)
+            all_work_items.append(SemanticWorkItem(digest=digest, capsule=capsule))
+            candidates = [(CHANGE_INSIGHT_VERSION, current_keys[digest.change_id])]
+            candidates.extend(
+                (version, cache_key(digest, version)) for version in LEGACY_CHANGE_INSIGHT_VERSIONS
+            )
+            cache_used = False
+            for version, key in candidates:
+                cached = self.repository.get_cached_insight(key)
+                if cached is None:
+                    continue
                 try:
                     insight = ShallowInsight.model_validate(cached["insight"])
+                    validate_product_language(insight)
                     item = project_change(digest, insight, profile)
-                    products[digest.change_id] = item
-                    self.repository.save_insight(scan_id, item)
-                    continue
                 except (ValueError, KeyError):
-                    pass
-            pending.append(digest)
-        hits = len(products)
-        self.progress("interpreting_changes", "正在逐批理解每一个变化", hits, len(digests))
+                    continue
+                products[digest.change_id] = item
+                self.repository.save_insight(scan_id, item)
+                stats["cache_hits"] += 1
+                if version != CHANGE_INSIGHT_VERSION:
+                    stats["legacy_cache_hits"] += 1
+                    self.repository.cache_insight(current_keys[digest.change_id], cached)
+                cache_used = True
+                break
+            if cache_used:
+                continue
 
-        async def interpret_batch(batch: list[ChangeDigest]) -> None:
-            expected = {d.change_id for d in batch}
-            digest_by_id = {d.change_id: d for d in batch}
+            decision = route_capsule(capsule)
+            if decision.route == "deterministic":
+                insight = deterministic_insight(capsule)
+                item = project_change(digest, insight, profile)
+                products[digest.change_id] = item
+                self.repository.save_insight(scan_id, item)
+                stats["deterministic"] += 1
+            else:
+                semantic_items.append(SemanticWorkItem(digest=digest, capsule=capsule))
+
+        stats["tiny_fast_path_candidate"] = tiny_fast_path_candidate(
+            all_work_items,
+            max_changes=self.caller.policy.tiny_fast_path_max_changes,
+            max_input_bytes=self.caller.policy.tiny_fast_path_max_input_bytes,
+        )
+        planner = BalancedBatchPlanner(
+            max_items=self.caller.policy.batch_size,
+            max_input_bytes=self.caller.policy.batch_input_bytes,
+        )
+        batches = planner.plan(semantic_items)
+        stats["planned_semantic_batches"] = len(batches)
+        semaphore = asyncio.Semaphore(self.caller.policy.shallow_concurrency)
+        self.progress(
+            "interpreting_changes", "正在理解需要语义判断的变化", len(products), len(digests)
+        )
+
+        async def interpret_batch(batch: list[SemanticWorkItem]) -> None:
+            expected = {item.digest.change_id for item in batch}
+            digest_by_id = {item.digest.change_id: item.digest for item in batch}
             validated_products: dict[str, ProductChange] = {}
 
             def validate(output: InsightBatch) -> None:
@@ -315,61 +400,52 @@ class EnvironmentEngine:
                     )
 
             try:
-                output = await self.caller.complete(
-                    "shallow",
-                    {
-                        "project": project_context(profile),
-                        "changes": [compact_digest(d) for d in batch],
-                    },
-                    InsightBatch,
-                    validate,
-                )
+                stats["semantic_batch_attempts"] += 1
+                async with semaphore:
+                    output = await self.caller.complete(
+                        "shallow",
+                        {
+                            "project": project_context(profile),
+                            "changes": [
+                                capsule_semantic_payload(item.capsule, item.digest)
+                                for item in batch
+                            ],
+                        },
+                        InsightBatch,
+                        validate,
+                    )
+                receipt = self.caller.last_receipt()
                 for insight in output.results:
                     item = validated_products[insight.change_id]
                     products[item.change_id] = item
                     self.repository.cache_insight(
-                        keys[item.change_id],
+                        current_keys[item.change_id],
                         {
                             "insight": insight.model_dump(mode="json"),
-                            "provenance": self.caller.audit[-1:],
+                            "provenance": [receipt] if receipt else [],
                         },
                     )
                     self.repository.save_insight(scan_id, item)
+                    stats["semantic"] += 1
             except (RuntimeError, ValueError):
-                # Large structured batches can fail even when smaller subsets are healthy.
-                # Split deterministically; never drop to Top-K and never recurse to one call/item
-                # unless the original failing batch is already very small.
+                # Keep model concurrency bounded even during repair. Split failed work; never
+                # truncate to Top-K and never silently replace a semantic result with a fake one.
                 if len(batch) > self.caller.policy.retry_split_min_batch:
+                    stats["semantic_batch_splits"] += 1
                     middle = len(batch) // 2
-                    await interpret_batch(batch[:middle])
-                    await interpret_batch(batch[middle:])
+                    await asyncio.gather(
+                        interpret_batch(batch[:middle]), interpret_batch(batch[middle:])
+                    )
                     return
-                for digest in batch:
-                    item = project_change(digest, None, profile)
-                    products[digest.change_id] = item
+                for work in batch:
+                    item = project_change(work.digest, None, profile)
+                    products[work.digest.change_id] = item
                     self.repository.save_insight(scan_id, item)
+                    stats["unavailable"] += 1
             self.progress(
-                "interpreting_changes", "正在逐批理解每一个变化", len(products), len(digests)
+                "interpreting_changes", "正在理解需要语义判断的变化", len(products), len(digests)
             )
 
-        for batch in self._batches(pending):
-            await interpret_batch(batch)
-        return [products[d.change_id] for d in digests], hits
-
-    def _batches(self, digests: list[ChangeDigest]) -> list[list[ChangeDigest]]:
-        batches: list[list[ChangeDigest]] = []
-        current: list[ChangeDigest] = []
-        size = 0
-        for digest in digests:
-            item_size = len(digest.model_dump_json().encode())
-            if current and (
-                len(current) >= self.caller.policy.batch_size
-                or size + item_size > self.caller.policy.batch_input_bytes
-            ):
-                batches.append(current)
-                current, size = [], 0
-            current.append(digest)
-            size += item_size
-        if current:
-            batches.append(current)
-        return batches
+        if batches:
+            await asyncio.gather(*(interpret_batch(batch) for batch in batches))
+        return [products[digest.change_id] for digest in digests], stats

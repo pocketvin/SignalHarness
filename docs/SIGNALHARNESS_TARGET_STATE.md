@@ -29,7 +29,9 @@ Connect project
 → auto-generate and activate Project Profile
 → collect environment changes
 → normalize / revision-track / deduplicate / aggregate into ChangeRevisions
-→ cheaply interpret every ChangeRevision in bounded batches
+→ build a deterministic FactCapsule for every ChangeRevision
+→ resolve ChangeInsight from validated cache / deterministic rules / bounded semantic batches
+→ build an ultra-compact DirectionDigest for every ChangeInsight
 → synthesize first-class EnvironmentDirections from the full period corpus
 → build the user-facing Relevant projection
 → select a small Featured set for presentation only
@@ -44,9 +46,9 @@ The primary result page should show, in this order:
 2. The **current EnvironmentDirections**: what patterns are forming, strengthening, weakening, or newly appearing, with supporting Changes and practical watch points.
 3. A natural Chinese overall environment report synthesized from the full frozen period corpus.
 4. A **Featured 5** set of Changes worth reading first. Featured is a presentation projection only; it does not automatically receive expensive deep analysis.
-5. An obvious entry to all relevant Changes in that time range, where every row has at least a cheap model-generated explanation of what changed and a lightweight project-relevance hint.
+5. An obvious entry to all relevant Changes in that time range, where every row has at least a cheap shallow explanation of what changed and a lightweight project-relevance hint, regardless of whether that Insight came from validated cache, deterministic structured facts, or a semantic model call.
 
-The scan-time semantic budget and the on-demand Deep Dive budget are different contracts. A Scan may observe/aggregate 300 Changes. All of them remain in the environment-synthesis horizon and receive bounded shallow interpretation; the system must not spend evidence-research / multi-step impact-analysis budget on an arbitrary Top-K during the scan. **Featured 5 is selected from shallow intelligence for reading priority, not as a hidden deep-analysis queue.** Expensive evidence resolution, code-usage inspection, impact/action analysis, and optional verification start only after the user opens a Change or explicitly requests a deeper Direction analysis.
+The scan-time semantic budget and the on-demand Deep Dive budget are different contracts. A Scan may observe/aggregate 300 Changes. All of them remain in the environment-synthesis horizon and receive a persisted shallow ChangeInsight; producing that Insight does not require an LLM when validated cache or deterministic structured facts are sufficient; the system must not spend evidence-research / multi-step impact-analysis budget on an arbitrary Top-K during the scan. **Featured 5 is selected from shallow intelligence for reading priority, not as a hidden deep-analysis queue.** Expensive evidence resolution, code-usage inspection, impact/action analysis, and optional verification start only after the user opens a Change or explicitly requests a deeper Direction analysis.
 
 Keep **Observed corpus**, **Relevant projection**, **Featured projection**, and **On-demand Deep Dive state** distinct. Weak individual observations may still combine into a supported emerging direction, while raw source noise must not be mislabeled as project-relevant.
 
@@ -132,10 +134,15 @@ The target scan path is **not** a fixed multi-Agent team. It is a bounded analys
 ```text
 L0  deterministic identity / revision / aggregation / source authority
  ↓
-L1  batched ChangeInterpreter over the full Change corpus
+L1  FactCapsule + cache/deterministic SemanticRouter
+     semantic misses → diversity-aware batched ChangeInterpreter with bounded concurrency
  ↓
-L2  ONE EnvironmentSynthesizer call over the full shallow corpus
-    returns Directions + overall brief + risks/opportunities + Featured IDs
+     ChangeInsight for every Change
+ ↓
+L1.5 DirectionDigestBuilder + deterministic CorpusOrganizer
+ ↓
+L2  ONE EnvironmentSynthesizer call over every compact external DirectionDigest
+    returns Directions + overall brief + Featured IDs
  ↓
      Relevant view + Featured 5 presentation
 
@@ -161,11 +168,13 @@ The current five-Agent implementation remains a regression baseline during migra
 - `LearningPolicyAgent`: remain outside the Scan hot path in calibration/replay.
 - `ProjectNarrativeAgent`: replace its scan-time product role with full-corpus EnvironmentDirection synthesis and report composition; it must not summarize only a Featured subset.
 
-The cheap ChangeInterpreter must be batch-friendly and schema-bounded so 100–500 Changes can be processed predictably. “Every Change receives shallow interpretation” does **not** mean one provider call per Change: compact multiple ChangeDigests into bounded batches, preserve `change_id` identity in every output row, retry/repair by failed batch or failed item, and persist results independently. It may output a short display summary and lightweight relevance/attention classification, but it may not fabricate source evidence, code reachability, exact affected modules, or detailed remediation. Those claims belong to Deep Dive after evidence is actually resolved.
+Every Change receives a shallow `ChangeInsight`, but **not every Change must consume model tokens**. Build a `FactCapsule` first from deterministic source identity, version/date, authority and exact Project Profile matches. Validated cache wins first. Conservative structured cases may create a deterministic Insight; rich releases, advisories, issues, RSS, web diffs and ambiguous project relations remain semantic. The semantic ChangeInterpreter must be batch-friendly and schema-bounded, use diversity-aware deterministic batching, bounded concurrency, and split failed large batches without silently dropping work or degrading to one call per Change. It may output a short display summary and lightweight relevance/attention classification, but it may not fabricate source evidence, code reachability, exact affected modules, or detailed remediation.
+
+The user-readable `ChangeInsight` and strong-model input are different contracts. A deterministic `DirectionDigestBuilder` compresses each Insight to a compact fact/entity/kind/date/posture/topic/project-relation/source row, while full Evidence remains persisted for Change detail/Deep Dive. `CorpusOrganizer` may add count indexes and ordering but must never summarize away Changes.
 
 Current implementation and deliberate limits are documented in `docs/ENVIRONMENT_INTELLIGENCE_V1.md`; the target below must not be read as a claim that every capability is implemented.
 
-EnvironmentDirection synthesis should normally receive the **entire compact ChangeInsight corpus for the Scan** so the model can connect weak signals across batches. If the corpus exceeds the selected model's safe context/budget, use an explicit hierarchical reduction whose intermediate summaries retain supporting Change IDs; never silently truncate to Featured or Top-K.
+EnvironmentDirection synthesis should normally receive **every compact external DirectionDigest for the Scan** so the model can connect weak signals across batches. If the digest corpus exceeds the selected model's safe context/budget, use an explicit provenance-preserving hierarchical reduction once implemented; until then, degrade truthfully rather than silently truncating to Featured or Top-K.
 
 ## 6. Memory and state boundaries
 

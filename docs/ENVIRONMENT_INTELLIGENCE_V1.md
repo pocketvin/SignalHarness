@@ -1,6 +1,6 @@
 # 方向优先的环境情报：首个可运行闭环
 
-更新日期：2026-09-11。当前实现范围：`environment-v1.5`。这是第一轮工程闭环，不代表完整产品质量验收已经结束。
+更新日期：2026-09-11。当前实现范围：`environment-v1.6`。这是第一轮工程闭环，不代表完整产品质量验收已经结束。
 
 ## 正常产品流程
 
@@ -8,10 +8,14 @@
 共享来源采集（GitHub / Local Git / PyPI / OSV / RSS / Web）
 → Event 身份与内容修订
 → 确定性跨来源 Change 聚合 + 冻结 ChangeRevision / 证据
-→ 全量 Change 分批浅层理解（默认每批最多 12 条，另有输入大小上限）
-→ Python 构造完整紧凑语料，保留弱相关与解释失败条目
+→ 每个 Change 构造 FactCapsule，先查可验证缓存
+→ 能确定性完成的结构化 Change 直接生成 ChangeInsight（0 token）
+→ 只有语义项进入弱模型队列（默认每批最多 12 条、并发 3、失败拆批）
+→ 每个 Change 最终都有 ChangeInsight
+→ DirectionDigestBuilder 将每条 Insight 压成全局综合专用紧凑行
+→ CorpusOrganizer 保留全部 Change，仅增加确定性索引/排序
 → 一次 EnvironmentSynthesizer 调用
-   同时输出方向、整体报告、风险/机会和最多 5 条 Featured
+   输出方向、整体报告和最多 5 条 Featured
 → 保存历史报告，按需 SQL 查询相关/全部变化
 ```
 
@@ -38,8 +42,12 @@ GET、方向证据列表、悬停均不启动模型。Deep Dive 不改写历史�
 | `runtime/workflow.py` | 共享采集入口；新产品分支在旧候选筛选之前切出；旧链路保留回归对照 |
 | `runtime/environment_scan.py` | 新扫描的领域冻结、分析调用、产物和完成状态 |
 | `intelligence/contracts.py` | 产品契约；不把评分/模型选择变成产品字段 |
-| `intelligence/corpus.py` | 确定性聚合、紧凑上下文、引用/偏好/方向状态约束 |
-| `intelligence/engine.py` | 批量浅理解 + 单次全局综合；缓存与可见降级 |
+| `intelligence/corpus.py` | 确定性聚合、引用/偏好/方向状态约束 |
+| `intelligence/fact_capsule.py` | 从 ChangeRevision 提取模型前可确定的事实与精确项目关系 |
+| `intelligence/semantic_router.py` | cache / deterministic / semantic 的确定性路由与 Tiny 候选判断 |
+| `intelligence/batch_planner.py` | 语义项的多样性平衡 Batch、大小预算与可复现顺序 |
+| `intelligence/direction_digest.py` | 将完整 ChangeInsight 压成强模型使用的全量紧凑 DirectionDigest |
+| `intelligence/engine.py` | 三路 Insight 解析、有界并行弱模型 + 单次全局综合；缓存与可见降级 |
 | `intelligence/model_calls.py` | 有界调用、中文/结构校验、重试、备用模型与真实审计 |
 | `providers/task_policy.py` | 服务端按任务选模型，使用各自凭据命名空间 |
 | `persistence/intelligence.py` | 同一 Ledger 中的版本化表与 SQL 筛选/分页 |
@@ -182,6 +190,42 @@ V1 删除了强模型输出 Schema 中独立的 `risks` / `opportunities` 字段
 最终 5 个 Direction 的证据集合两两重叠率为 0；没有项目自身 Change 支撑 Direction/Brief，没有内部字段或 Change ID 泄漏，没有已知错误“同日”断言。该结果是**结构化语义质量门通过**，不是对所有结论真实性的独立人工/网页复核。
 
 浏览器验收覆盖方向证据姿态、外部/项目自身分区、方向证据导航和移动端。主页面不再展示独立风险/机会块，也没有模型选择、mock、影响分或 raw Change ID。
+
+## 2026-09-11 P0 成本感知主链（environment-v1.6）
+
+新的产品不变量是：**全量理解不等于全量调用模型。每个 Change 必须得到 ChangeInsight，但 Insight 的来源可以是 cache、deterministic 或 semantic。**
+
+```text
+ChangeRevision
+→ FactCapsule
+→ validated cache ?
+   ├─ hit → ChangeInsight
+   └─ miss
+      → deterministic eligible ?
+         ├─ yes → ChangeInsight (0 model token)
+         └─ no  → BalancedBatchPlanner → bounded parallel ChangeInterpreter
+→ all ChangeInsights
+→ DirectionDigestBuilder
+→ CorpusOrganizer
+→ full compact corpus budget check
+→ ONE EnvironmentSynthesizer
+```
+
+当前 deterministic bypass 故意保守：正常 PyPI/package-registry 发布且能精确关联项目、以及项目自身活动可以跳过弱模型；GitHub Release、安全公告、Issue、RSS、Web diff 或关系不明确的 Change 继续走语义理解。Package metadata 出现非零 yanked 时也强制回到 semantic；如果同一个 package release 已聚合 GitHub Release 等更丰富来源，也继续走 semantic，避免 0-token 路径丢掉 release notes。
+
+弱模型默认 `batch_size=12`、`shallow_concurrency=3`。BatchPlanner 在能做到时按实体 round-robin，降低同一实体密集内容造成的 priming；调用完成顺序不影响最终顺序，结果按 Change identity 重新收敛。失败 Batch 可以二分重试，但每次真实调用仍受同一个 Semaphore 限制。并行状态下成功调用 receipt 使用 task-local ContextVar，避免另一个 Batch 先完成后污染缓存 provenance。
+
+强模型不再接收完整 `ProductChange`。每条 `DirectionDigest` 只保留短字段：Change ID、实体、类型、天级日期、证据姿态、≤88 字事实、最多 3 个主题、项目关系和最多 3 个来源 identity；字段图例只发送一次。完整 Evidence、长说明和 Deep Dive 数据仍在持久层。当前 `global_input_bytes=450000`，它是保守 UTF-8 transport budget，不冒充精确 token 计数。
+
+零 API 离线验收：
+
+- 1,000 个结构化 package release → 1,000 deterministic Insight，**0 weak call + 1 scripted strong call**，完整 1,000 个 Digest 均进入全局综合；完整 ProductChange 序列化约 966 KB，DirectionDigest 约 245 KB（25.3%），全局请求约 257 KB，低于 450 KB budget。
+- 1,000 个全部需要语义理解的 scripted Change → 84 个弱 Batch + 1 个强综合，完整 1,000 条仍进入 Global Corpus，没有 Top-K。
+- 24 条混合场景第一次为 12 deterministic + 12 semantic，只需 1 个弱 Batch；相同 Revision 第二次为 12 deterministic + 12 cache，弱模型调用为 0。
+- 对上一轮 71 条真实保存来源观察做 **0 API 静态路由估算**：67 Change 中，即使完全不使用缓存，也有 8 条可以保守 deterministic、59 条需要 semantic，规划为 5 个 Batch（并发上限 3）；这些 semantic Change 的模型输入从旧版约 100,935 bytes 降为约 64,034 bytes，即 63.4%。这是字节口径，不冒充精确 token 数。
+- Tiny fast path 已有 whole-corpus 判断点（≤4 条且输入≤24 KB），**尚未激活**。只有整个 corpus 很小时才有资格跳过 weak；500 条里只有 3 个 cache miss 仍不是 Tiny。
+
+这一 checkpoint 没有运行新的真实 Provider 大矩阵。原因是目标本身就是降 token；批次并发、1000 条完整性、缓存、split retry、Digest budget 等先用 scripted/offline 证明，后续真实测试只做小样本探针。
 
 ## 本轮未宣称完成的能力
 

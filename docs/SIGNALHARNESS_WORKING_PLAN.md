@@ -6,6 +6,25 @@
 
 This document records where construction should go next and how each phase should be verified. It is intentionally mutable. After every completed phase, update Current State, Retrospective, Acceptance evidence, and the next phase before continuing.
 
+## P0 COST-AWARE INTELLIGENCE CHECKPOINT — 2026-09-11
+
+**Implemented offline-first; no new real-provider eval was spent for this checkpoint.**
+
+- Changed the invariant from “every Change goes through the weak model” to **“every Change gets a ChangeInsight.”** Resolution order is validated cache → conservative deterministic FactCapsule route → semantic ChangeInterpreter.
+- Added `fact_capsule.py`, `semantic_router.py`, `batch_planner.py`, and `direction_digest.py`. The router is deterministic; no Supervisor/model decides whether another model should run.
+- Deterministic bypass is intentionally conservative: normal structured package-registry releases with exact project exposure and project-owned activity can skip the weak model. Rich GitHub releases, security advisories, Issues, RSS/Web changes and ambiguous relations still use semantic interpretation. Yanked package releases and cross-source package Changes containing richer GitHub Release evidence are explicitly kept semantic.
+- Semantic batches are diversity-aware (round-robin by entity where possible), default to 12 items, and run with bounded concurrency 3. Split retries share the same semaphore. Concurrent call provenance uses task-local receipts so cache provenance is not corrupted by parallel completion order.
+- Added compatibility migration for validated `environment-v1.3` shallow caches into the new shallow-cache identity, avoiding forced token spend after the architecture change.
+- Added an ultra-compact `DirectionDigest` (`id/e/k/d/p/f/t/r/s` with one legend), day-level dates, ≤88-character facts, no full Evidence and no long relation reason. `CorpusOrganizer` keeps every Change and adds count-only indexes.
+- Global synthesis budget is now 450,000 UTF-8 bytes (a conservative transport budget, not a fake exact token count). Over-budget behavior remains degraded/full-preservation rather than Top-K truncation.
+- Tiny strong-only fast path has a real deterministic eligibility check (whole corpus ≤4 and ≤24 KB), but activation remains **false** until a small real-model comparison is justified. 500 Changes with 3 misses is explicitly not Tiny.
+- Zero-API acceptance: 1,000 structured package releases → 1,000 deterministic Insights, 0 weak calls, 1 strong scripted synthesis over all 1,000 digests; full ProductChange serialization ~966 KB → DirectionDigest ~245 KB (25.3%), total synthesis payload ~257 KB < 450 KB. Separately, 1,000 all-semantic scripted Changes → 84 shallow batches + 1 strong call, all 1,000 retained under budget.
+- Mixed-route acceptance: first 24-Change scan (12 deterministic + 12 semantic) uses one weak batch; second identical scan uses 12 deterministic + 12 cache and **zero** weak calls before the one global synthesis.
+- Zero-API routing estimate on the previous 71 stored real observations: 67 Changes → 8 conservative deterministic + 59 semantic even with cache disabled; 5 planned semantic batches at concurrency 3. Semantic payload bytes fall from ~100,935 under the old ChangeDigest input to ~64,034 (63.4%); this is a transport-byte comparison, not a tokenizer claim.
+- Final repository verification after this cost-aware slice: **432 Python tests passed**, Ruff passed, mypy passed over 137 source files, TypeScript/Vite passed, wheel/sdist built, and the isolated legacy mock scan/trace/calibrate chain remained green.
+
+**Next accepted scope remains cost-bounded:** do not run a large Batch-size/model matrix. If a real Batch-bias probe is needed, use a handful of anchor Changes and stop early when stability is sufficient. Fresh 100–500 Change Direction eval remains the next semantic milestone, but should reuse cached Insights and have an explicit API/token budget.
+
 ## P0 SEMANTIC QUALITY CHECKPOINT — 2026-09-11
 
 **Implemented and structurally accepted on a saved-real-source replay; broader live semantic eval remains next.**
@@ -26,8 +45,8 @@ This document records where construction should go next and how each phase shoul
 **Implemented: first end-to-end direction-first product slice, not final V1 acceptance.**
 
 - New `/demo` frontend now consumes `/intelligence/*`: Directions → full brief → Featured ≤5 → all/relevant Changes → clicked read-only Deep Dive. No model/mode/mock/score selector.
-- Production Web, new `environment` CLI, and newly created product schedules run full-corpus shallow batches followed by ONE global synthesis call. Old `scan`/MCP remain compatibility baselines.
-- SQLite v7 persists aggregated ChangeRevision evidence, shallow results, versioned reports/Directions, cache and separate Deep Dive jobs. SQL implements list filters/sort/pagination.
+- Production Web, new `environment` CLI, and newly created product schedules resolve a ChangeInsight for every Change (cache/deterministic/semantic) followed by ONE full-corpus compact global synthesis. Old `scan`/MCP remain compatibility baselines.
+- SQLite v8 persists aggregated ChangeRevision evidence, corpus role, shallow results, versioned reports/Directions, cache and separate Deep Dive jobs. SQL implements list filters/sort/pagination.
 - ID coverage/citation guards, Chinese-prose validation, provider fallback, frozen POST-time window, history immutability, idempotent click jobs and no-auto-deep contracts are tested.
 - Removed Mock Provider → capability_eval import by relocating shared schemas; production providers no longer import eval.
 - Verified 300-item dataflow using scripted Provider (15 batches + 1 global); real Provider replay uses 8 saved observations → 6 Changes → 3 Directions. These are different evidence levels.
@@ -61,7 +80,7 @@ P1–P8 remain useful implementation history and tested infrastructure, but they
 
 ### P0-A — Full-corpus shallow intelligence + Direction-first synthesis
 
-- Remove the fixed scan-time “deep analyze 10–15” product contract. **Every aggregated Change receives bounded shallow interpretation; expensive Deep Dive is lazy and user-triggered.**
+- Remove the fixed scan-time “deep analyze 10–15” product contract. **Every aggregated Change receives a persisted shallow ChangeInsight; cache or deterministic structured facts may avoid model calls, while expensive Deep Dive is lazy and user-triggered.**
 - Explicitly separate **Observed Change Corpus → shallow ChangeInsight for all → Relevant Projection → Featured 5 presentation → optional DeepDiveAnalysis**. The current code incorrectly equates pre-funnel deduplicated count with `relevant_count`; fix that semantic boundary.
 - Build the full-period `EnvironmentSynthesis` path over the entire frozen aggregated Change corpus (for example 300 Changes) through bounded `ChangeDigest + ChangeInsight` contracts, so weak individual signals can combine into an emerging direction.
 - Make `EnvironmentDirection` a first-class versioned object with supporting Change IDs, state (`emerging/strengthening/stable/weakening`), source diversity, project-exposure hints, uncertainty, and `watch_next`. Direction continuity across Scans is part of the product contract.

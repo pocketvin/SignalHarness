@@ -63,8 +63,19 @@ class ScriptedIntelligenceProvider:
                 results = results[:-1]
             return json.dumps({"results": results}, ensure_ascii=False)
         if call.output_schema == SynthesisOutput.__name__:
-            ids = [item["change_id"] for item in payload["corpus"]]
-            refs = ids[-3:] if len(ids) >= 3 else ids
+            ids = [item.get("change_id", item.get("id")) for item in payload["corpus"]]
+            refs = []
+            seen_entities = set()
+            for item in reversed(payload["corpus"]):
+                entity = str(item.get("entity") or item.get("e") or "").casefold()
+                if entity in seen_entities:
+                    continue
+                refs.append(item.get("change_id", item.get("id")))
+                seen_entities.add(entity)
+                if len(refs) == min(3, len(ids)):
+                    break
+            if len(refs) < min(2, len(ids)):
+                refs = ids[-3:] if len(ids) >= 3 else ids
             if self.fault == "foreign_direction":
                 refs = [*refs, "chg-not-in-corpus"]
             previous = payload.get("previous_report")
@@ -178,7 +189,7 @@ def test_300_changes_all_reach_global_model_without_topk(
     ) // engine.caller.policy.batch_size
     assert len(calls) == expected_batches + 1  # bounded batches + ONE synthesis, never per-item.
     assert len(calls[-1].input_payload["corpus"]) == 300
-    assert len({c["change_id"] for c in calls[-1].input_payload["corpus"]}) == 300
+    assert len({c.get("change_id", c.get("id")) for c in calls[-1].input_payload["corpus"]}) == 300
     assert set(report.directions[0].supporting_change_ids).isdisjoint(
         {c.change_id for c in report.featured}
     )
@@ -686,3 +697,613 @@ def test_official_rss_authority_uses_deterministic_source_quality(tmp_path: Path
     )
     digest = assemble_changes([event], ledger.persist_observations([event]))[0]
     assert digest.evidence[0].authority == "official"
+
+
+def test_1000_structured_package_releases_skip_weak_model_and_keep_full_global_corpus(
+    tmp_path: Path, project_root: Path
+) -> None:
+    ledger = ChangeLedger(tmp_path / "cost-aware.sqlite3")
+    dependencies = [f"pkg-{index:04d}" for index in range(1000)]
+    profile = ledger.ensure_profile_revision(
+        project_id="cost-aware",
+        auto_profile={"project_name": "成本测试项目", "dependencies": dependencies},
+    )
+    ledger.begin_scan(
+        scan_id="scan-1000",
+        project_id="cost-aware",
+        collected_count=1000,
+        deduped_count=1000,
+        profile_revision_id=profile["profile_revision_id"],
+    )
+    events = [
+        SignalEvent(
+            event_id=f"release-{index:04d}",
+            source_type="package_registry",
+            source_name=package,
+            title=f"{package} 1.0.{index}",
+            content=f"PyPI release 1.0.{index} for {package}",
+            url=f"https://pypi.org/project/{package}/1.0.{index}/",
+            collected_at=NOW,
+            published_at=NOW,
+            current_version=f"1.0.{index}",
+            raw_payload={
+                "registry": "pypi",
+                "package_name": package,
+                "official": True,
+                "source_authority": "official",
+            },
+        )
+        for index, package in enumerate(dependencies)
+    ]
+    digests = assemble_changes(events, ledger.persist_observations(events))
+    calls: list[AgentCall] = []
+    policy = TaskPolicy.load(project_root / "configs")
+    caller = BoundedModelCaller(
+        policy,
+        TraceRecorder(),
+        lambda name, role: ScriptedIntelligenceProvider(calls),
+        {role: ["offline"] for role in ("shallow", "synthesis", "deep_dive")},
+    )
+    repo = IntelligenceRepository(ledger.path)
+    engine = EnvironmentEngine(repo, caller)
+    report = asyncio.run(
+        engine.run(
+            scan_id="scan-1000",
+            project_id="cost-aware",
+            profile_revision_id=profile["profile_revision_id"],
+            profile=profile["effective_profile"],
+            digests=digests,
+            window={"from": "2026-09-10T00:00:00+00:00", "to": "2026-09-11T00:00:00+00:00"},
+            observed_count=1000,
+            sources=[],
+            coverage_status="complete",
+        )
+    )
+    assert report.status == "complete"
+    assert report.counts["interpreted"] == report.counts["changes"] == 1000
+    assert report.counts["automatic_deep_dives"] == 0
+    assert all(call.agent_name != "ChangeInterpreter" for call in calls)
+    synthesis_calls = [call for call in calls if call.agent_name == "EnvironmentSynthesizer"]
+    assert len(synthesis_calls) == 1
+    assert len(synthesis_calls[0].input_payload["corpus"]) == 1000
+    assert (
+        len(
+            {
+                item.get("change_id", item.get("id"))
+                for item in synthesis_calls[0].input_payload["corpus"]
+            }
+        )
+        == 1000
+    )
+    with repo.connect() as db:
+        audit = json.loads(
+            db.execute(
+                "SELECT audit_json FROM environment_reports WHERE scan_id='scan-1000'"
+            ).fetchone()[0]
+        )
+    routing = audit["insight_routing"]
+    assert routing["deterministic"] == 1000
+    assert routing["semantic"] == 0
+    assert routing["planned_semantic_batches"] == 0
+    assert routing["tiny_fast_path_activated"] is False
+    assert audit["synthesis_input_bytes"] < policy.global_input_bytes
+
+
+def test_balanced_batch_planner_spreads_entities_before_repeating(tmp_path: Path) -> None:
+    from signal_harness.intelligence.batch_planner import BalancedBatchPlanner
+    from signal_harness.intelligence.fact_capsule import build_fact_capsule
+    from signal_harness.intelligence.semantic_router import SemanticWorkItem
+
+    events = []
+    for entity in ("alpha/repo", "beta/repo", "gamma/repo"):
+        for index in range(3):
+            events.append(
+                SignalEvent(
+                    event_id=f"{entity}-{index}",
+                    source_type="github_issue",
+                    source_name=entity,
+                    title=f"Issue {index}",
+                    content="A semantic issue that needs interpretation.",
+                    url=f"https://example.com/{entity}/{index}",
+                    collected_at=NOW,
+                    published_at=NOW,
+                    raw_payload={"author_association": "NONE"},
+                )
+            )
+    ledger = ChangeLedger(tmp_path / "planner.sqlite3")
+    digests = assemble_changes(events, ledger.persist_observations(events))
+    work = [
+        SemanticWorkItem(digest=digest, capsule=build_fact_capsule(digest, {}))
+        for digest in digests
+    ]
+    batches = BalancedBatchPlanner(max_items=6, max_input_bytes=100000).plan(work)
+    first_entities = [item.capsule.entity for item in batches[0]]
+    assert first_entities[:3] == ["alpha/repo", "beta/repo", "gamma/repo"]
+    assert first_entities[3:6] == ["alpha/repo", "beta/repo", "gamma/repo"]
+
+
+class _ConcurrencyProbeProvider(ScriptedIntelligenceProvider):
+    def __init__(self, calls: list[AgentCall], tracker: dict[str, int]) -> None:
+        super().__init__(calls)
+        self.tracker = tracker
+
+    async def complete(self, call: AgentCall) -> str:
+        if call.output_schema == InsightBatch.__name__:
+            self.tracker["active"] += 1
+            self.tracker["max_active"] = max(self.tracker["max_active"], self.tracker["active"])
+            await asyncio.sleep(0.03)
+            try:
+                return await super().complete(call)
+            finally:
+                self.tracker["active"] -= 1
+        return await super().complete(call)
+
+
+def test_semantic_batches_use_bounded_parallelism(tmp_path: Path, project_root: Path) -> None:
+    engine, kwargs, calls, _, *_ = setup_engine(tmp_path, project_root, 36)
+    tracker = {"active": 0, "max_active": 0}
+    engine.caller.policy = replace(
+        engine.caller.policy,
+        batch_size=4,
+        batch_input_bytes=100000,
+        shallow_concurrency=3,
+    )
+    engine.caller.factory = lambda name, role: _ConcurrencyProbeProvider(calls, tracker)
+    report = asyncio.run(engine.run(**kwargs))
+    assert report.status == "complete"
+    assert tracker["max_active"] == 3
+    assert report.counts["interpreted"] == 36
+    with engine.repository.connect() as db:
+        audit = json.loads(
+            db.execute(
+                "SELECT audit_json FROM environment_reports WHERE scan_id='scan-test'"
+            ).fetchone()[0]
+        )
+    assert audit["insight_routing"]["planned_semantic_batches"] == 9
+    assert audit["insight_routing"]["shallow_concurrency"] == 3
+
+
+def test_tiny_fast_path_is_only_a_decision_point_until_eval(
+    tmp_path: Path, project_root: Path
+) -> None:
+    engine, kwargs, calls, _, *_ = setup_engine(tmp_path, project_root, 3)
+    report = asyncio.run(engine.run(**kwargs))
+    assert report.status == "complete"
+    # Small corpus qualifies for a future strong-only fast path, but this release deliberately
+    # keeps the normal weak + strong path until a bounded real-model comparison is approved.
+    assert any(call.agent_name == "ChangeInterpreter" for call in calls)
+    with engine.repository.connect() as db:
+        audit = json.loads(
+            db.execute(
+                "SELECT audit_json FROM environment_reports WHERE scan_id='scan-test'"
+            ).fetchone()[0]
+        )
+    assert audit["insight_routing"]["tiny_fast_path_candidate"] is True
+    assert audit["insight_routing"]["tiny_fast_path_activated"] is False
+
+
+def test_direction_digest_keeps_every_change_without_repeating_long_evidence(
+    tmp_path: Path,
+) -> None:
+    from signal_harness.intelligence.contracts import Evidence, ProductChange
+    from signal_harness.intelligence.direction_digest import organize_direction_corpus
+
+    changes = [
+        ProductChange(
+            change_id=f"c{index}",
+            revision_id=f"r{index}",
+            title="Long evidence change",
+            entity=f"entity-{index % 10}",
+            kind="github_issue",
+            published_at=NOW.isoformat(),
+            summary="上游报告了一个需要关注的兼容性变化。",
+            what_changed="流式解析在特定控制事件上可能提前结束，需要继续确认。" * 8,
+            project_relation="context",
+            relation_reason="项目包含相关流式处理路径。" * 8,
+            attention="normal",
+            topics=["流式解析", "兼容性"],
+            uncertainty="当前信息来自问题报告，尚未确认修复状态。",
+            interpretation_status="ready",
+            relevant=True,
+            evidence=[
+                Evidence(
+                    evidence_id=f"e{index}",
+                    event_revision_id=index + 1,
+                    source_name=f"repo-{index % 10}",
+                    source_type="github_issue",
+                    url=f"https://example.com/{index}",
+                    authority="community",
+                    excerpt="X" * 1800,
+                )
+            ],
+        )
+        for index in range(1000)
+    ]
+    organized = organize_direction_corpus(changes)
+    encoded = json.dumps(organized, ensure_ascii=False, separators=(",", ":")).encode()
+    assert len(organized["items"]) == 1000
+    assert len({item["id"] for item in organized["items"]}) == 1000
+    assert all(
+        "evidence" not in item and "relation_reason" not in item for item in organized["items"]
+    )
+    assert len(encoded) < 450000
+
+
+def test_mixed_deterministic_semantic_then_cache_reuse_only_calls_new_semantics(
+    tmp_path: Path, project_root: Path
+) -> None:
+    ledger = ChangeLedger(tmp_path / "mixed-routes.sqlite3")
+    dependencies = [f"pkg-{index}" for index in range(12)]
+    profile = ledger.ensure_profile_revision(
+        project_id="mixed",
+        auto_profile={"project_name": "混合路由项目", "dependencies": dependencies},
+    )
+    events: list[SignalEvent] = []
+    for index, package in enumerate(dependencies):
+        events.append(
+            SignalEvent(
+                event_id=f"release-{index}",
+                source_type="package_registry",
+                source_name=package,
+                title=f"{package} 1.0.{index}",
+                content=f"PyPI release 1.0.{index}",
+                url=f"https://pypi.org/project/{package}/1.0.{index}/",
+                collected_at=NOW,
+                published_at=NOW,
+                current_version=f"1.0.{index}",
+                raw_payload={
+                    "registry": "pypi",
+                    "package_name": package,
+                    "official": True,
+                },
+            )
+        )
+    for index in range(12):
+        events.append(
+            SignalEvent(
+                event_id=f"issue-{index}",
+                source_type="github_issue",
+                source_name=f"repo-{index % 4}",
+                title=f"Semantic issue {index}",
+                content="A reported runtime behavior needs semantic interpretation.",
+                url=f"https://example.com/issues/{index}",
+                collected_at=NOW,
+                published_at=NOW,
+                raw_payload={"author_association": "NONE"},
+            )
+        )
+    digests = assemble_changes(events, ledger.persist_observations(events))
+    policy = TaskPolicy.load(project_root / "configs")
+    repo = IntelligenceRepository(ledger.path)
+
+    def run(scan_id: str, calls: list[AgentCall]) -> dict[str, Any]:
+        ledger.begin_scan(
+            scan_id=scan_id,
+            project_id="mixed",
+            collected_count=len(events),
+            deduped_count=len(digests),
+            profile_revision_id=profile["profile_revision_id"],
+        )
+        caller = BoundedModelCaller(
+            policy,
+            TraceRecorder(),
+            lambda name, role: ScriptedIntelligenceProvider(calls),
+            {role: ["offline"] for role in ("shallow", "synthesis", "deep_dive")},
+        )
+        engine = EnvironmentEngine(repo, caller)
+        report = asyncio.run(
+            engine.run(
+                scan_id=scan_id,
+                project_id="mixed",
+                profile_revision_id=profile["profile_revision_id"],
+                profile=profile["effective_profile"],
+                digests=digests,
+                window={
+                    "from": "2026-09-10T00:00:00+00:00",
+                    "to": "2026-09-11T00:00:00+00:00",
+                },
+                observed_count=len(events),
+                sources=[],
+                coverage_status="complete",
+            )
+        )
+        assert report.status == "complete"
+        with repo.connect() as db:
+            return json.loads(
+                db.execute(
+                    "SELECT audit_json FROM environment_reports WHERE scan_id=?", (scan_id,)
+                ).fetchone()[0]
+            )
+
+    first_calls: list[AgentCall] = []
+    first = run("mixed-1", first_calls)
+    assert first["insight_routing"]["deterministic"] == 12
+    assert first["insight_routing"]["semantic"] == 12
+    assert first["insight_routing"]["cache_hits"] == 0
+    assert sum(call.agent_name == "ChangeInterpreter" for call in first_calls) == 1
+
+    second_calls: list[AgentCall] = []
+    second = run("mixed-2", second_calls)
+    assert second["insight_routing"]["deterministic"] == 12
+    assert second["insight_routing"]["semantic"] == 0
+    assert second["insight_routing"]["cache_hits"] == 12
+    assert all(call.agent_name != "ChangeInterpreter" for call in second_calls)
+    assert sum(call.agent_name == "EnvironmentSynthesizer" for call in second_calls) == 1
+
+
+def test_legacy_shallow_cache_is_validated_and_promoted_without_model_recompute(
+    tmp_path: Path, project_root: Path
+) -> None:
+    from signal_harness.intelligence.contracts import (
+        CHANGE_INSIGHT_VERSION,
+        LEGACY_CHANGE_INSIGHT_VERSIONS,
+    )
+    from signal_harness.intelligence.corpus import identity
+
+    ledger = ChangeLedger(tmp_path / "legacy-cache.sqlite3")
+    profile = ledger.ensure_profile_revision(
+        project_id="legacy-cache", auto_profile={"project_name": "缓存项目"}
+    )
+    event = SignalEvent(
+        event_id="legacy-event",
+        source_type="web_change",
+        source_name="upstream",
+        title="上游接口发生变化",
+        content="公开说明中描述了接口行为变化。",
+        url="https://example.com/change",
+        collected_at=NOW,
+        published_at=NOW,
+        raw_payload={"official": True},
+    )
+    digest = assemble_changes([event], ledger.persist_observations([event]))[0]
+    ledger.begin_scan(
+        scan_id="legacy-cache-scan",
+        project_id="legacy-cache",
+        collected_count=1,
+        deduped_count=1,
+        profile_revision_id=profile["profile_revision_id"],
+    )
+    repo = IntelligenceRepository(ledger.path)
+    policy = TaskPolicy.load(project_root / "configs")
+    fingerprint = policy.fingerprint("shallow")
+    old_version = LEGACY_CHANGE_INSIGHT_VERSIONS[0]
+    old_key = identity(
+        "insight-",
+        [digest.revision_id, profile["profile_revision_id"], old_version, fingerprint],
+    )
+    new_key = identity(
+        "insight-",
+        [digest.revision_id, profile["profile_revision_id"], CHANGE_INSIGHT_VERSION, fingerprint],
+    )
+    cached = {
+        "insight": {
+            "change_id": digest.change_id,
+            "summary": "上游接口出现新的行为变化。",
+            "what_changed": "公开说明描述了接口行为发生变化。",
+            "project_relation": "context",
+            "relation_reason": "该接口属于项目关注的外部环境。",
+            "attention": "normal",
+            "topics": ["接口变化"],
+            "evidence_ids": [digest.evidence[0].evidence_id],
+            "uncertainty": "尚未深入核实项目调用位置。",
+        },
+        "provenance": [{"version": old_version}],
+    }
+    repo.cache_insight(old_key, cached)
+    calls: list[AgentCall] = []
+    caller = BoundedModelCaller(
+        policy,
+        TraceRecorder(),
+        lambda name, role: ScriptedIntelligenceProvider(calls),
+        {role: ["offline"] for role in ("shallow", "synthesis", "deep_dive")},
+    )
+    engine = EnvironmentEngine(repo, caller)
+    report = asyncio.run(
+        engine.run(
+            scan_id="legacy-cache-scan",
+            project_id="legacy-cache",
+            profile_revision_id=profile["profile_revision_id"],
+            profile=profile["effective_profile"],
+            digests=[digest],
+            window={"from": "2026-09-10T00:00:00+00:00", "to": "2026-09-11T00:00:00+00:00"},
+            observed_count=1,
+            sources=[],
+            coverage_status="complete",
+        )
+    )
+    assert report.status == "complete"
+    assert all(call.agent_name != "ChangeInterpreter" for call in calls)
+    with repo.connect() as db:
+        audit = json.loads(
+            db.execute(
+                "SELECT audit_json FROM environment_reports WHERE scan_id='legacy-cache-scan'"
+            ).fetchone()[0]
+        )
+    assert audit["insight_routing"]["cache_hits"] == 1
+    assert audit["insight_routing"]["legacy_cache_hits"] == 1
+    assert repo.get_cached_insight(new_key) == cached
+
+
+def test_yanked_package_release_stays_on_semantic_path(tmp_path: Path, project_root: Path) -> None:
+    ledger = ChangeLedger(tmp_path / "yanked.sqlite3")
+    profile = ledger.ensure_profile_revision(
+        project_id="yanked",
+        auto_profile={"project_name": "Yanked 项目", "dependencies": ["demo-pkg"]},
+    )
+    event = SignalEvent(
+        event_id="yanked-release",
+        source_type="package_registry",
+        source_name="demo-pkg",
+        title="demo-pkg 2.0.0",
+        content="PyPI release 2.0.0 for demo-pkg; 2 distribution file(s), 2 yanked.",
+        url="https://pypi.org/project/demo-pkg/2.0.0/",
+        collected_at=NOW,
+        published_at=NOW,
+        current_version="2.0.0",
+        raw_payload={"registry": "pypi", "package_name": "demo-pkg", "official": True},
+    )
+    digest = assemble_changes([event], ledger.persist_observations([event]))[0]
+    from signal_harness.intelligence.fact_capsule import build_fact_capsule
+    from signal_harness.intelligence.semantic_router import route_capsule
+
+    capsule = build_fact_capsule(digest, profile["effective_profile"])
+    assert capsule.deterministic_eligible is False
+    assert route_capsule(capsule).route == "semantic"
+
+
+def test_project_owned_english_commit_can_skip_weak_model_without_language_failure(
+    tmp_path: Path, project_root: Path
+) -> None:
+    ledger = ChangeLedger(tmp_path / "own-english.sqlite3")
+    profile = ledger.ensure_profile_revision(
+        project_id="own", auto_profile={"project_name": "Own project"}
+    )
+    event = SignalEvent(
+        event_id="abcdef1234567890",
+        source_type="github_commit",
+        source_name="owner/project",
+        title="Refactor streaming runtime",
+        content="Refactor streaming runtime",
+        url="https://github.com/owner/project/commit/abcdef1234567890",
+        collected_at=NOW,
+        published_at=NOW,
+        raw_payload={
+            "project_owned": True,
+            "sha": "abcdef1234567890",
+            "repository": "owner/project",
+            "repository_identity": "owner/project",
+            "official": True,
+        },
+    )
+    digest = assemble_changes([event], ledger.persist_observations([event]))[0]
+    ledger.begin_scan(
+        scan_id="own-scan",
+        project_id="own",
+        collected_count=1,
+        deduped_count=1,
+        profile_revision_id=profile["profile_revision_id"],
+    )
+    calls: list[AgentCall] = []
+    caller = BoundedModelCaller(
+        TaskPolicy.load(project_root / "configs"),
+        TraceRecorder(),
+        lambda name, role: ScriptedIntelligenceProvider(calls),
+        {role: ["offline"] for role in ("shallow", "synthesis", "deep_dive")},
+    )
+    repo = IntelligenceRepository(ledger.path)
+    report = asyncio.run(
+        EnvironmentEngine(repo, caller).run(
+            scan_id="own-scan",
+            project_id="own",
+            profile_revision_id=profile["profile_revision_id"],
+            profile=profile["effective_profile"],
+            digests=[digest],
+            window={"from": "2026-09-10T00:00:00+00:00", "to": "2026-09-11T00:00:00+00:00"},
+            observed_count=1,
+            sources=[],
+            coverage_status="complete",
+        )
+    )
+    assert report.status == "complete"
+    assert all(call.agent_name != "ChangeInterpreter" for call in calls)
+    activity = repo.changes("own-scan", view="activity")["items"][0]
+    assert activity["summary"].startswith("项目自身更新：")
+
+
+def test_large_corpus_with_only_three_semantic_misses_is_not_tiny_fast_path(
+    tmp_path: Path, project_root: Path
+) -> None:
+    from signal_harness.intelligence.fact_capsule import build_fact_capsule
+    from signal_harness.intelligence.semantic_router import (
+        SemanticWorkItem,
+        tiny_fast_path_candidate,
+    )
+
+    ledger = ChangeLedger(tmp_path / "not-tiny.sqlite3")
+    events = [
+        SignalEvent(
+            event_id=f"event-{index}",
+            source_type="web_change",
+            source_name=f"source-{index % 5}",
+            title=f"Change {index}",
+            content="Needs semantic interpretation.",
+            url=f"https://example.com/{index}",
+            collected_at=NOW,
+            published_at=NOW,
+            raw_payload={"official": True},
+        )
+        for index in range(500)
+    ]
+    digests = assemble_changes(events, ledger.persist_observations(events))
+    items = [SemanticWorkItem(digest=d, capsule=build_fact_capsule(d, {})) for d in digests]
+    policy = TaskPolicy.load(project_root / "configs")
+    assert not tiny_fast_path_candidate(
+        items,
+        max_changes=policy.tiny_fast_path_max_changes,
+        max_input_bytes=policy.tiny_fast_path_max_input_bytes,
+    )
+
+
+def test_1000_semantic_changes_remain_full_corpus_under_offline_budget(
+    tmp_path: Path, project_root: Path
+) -> None:
+    engine, kwargs, calls, repo, *_ = setup_engine(tmp_path, project_root, 1000)
+    report = asyncio.run(engine.run(**kwargs))
+    assert report.status == "complete"
+    assert report.counts["interpreted"] == 1000
+    weak_calls = [call for call in calls if call.agent_name == "ChangeInterpreter"]
+    strong_calls = [call for call in calls if call.agent_name == "EnvironmentSynthesizer"]
+    assert len(weak_calls) == 84  # ceil(1000 / 12), all offline scripted calls.
+    assert len(strong_calls) == 1
+    assert len(strong_calls[0].input_payload["corpus"]) == 1000
+    with repo.connect() as db:
+        audit = json.loads(
+            db.execute(
+                "SELECT audit_json FROM environment_reports WHERE scan_id='scan-test'"
+            ).fetchone()[0]
+        )
+    assert audit["insight_routing"]["semantic"] == 1000
+    assert audit["insight_routing"]["deterministic"] == 0
+    assert audit["synthesis_input_bytes"] < engine.caller.policy.global_input_bytes
+
+
+def test_cross_source_package_release_with_rich_release_evidence_stays_semantic(tmp_path: Path):
+    from signal_harness.intelligence.fact_capsule import build_fact_capsule
+    from signal_harness.intelligence.semantic_router import route_capsule
+
+    ledger = ChangeLedger(tmp_path / "cross-source-rich.sqlite3")
+    package = SignalEvent(
+        event_id="pypi-demo-2",
+        source_type="package_registry",
+        source_name="demo-pkg",
+        title="demo-pkg 2.0.0",
+        current_version="2.0.0",
+        content="PyPI release 2.0.0 for demo-pkg; 2 distribution file(s), 0 yanked.",
+        url="https://pypi.org/project/demo-pkg/2.0.0/",
+        collected_at=NOW,
+        published_at=NOW,
+        raw_payload={"registry": "pypi", "package_name": "demo-pkg", "official": True},
+    )
+    release = SignalEvent(
+        event_id="github-demo-2",
+        source_type="github_release",
+        source_name="org/demo",
+        title="demo-pkg v2.0.0",
+        current_version="v2.0.0",
+        content="Release notes describe a breaking API behavior and migration steps.",
+        url="https://github.com/org/demo/releases/tag/v2.0.0",
+        collected_at=NOW,
+        published_at=NOW,
+        raw_payload={
+            "package_registry": "pypi",
+            "package_name": "demo-pkg",
+            "official": True,
+        },
+    )
+    digest = assemble_changes([package, release], ledger.persist_observations([package, release]))[
+        0
+    ]
+    assert len(digest.evidence) == 2
+    capsule = build_fact_capsule(digest, {"dependencies": ["demo-pkg"]})
+    assert capsule.deterministic_relation == "direct"
+    assert route_capsule(capsule).route == "semantic"

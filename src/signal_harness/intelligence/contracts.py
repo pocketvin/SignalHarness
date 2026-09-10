@@ -6,9 +6,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-INTELLIGENCE_VERSION = "environment-v1.5"
-CHANGE_INSIGHT_VERSION = "environment-v1.3"  # keep v1.3 shallow-cache identity stable
-SYNTHESIS_VERSION = "environment-synthesis-v1.5"
+INTELLIGENCE_VERSION = "environment-v1.6"
+CHANGE_INSIGHT_VERSION = "environment-shallow-v1.6"
+LEGACY_CHANGE_INSIGHT_VERSIONS = ("environment-v1.3",)
+SYNTHESIS_VERSION = "environment-synthesis-v1.6"
 DEEP_DIVE_VERSION = "environment-v1.3"  # deep-dive cache unchanged by report-only evolution
 
 

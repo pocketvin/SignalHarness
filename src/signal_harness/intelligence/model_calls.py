@@ -7,6 +7,7 @@ import json
 import re
 import time
 from collections.abc import Callable
+from contextvars import ContextVar
 from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
@@ -33,10 +34,13 @@ ROLES = {
         "逐条解释本批全部changes；每个change_id恰好一个results。写清事实与轻度项目关系，"
         "不要深挖、调用工具、给详细修改建议、宣称已验证源码影响。evidence_ids只能引用该条已有证据。"
         "topics使用简短稳定主题。弱相关也必须保留；事实与项目推测分开。"
+        "同一batch里的每个change是互相独立的并行任务：解释当前change时只能使用它自己的evidence，"
+        "其他change不能作为当前change的事实、严重性、主题或项目关系依据。先描述世界事实，再单独判断项目关系。"
         "用户可见文字必须自然表达，不要提JSON字段名、Change ID或诸如critical_modules/dependencies等内部键。"
     ),
     "synthesis": (
-        "corpus是本期全部外部环境变化，必须整体综合，不能只看重点；project_activity只是项目自身近期动作，"
+        "corpus是本期全部外部环境变化，必须整体综合，不能只看重点；corpus中的短字段由corpus_legend定义，"
+        "其中id就是可引用的change_id。project_activity只是项目自身近期动作，"
         "可用于解释为什么某个外部方向与项目有关，但绝不能作为EnvironmentDirection、brief或featured的支持证据。"
         "将不同外部变化合成环境方向，同时输出brief和最多5个featured；不要输出risks或opportunities字段。"
         "风险、机会和下一步观察统一写进最相关Direction的watch_next，不再另起一套推测。"
@@ -153,6 +157,13 @@ class BoundedModelCaller:
         self.factory = provider_factory or policy.create_provider
         self.selections = selections
         self.audit: list[dict[str, Any]] = []
+        self._receipt: ContextVar[dict[str, Any] | None] = ContextVar(
+            f"signalharness_model_receipt_{id(self)}", default=None
+        )
+
+    def last_receipt(self) -> dict[str, Any] | None:
+        """Return the successful call receipt for the current asyncio task."""
+        return self._receipt.get()
 
     async def complete(
         self,
@@ -161,6 +172,7 @@ class BoundedModelCaller:
         schema: type[T],
         validate: Callable[[T], None] | None = None,
     ) -> T:
+        self._receipt.set(None)
         names = (
             self.selections[role] if self.selections is not None else self.policy.providers(role)
         )
@@ -334,17 +346,17 @@ class BoundedModelCaller:
                     },
                 }
             )
-            self.audit.append(
-                {
-                    "role": role,
-                    "provider": provider.name,
-                    "model": provider.model,
-                    "status": "success",
-                    "attempt": attempt + 1,
-                    "duration_ms": duration,
-                    "input_count": call.input_count,
-                    "total_tokens": delta.total_tokens,
-                }
-            )
+            receipt = {
+                "role": role,
+                "provider": provider.name,
+                "model": provider.model,
+                "status": "success",
+                "attempt": attempt + 1,
+                "duration_ms": duration,
+                "input_count": call.input_count,
+                "total_tokens": delta.total_tokens,
+            }
+            self.audit.append(receipt)
+            self._receipt.set(receipt)
             return output
         raise RuntimeError("Structured call did not finish")

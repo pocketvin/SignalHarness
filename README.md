@@ -14,6 +14,8 @@ SignalHarness 会实时监听项目本地 Git、GitHub、PyPI package registry�
 
 当前环境报告还会区分 **外部环境变化** 与 **项目自身活动**：后者只用于解释项目关联，不能制造外部趋势。Direction 会显示证据姿态（问题/讨论信号、混合证据、已观察变化），避免把 GitHub Issue 当成已经发布的事实。
 
+成本侧现在使用 **cache → deterministic FactCapsule → semantic batch** 的三路 ChangeInsight 解析；不是每个 Change 都调用弱模型。只有需要语义理解的 cache miss 才进入默认 12 条/批、并发 3 的队列；强模型读取的是每条 Change 的紧凑 DirectionDigest，而不是再次读取完整证据。
+
 ```bash
 cd /Users/yu0/Workspace/10-Projects/SignalHarness
 uv run signal-harness environment --project signalharness --window since_last
