@@ -165,6 +165,53 @@ class BoundedModelCaller:
         """Return the successful call receipt for the current asyncio task."""
         return self._receipt.get()
 
+    def usage_summary(self) -> dict[str, Any]:
+        """Aggregate actual provider attempts, including invalid structured outputs."""
+        attempts = [item for item in self.audit if item.get("provider_attempt")]
+        by_role: dict[str, dict[str, Any]] = {}
+        for item in attempts:
+            role = str(item.get("role") or "unknown")
+            bucket = by_role.setdefault(
+                role,
+                {
+                    "attempts": 0,
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                    "estimated_cost_usd": 0.0,
+                    "duration_ms_sum": 0,
+                    "max_attempt_ms": 0,
+                    "usage_unknown_attempts": 0,
+                },
+            )
+            bucket["attempts"] += 1
+            bucket["prompt_tokens"] += int(item.get("prompt_tokens") or 0)
+            bucket["completion_tokens"] += int(item.get("completion_tokens") or 0)
+            bucket["total_tokens"] += int(item.get("total_tokens") or 0)
+            bucket["estimated_cost_usd"] = round(
+                float(bucket["estimated_cost_usd"]) + float(item.get("estimated_cost_usd") or 0),
+                8,
+            )
+            duration = int(item.get("duration_ms") or 0)
+            bucket["duration_ms_sum"] += duration
+            bucket["max_attempt_ms"] = max(int(bucket["max_attempt_ms"]), duration)
+            if not str(item.get("usage_source") or "").startswith("provider_reported"):
+                bucket["usage_unknown_attempts"] += 1
+        total = {
+            "attempts": sum(int(value["attempts"]) for value in by_role.values()),
+            "prompt_tokens": sum(int(value["prompt_tokens"]) for value in by_role.values()),
+            "completion_tokens": sum(int(value["completion_tokens"]) for value in by_role.values()),
+            "total_tokens": sum(int(value["total_tokens"]) for value in by_role.values()),
+            "estimated_cost_usd": round(
+                sum(float(value["estimated_cost_usd"]) for value in by_role.values()), 8
+            ),
+            "duration_ms_sum": sum(int(value["duration_ms_sum"]) for value in by_role.values()),
+            "usage_unknown_attempts": sum(
+                int(value["usage_unknown_attempts"]) for value in by_role.values()
+            ),
+        }
+        return {"total": total, "by_role": by_role}
+
     async def complete(
         self,
         role: TaskRole,
@@ -187,6 +234,7 @@ class BoundedModelCaller:
                 raise
             except Exception as exc:
                 response = getattr(exc, "response", None)
+                failure_usage = getattr(exc, "_signalharness_usage", ProviderUsage())
                 self.audit.append(
                     {
                         "role": role,
@@ -195,6 +243,15 @@ class BoundedModelCaller:
                         "status": "call_failed",
                         "error_type": type(exc).__name__,
                         "http_status": getattr(response, "status_code", None),
+                        "provider_attempt": bool(
+                            getattr(exc, "_signalharness_provider_attempt", False)
+                        ),
+                        "duration_ms": int(getattr(exc, "_signalharness_duration_ms", 0) or 0),
+                        "prompt_tokens": failure_usage.prompt_tokens,
+                        "completion_tokens": failure_usage.completion_tokens,
+                        "total_tokens": failure_usage.total_tokens,
+                        "estimated_cost_usd": failure_usage.estimated_cost_usd,
+                        "usage_source": failure_usage.source,
                     }
                 )
                 errors.append(f"{name}:{type(exc).__name__}")
@@ -271,16 +328,29 @@ class BoundedModelCaller:
                 text = await asyncio.wait_for(
                     provider.complete(call), timeout=self.policy.timeout(role)
                 )
-            except BaseException:
+            except BaseException as exc:
+                delta = usage().delta(before)
+                duration = round((time.monotonic() - started) * 1000)
                 self.trace.steps[index] = self.trace.steps[index].model_copy(
                     update={
                         "status": "error",
-                        "duration_ms": round((time.monotonic() - started) * 1000),
+                        "duration_ms": duration,
+                        "prompt_tokens": delta.prompt_tokens,
+                        "completion_tokens": delta.completion_tokens,
+                        "total_tokens": delta.total_tokens,
+                        "estimated_cost_usd": delta.estimated_cost_usd,
+                        "usage_source": delta.source,
                         "error": "provider_call_failed_or_interrupted",
                         "fallback_used": False,
                     }
                 )
+                if isinstance(exc, Exception):
+                    setattr(exc, "_signalharness_provider_attempt", True)
+                    setattr(exc, "_signalharness_usage", delta)
+                    setattr(exc, "_signalharness_duration_ms", duration)
                 raise
+            delta = usage().delta(before)
+            duration = round((time.monotonic() - started) * 1000)
             try:
                 stripped = text.strip()
                 if stripped.startswith("```"):
@@ -296,7 +366,12 @@ class BoundedModelCaller:
                         "status": "error",
                         "schema_valid": False,
                         "error": "output_contract_invalid",
-                        "duration_ms": round((time.monotonic() - started) * 1000),
+                        "duration_ms": duration,
+                        "prompt_tokens": delta.prompt_tokens,
+                        "completion_tokens": delta.completion_tokens,
+                        "total_tokens": delta.total_tokens,
+                        "estimated_cost_usd": delta.estimated_cost_usd,
+                        "usage_source": delta.source,
                         "metadata": {
                             "role": role,
                             "attempt": attempt + 1,
@@ -307,10 +382,18 @@ class BoundedModelCaller:
                 self.audit.append(
                     {
                         "role": role,
+                        "provider": provider.name,
                         "model": provider.model,
                         "status": "invalid_output",
                         "attempt": attempt + 1,
                         "validation_code": validation_code,
+                        "provider_attempt": True,
+                        "duration_ms": duration,
+                        "prompt_tokens": delta.prompt_tokens,
+                        "completion_tokens": delta.completion_tokens,
+                        "total_tokens": delta.total_tokens,
+                        "estimated_cost_usd": delta.estimated_cost_usd,
+                        "usage_source": delta.source,
                     }
                 )
                 if attempt:
@@ -326,8 +409,6 @@ class BoundedModelCaller:
                 )
                 del exc
                 continue
-            delta = usage().delta(before)
-            duration = round((time.monotonic() - started) * 1000)
             self.trace.steps[index] = self.trace.steps[index].model_copy(
                 update={
                     "status": "success",
@@ -339,6 +420,8 @@ class BoundedModelCaller:
                     "prompt_tokens": delta.prompt_tokens,
                     "completion_tokens": delta.completion_tokens,
                     "total_tokens": delta.total_tokens,
+                    "estimated_cost_usd": delta.estimated_cost_usd,
+                    "usage_source": delta.source,
                     "metadata": {
                         "role": role,
                         "attempt": attempt + 1,
@@ -354,7 +437,12 @@ class BoundedModelCaller:
                 "attempt": attempt + 1,
                 "duration_ms": duration,
                 "input_count": call.input_count,
+                "prompt_tokens": delta.prompt_tokens,
+                "completion_tokens": delta.completion_tokens,
                 "total_tokens": delta.total_tokens,
+                "estimated_cost_usd": delta.estimated_cost_usd,
+                "usage_source": delta.source,
+                "provider_attempt": True,
             }
             self.audit.append(receipt)
             self._receipt.set(receipt)

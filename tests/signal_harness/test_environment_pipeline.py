@@ -1307,3 +1307,93 @@ def test_cross_source_package_release_with_rich_release_evidence_stays_semantic(
     capsule = build_fact_capsule(digest, {"dependencies": ["demo-pkg"]})
     assert capsule.deterministic_relation == "direct"
     assert route_capsule(capsule).route == "semantic"
+
+
+class _UsageAccountingProvider:
+    name = "usage-probe"
+    model = "usage-probe-model"
+
+    def __init__(self) -> None:
+        from signal_harness.providers.adapter import ProviderUsage
+
+        self._usage = ProviderUsage(source="provider_reported_with_profile_pricing")
+
+    async def close(self) -> None:
+        pass
+
+    def usage_snapshot(self):
+        return self._usage
+
+    async def complete(self, call: AgentCall) -> str:
+        from signal_harness.providers.adapter import ProviderUsage
+
+        self._usage = ProviderUsage(
+            prompt_tokens=self._usage.prompt_tokens + 100,
+            completion_tokens=self._usage.completion_tokens + 50,
+            total_tokens=self._usage.total_tokens + 150,
+            estimated_cost_usd=self._usage.estimated_cost_usd + 0.0015,
+            source="provider_reported_with_profile_pricing",
+        )
+        item = call.input_payload["changes"][0]
+        return json.dumps(
+            {
+                "results": [
+                    {
+                        "change_id": item["change_id"],
+                        "summary": "上游接口出现一项变化。",
+                        "what_changed": "公开资料描述了接口行为变化。",
+                        "project_relation": "context",
+                        "relation_reason": "这项变化属于项目关注的外部接口。",
+                        "attention": "normal",
+                        "topics": ["接口变化"],
+                        "evidence_ids": [item["evidence"][0]["evidence_id"]],
+                        "uncertainty": "尚未深入核实项目调用位置。",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        )
+
+
+def test_model_usage_counts_invalid_attempt_and_success(tmp_path: Path, project_root: Path) -> None:
+    policy = TaskPolicy.load(project_root / "configs")
+    provider = _UsageAccountingProvider()
+    caller = BoundedModelCaller(
+        policy,
+        TraceRecorder(),
+        lambda name, role: provider,
+        {role: ["usage"] for role in ("shallow", "synthesis", "deep_dive")},
+    )
+    validation_calls = 0
+
+    def reject_once(output: InsightBatch) -> None:
+        nonlocal validation_calls
+        validation_calls += 1
+        if validation_calls == 1:
+            raise ValueError("synthetic validation failure")
+
+    payload = {
+        "project": {},
+        "changes": [
+            {
+                "change_id": "c1",
+                "title": "change",
+                "evidence": [{"evidence_id": "e1", "excerpt": "source"}],
+            }
+        ],
+    }
+    output = asyncio.run(caller.complete("shallow", payload, InsightBatch, reject_once))
+    assert output.results[0].change_id == "c1"
+    summary = caller.usage_summary()
+    assert summary["total"]["attempts"] == 2
+    assert summary["total"]["prompt_tokens"] == 200
+    assert summary["total"]["completion_tokens"] == 100
+    assert summary["total"]["total_tokens"] == 300
+    assert summary["total"]["estimated_cost_usd"] == pytest.approx(0.003)
+    assert summary["total"]["usage_unknown_attempts"] == 0
+    assert caller.audit[0]["status"] == "invalid_output"
+    assert caller.audit[0]["total_tokens"] == 150
+    assert caller.audit[1]["status"] == "success"
+    assert caller.audit[1]["total_tokens"] == 150
+    assert caller.trace.steps[0].total_tokens == 150
+    assert caller.trace.steps[1].total_tokens == 150

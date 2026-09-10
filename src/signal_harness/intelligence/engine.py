@@ -273,6 +273,7 @@ class EnvironmentEngine:
             {
                 "version": INTELLIGENCE_VERSION,
                 "calls": self.caller.audit,
+                "model_usage": self.caller.usage_summary(),
                 "full_corpus_ids": list(by_id),
                 "full_corpus_hash": identity("corpus-", payload),
                 "shallow_policy": self.caller.policy.fingerprint("shallow"),
