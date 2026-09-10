@@ -51,7 +51,7 @@ def test_kimi_profile_uses_max_completion_tokens(project_root: Path) -> None:
         config_dir=project_root / "configs",
     )
 
-    assert profile.model == "kimi-k2.6"
+    assert profile.model == "kimi-k3"
     assert profile.output_token_parameter == "max_completion_tokens"
     assert profile.supports_json_mode is True
     assert profile.supports_json_schema is True
@@ -324,7 +324,7 @@ def test_provider_from_selection_uses_selected_namespace(project_root: Path, mon
     provider = provider_from_selection("kimi", config_dir=project_root / "configs")
     try:
         assert provider.provider == "kimi"
-        assert provider.model == "kimi-k2.6"
+        assert provider.model == "kimi-k3"
         assert provider.model_profile == "kimi"
         assert provider.profile.supports_json_mode is True
         assert provider.profile.supports_json_schema is True
@@ -345,9 +345,9 @@ def test_provider_catalog_marks_deprecated_model_and_resolves_current_profile(
     )
 
     assert option.ready is True
-    assert option.model == "kimi-k2.6"
+    assert option.model == "kimi-k3"
     assert option.warning == "deprecated_model_auto_upgraded"
-    assert option.checked_at == "2026-09-06"
+    assert option.checked_at == "2026-09-11"
 
 
 def test_unknown_model_override_uses_conservative_capabilities(
@@ -376,7 +376,7 @@ def test_unknown_model_override_uses_conservative_capabilities(
 def test_deepseek_profile_tracks_current_chat_model(project_root: Path) -> None:
     profile = load_model_profile("deepseek", config_dir=project_root / "configs")
 
-    assert profile.model == "deepseek-v4-flash"
+    assert profile.model == "deepseek-v4-pro"
     assert profile.supports_json_mode is True
     assert profile.output_token_parameter == "max_completion_tokens"
     assert "deepseek-chat" in profile.deprecated_models
@@ -400,13 +400,13 @@ def test_provider_catalog_does_not_leak_global_model_into_provider_profiles(
     monkeypatch.setenv("KIMI_MODEL", "kimi-latest")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
     monkeypatch.setenv("DEEPSEEK_BASE_URL", "https://deepseek.example/v1")
-    monkeypatch.setenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+    monkeypatch.setenv("DEEPSEEK_MODEL", "deepseek-v4-pro")
 
     options = {item.provider_id: item for item in provider_catalog(project_root / "configs")}
 
-    assert options["kimi"].model == "kimi-k2.6"
+    assert options["kimi"].model == "kimi-k3"
     assert options["kimi"].warning == "deprecated_model_auto_upgraded"
-    assert options["deepseek"].model == "deepseek-v4-flash"
+    assert options["deepseek"].model == "deepseek-v4-pro"
     assert options["deepseek"].warning is None
 
 

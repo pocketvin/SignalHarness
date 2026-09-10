@@ -40,11 +40,16 @@ Connect project
 The primary result page should show, in this order:
 
 1. A visible summary of how SignalHarness currently understands the project.
-2. A natural Chinese overall environment report for the selected period.
-3. The most important roughly 10–15 changes.
-4. An obvious entry to all relevant changes in that time range.
+2. A natural Chinese overall environment report synthesized from **all relevant Changes in the frozen Scan**, not only the deep-analysis shortlist.
+3. A small set of evidence-backed **environment directions / themes to watch**, also derived from the full relevant set.
+4. The most important roughly 10–15 changes selected for deeper project-impact analysis.
+5. An obvious entry to all relevant changes in that time range.
 
-A compact change row/card should show only the user-facing change type, a short Chinese summary, and one sentence of likely project impact. Full details are progressive disclosure: what happened, why it is relevant, affected modules/capabilities, recommended actions, Before/After when real evidence exists, sources/evidence, and optional audit reasoning/score/trace.
+The deep-analysis budget and the environment-synthesis input are different contracts. A Scan may observe/aggregate 300 Changes while only 10–15 receive expensive deep analysis; the environment report must still semantically cover the full frozen environment corpus through bounded compact Change digests / hierarchical synthesis rather than pretending the 10–15 shortlist represents the whole period. Keep **Observed corpus**, **All Relevant Changes**, and **Deep-analyzed shortlist** as distinct projections; weak individual observations may still contribute to a supported emerging direction, while raw source noise must not be mislabeled as project-relevant.
+
+A compact change row/card should show only the user-facing change type, a short Chinese summary, and one sentence of likely project impact. **Numeric relevance/impact scores are internal ranking/audit data and are not a primary product-facing concept.** Full details are progressive disclosure: what happened, why it is relevant, affected modules/capabilities, recommended actions, Before/After when real evidence exists, sources/evidence, and optional audit reasoning/score/trace.
+
+The normal Web product surface must not expose test/runtime implementation choices such as `mock-agent`, fixture mode, deterministic fallback mode, Harness variant names, raw SSE counts, or Agent-count internals. Those belong in explicit developer/audit surfaces. Normal live progress should use product milestones (collecting, aggregating, synthesizing the environment, deeply verifying important changes, report ready), while raw Trace remains available behind Audit.
 ## 3. Core domain model
 
 The target business lifecycle is:

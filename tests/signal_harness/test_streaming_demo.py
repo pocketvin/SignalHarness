@@ -414,9 +414,9 @@ def test_demo_metadata_resolves_deprecated_kimi_without_exposing_secret(
         providers = {item["id"]: item for item in response.json()["providers"]}
         kimi = providers["kimi"]
         assert kimi["ready"] is True
-        assert kimi["model"] == "kimi-k2.6"
+        assert kimi["model"] == "kimi-k3"
         assert kimi["warning"] == "deprecated_model_auto_upgraded"
-        assert kimi["checked_at"] == "2026-09-06"
+        assert kimi["checked_at"] == "2026-09-11"
 
 
 def test_stream_run_starts_without_sse_subscription(

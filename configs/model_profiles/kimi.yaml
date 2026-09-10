@@ -1,16 +1,16 @@
 provider: openai_compatible
-model: kimi-k2.6
+model: kimi-k3
 supports_json_schema: true
 supports_json_mode: true
 supports_native_tool_calling: false
 supports_system_prompt: true
-max_input_tokens: 256000
+max_input_tokens: 1048576
 max_output_tokens: 8192
 output_token_parameter: max_completion_tokens
 recommended_temperature: 0.0
 schema_strategy: prompt_json_retry
 tool_strategy: controlled_tool_request
-checked_at: 2026-09-06
+checked_at: 2026-09-11
 deprecated_models:
   - kimi-latest
   - kimi-thinking-preview

@@ -22,6 +22,77 @@ Current repository baseline at planning time:
 - current real-agent scan already defers LearningPolicyAgent reflection from the critical path.
 
 The existing five-Agent implementation is a baseline to preserve for comparison, not the future product contract.
+## P0 RESET — Product Surface + Full-Set Environment Synthesis + Architecture Convergence
+
+**Status: CURRENT HIGHEST PRIORITY — owner review on 2026-09-11 supersedes the previous “move directly to pilot” next action.**
+
+P1–P8 remain useful implementation history and tested infrastructure, but they do not mean the current product surface or semantic data flow is accepted. Before a broader pilot, converge the system around the actual product experience.
+
+### P0-A — Full-set environment synthesis
+
+- Keep deep semantic impact/action analysis bounded to roughly 10–15 high-value Changes.
+- Explicitly separate **Observed Change Corpus → Relevant Projection → Deep-analysis Shortlist**. The current code incorrectly equates pre-funnel deduplicated count with `relevant_count`; fix that semantic boundary.
+- Build an `EnvironmentSynthesis` path that receives the full frozen **Observed/aggregated Change corpus** for the period (for example 300 Changes) through bounded `ChangeDigest` contracts, so weak individual signals can still combine into an emerging direction. Project relevance is an input/weight, not an early Top-K visibility cutoff.
+- The user-facing “All Relevant Changes” projection is a separate, recall-oriented project-relevance view and must not contain raw source noise merely because it was observed.
+- The model-written environment report and “directions to watch” must be grounded across the full environment corpus and reference supporting Change IDs/evidence; project-specific claims must additionally be grounded in Project Profile/usage evidence.
+- Top-K is an analysis budget only. It must never become the semantic horizon for the period report.
+- Prefer Change/ChangeRevision as the synthesis/analyzer unit; do not make source-level `SignalEvent` the permanent product reasoning unit.
+
+### P0-B — Frontend product redesign
+
+Frontend quality is a product blocker, not optional polish. The normal Web surface should lead with **period environment brief → directions/themes → items requiring attention → all relevant changes → detail**.
+
+Remove from the normal product UI:
+
+- numeric impact/relevance scores;
+- `mock-agent`, deterministic/demo, fixture and Harness selectors;
+- “deep analyzed” as a primary metric;
+- raw SSE / Trace / LLM-call counters and permission/debug vocabulary;
+- engineering-only provider/runtime concepts unless the user explicitly opens Settings/Audit.
+
+Keep internal score, modes and Trace for ranking, tests, CLI/dev tools and Audit. Production Web runs use the configured real analysis policy automatically.
+
+### P0-C — Product-level live execution
+
+Raw `trace.step` remains an audit stream, but the primary live experience needs a stable product event contract such as:
+
+```text
+collecting_sources
+→ normalizing_and_aggregating
+→ synthesizing_environment
+→ deep_analyzing_priority_changes
+→ assembling_report
+→ complete
+```
+
+Expose meaningful progress/count deltas and newly formed themes/changes without rendering every low-level Python/LLM Trace row as the main scan experience.
+
+### P0-D — Architecture conflict cleanup
+
+- Introduce first-class ChangeRevision / aggregated evidence before semantic analysis rather than aggregating only after Event-oriented processing.
+- Introduce a first-class versioned Report/EnvironmentSynthesis projection. Do not copy one global `report_summary_zh` into every per-Change Assessment as the durable representation.
+- Make the relational ledger the durable product source of truth; demote legacy signal/feedback JSON and YAML-derived runtime memory to bootstrap/compatibility/export roles.
+- Remove hard-coded `12` policy leakage from frontend/API contracts; analysis budget belongs to backend policy/configuration.
+- Move All Changes filtering/sorting/pagination into the persistence query rather than loading an entire Scan into Python before each page.
+- Normalize product feedback APIs around `change_id + scan_id + event/change revision`, not legacy `signal_id` naming.
+- Reduce legacy UI/output fallback paths once the Product Intelligence contract is proven.
+
+### P0-E — Model profiles
+
+- Default Kimi profile: `kimi-k3` (official flagship, verified 2026-09-11).
+- Default DeepSeek profile: `deepseek-v4-pro` (official GA API model, verified 2026-09-11).
+- Keep provider-native tools disabled in SignalHarness until the runtime explicitly implements that authority path; model capability does not silently change Tool/permission ownership.
+
+### P0 acceptance
+
+- a controlled Scan with >=300 observed/aggregated Changes produces a model-written full-period environment brief and directions grounded across the full corpus while only a bounded shortlist receives expensive deep analysis; Observed, Relevant and Deep-analyzed counts remain semantically distinct;
+- report claims are traceable to supporting Change IDs and do not silently over-generalize from Top-K;
+- ordinary Web UI contains no numeric impact score, mock/demo/fixture mode, Harness implementation selector, or raw Trace console in the primary flow;
+- live scan progress is understandable without knowing SSE, Agents, schemas or Trace internals;
+- ChangeRevision / aggregation boundary and durable state authority are explicit and tested;
+- current Kimi and DeepSeek profiles resolve to `kimi-k3` and `deepseek-v4-pro`;
+- full Python/frontend verification remains green after convergence.
+
 ## PHASE STRATEGY
 
 Each phase is a bounded product capability, not a request to rewrite everything at once.
@@ -539,9 +610,9 @@ These are intentionally deferred until the relevant phase because they do not bl
 
 ## NEXT ACTION
 
-**Move from architecture construction to a real-usage pilot.**
+**Complete the P0 reset before treating the current UI/data flow as pilot-ready.**
 
-P1–P8 are locally implemented under the confirmed target-state contracts. Do not add another orchestration/database/framework layer merely because the phase list is complete. The next useful evidence must come from real use: run SignalHarness on real project changes, record feedback/outcomes from Change Detail, and let `/projects/{id}/calibration` accumulate frozen Episodes. Before 3 labeled Episodes, treat candidates as insufficient evidence. Once enough real labels exist, inspect the shadow rank/decision/notification diff and only consider `learning-apply` when durable replay shows measured non-regressing improvement; retain the versioned rollback path. Separately, P7's final environment-dependent acceptance remains one explicitly authorized user-owned external webhook delivery.
+P1–P8 are locally implemented and remain valuable infrastructure, but the 2026-09-11 owner review found four product blockers: the model-written environment narrative currently sees only the deep-analysis shortlist rather than the full relevant set; the normal Web surface exposes engineering/test concepts and numeric scores; raw Trace/SSE is being used as the main live experience; and Event-oriented/legacy-state boundaries still conflict with the target Change-centric architecture. Resolve P0-A through P0-E first. Then move to real-usage pilot, collect feedback/outcomes, and use the existing Calibration replay/promotion gates rather than adding another framework layer. P7's final external-destination delivery remains separately environment-dependent.
 
 ## RETROSPECTIVE TEMPLATE
 

@@ -1,5 +1,5 @@
 provider: openai_compatible
-model: deepseek-v4-flash
+model: deepseek-v4-pro
 supports_json_schema: false
 supports_json_mode: true
 supports_native_tool_calling: false
@@ -10,7 +10,7 @@ recommended_temperature: 0.0
 schema_strategy: prompt_json_retry
 tool_strategy: controlled_tool_request
 output_token_parameter: max_completion_tokens
-checked_at: 2026-09-06
+checked_at: 2026-09-11
 deprecated_models:
   - deepseek-chat
   - deepseek-reasoner
