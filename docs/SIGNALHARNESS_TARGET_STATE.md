@@ -1,7 +1,7 @@
 # SignalHarness Target State
 
 > Status: Confirmed strategic baseline
-> Updated: 2026-09-09
+> Updated: 2026-09-11
 > Scope: Product target, durable architecture principles, and decision boundaries
 
 This document records the latest confirmed direction for SignalHarness. It is intentionally more stable than implementation plans. When older architecture documents describe the current five-Agent implementation, they remain valid as **current-state facts**; when they conflict with the future product direction below, this document governs the target state.
@@ -28,28 +28,33 @@ A normal project flow should be:
 Connect project
 → auto-generate and activate Project Profile
 → collect environment changes
-→ normalize / revision-track / deduplicate / aggregate
-→ determine project relevance
-→ selectively perform deeper impact analysis
-→ rank
-→ generate overall Chinese environment report
-→ show Top 10–15
-→ allow navigation to All Relevant Changes
+→ normalize / revision-track / deduplicate / aggregate into ChangeRevisions
+→ cheaply interpret every ChangeRevision in bounded batches
+→ synthesize first-class EnvironmentDirections from the full period corpus
+→ build the user-facing Relevant projection
+→ select a small Featured set for presentation only
+→ generate the overall environment report
+→ allow navigation to all relevant Changes
+→ run evidence-heavy Deep Dive only when the user opens a Change/Direction
 ```
 
 The primary result page should show, in this order:
 
 1. A visible summary of how SignalHarness currently understands the project.
-2. A natural Chinese overall environment report synthesized from **all relevant Changes in the frozen Scan**, not only the deep-analysis shortlist.
-3. A small set of evidence-backed **environment directions / themes to watch**, also derived from the full relevant set.
-4. The most important roughly 10–15 changes selected for deeper project-impact analysis.
-5. An obvious entry to all relevant changes in that time range.
+2. The **current EnvironmentDirections**: what patterns are forming, strengthening, weakening, or newly appearing, with supporting Changes and practical watch points.
+3. A natural Chinese overall environment report synthesized from the full frozen period corpus.
+4. A **Featured 5** set of Changes worth reading first. Featured is a presentation projection only; it does not automatically receive expensive deep analysis.
+5. An obvious entry to all relevant Changes in that time range, where every row has at least a cheap model-generated explanation of what changed and a lightweight project-relevance hint.
 
-The deep-analysis budget and the environment-synthesis input are different contracts. A Scan may observe/aggregate 300 Changes while only 10–15 receive expensive deep analysis; the environment report must still semantically cover the full frozen environment corpus through bounded compact Change digests / hierarchical synthesis rather than pretending the 10–15 shortlist represents the whole period. Keep **Observed corpus**, **All Relevant Changes**, and **Deep-analyzed shortlist** as distinct projections; weak individual observations may still contribute to a supported emerging direction, while raw source noise must not be mislabeled as project-relevant.
+The scan-time semantic budget and the on-demand Deep Dive budget are different contracts. A Scan may observe/aggregate 300 Changes. All of them remain in the environment-synthesis horizon and receive bounded shallow interpretation; the system must not spend evidence-research / multi-step impact-analysis budget on an arbitrary Top-K during the scan. **Featured 5 is selected from shallow intelligence for reading priority, not as a hidden deep-analysis queue.** Expensive evidence resolution, code-usage inspection, impact/action analysis, and optional verification start only after the user opens a Change or explicitly requests a deeper Direction analysis.
+
+Keep **Observed corpus**, **Relevant projection**, **Featured projection**, and **On-demand Deep Dive state** distinct. Weak individual observations may still combine into a supported emerging direction, while raw source noise must not be mislabeled as project-relevant.
 
 A compact change row/card should show only the user-facing change type, a short Chinese summary, and one sentence of likely project impact. **Numeric relevance/impact scores are internal ranking/audit data and are not a primary product-facing concept.** Full details are progressive disclosure: what happened, why it is relevant, affected modules/capabilities, recommended actions, Before/After when real evidence exists, sources/evidence, and optional audit reasoning/score/trace.
 
-The normal Web product surface must not expose test/runtime implementation choices such as `mock-agent`, fixture mode, deterministic fallback mode, Harness variant names, raw SSE counts, or Agent-count internals. Those belong in explicit developer/audit surfaces. Normal live progress should use product milestones (collecting, aggregating, synthesizing the environment, deeply verifying important changes, report ready), while raw Trace remains available behind Audit.
+The normal Web product surface must not expose test/runtime implementation choices such as `mock-agent`, fixture mode, deterministic fallback mode, Harness variant names, raw SSE counts, or Agent-count internals. Those belong in explicit developer/audit surfaces. Normal live progress should use product milestones (collecting, aggregating, interpreting Changes, forming Directions, report ready), while raw Trace remains available behind Audit.
+
+The Web frontend is a **P0 product asset and the primary expression of SignalHarness**, not a debugging shell over the runtime. Product contracts should be designed so the frontend can render stable user concepts (`Project`, `Direction`, `Change`, `Deep Dive`, `Monitoring`) without importing or mirroring Agent/Harness/scoring semantics. Backend implementation changes must not force product-surface vocabulary changes unless the domain contract itself changes.
 ## 3. Core domain model
 
 The target business lifecycle is:
@@ -59,22 +64,25 @@ Event / EventRevision
         ↓
 Change / ChangeRevision
         ↓
-ProjectImpact
+ChangeInsight (cheap, scan-time, for every Change)
         ↓
 Scan / ScanChange
-        ↓
-Report
+        ├────────→ EnvironmentDirection
+        ├────────→ Report / Featured projection
+        └────────→ DeepDiveAnalysis (lazy, user-triggered)
 ```
 
 - **Event**: one source-observed fact, such as a release, advisory, issue update, registry publication, PR merge, or web snapshot change.
 - **EventRevision**: a later revision of the same source fact; identity and revision must not be conflated.
 - **Change**: one underlying real-world environmental change that may be supported by multiple Events.
 - **ChangeRevision**: new facts or corrections about the same Change.
-- **ProjectImpact**: the project-specific relevance, impact, affected modules, confidence, and recommended actions for one ChangeRevision under one Project Profile revision and analyzer version.
-- **ScanChange**: the frozen membership/ranking projection of a Change inside one Scan.
-- **Report**: a versioned product projection for one Scan.
+- **ChangeInsight**: a cheap bounded interpretation produced for every ChangeRevision in the Scan: what changed, basic type/entity, lightweight project relation, attention class, uncertainty, and enough semantic structure to support Directions/search/display. It must not perform open-ended research or claim code-level impact without evidence.
+- **ScanChange**: the frozen membership and presentation projection of a Change inside one Scan, including whether it belongs to Relevant or Featured views.
+- **EnvironmentDirection**: a first-class, versioned cross-Change object describing a supported environment pattern such as `emerging`, `strengthening`, `stable`, or `weakening`, with supporting Change IDs, source diversity, project exposure hints, uncertainty, and what to watch next. Directions may continue across Scans rather than being recreated as disposable category labels.
+- **DeepDiveAnalysis**: optional, cached, user-triggered analysis for one ChangeRevision (or later one Direction revision), tied to the Project Profile revision and analyzer version. This is where evidence resolution, code-usage/call-site inspection, impact analysis, recommended verification/actions, and selective verification belong.
+- **Report**: a versioned product projection for one Scan, grounded in the full Change/ChangeInsight corpus and the resulting EnvironmentDirections.
 
-Top 10–15 is a presentation and deep-analysis budget, not a persistence boundary. All relevant Changes for the Scan must remain queryable even when only a bounded subset receives deep analysis.
+**Featured 5 is never a persistence boundary or an automatic Deep Dive budget.** All relevant Changes remain queryable and shallowly understandable; Deep Dive state is created lazily on explicit user demand and reused when its pinned ChangeRevision/ProfileRevision/analyzer version is still valid.
 ## 4. Project Profile and Preference Engine
 
 Project onboarding must not block on mandatory review. After authorization, SignalHarness should safely inspect manifests, lockfiles, runtime/config metadata, bounded representative paths, and approved repository metadata, then activate an initial profile immediately.
@@ -115,6 +123,43 @@ Successful manual queries ending at “now” may advance the interactive checkp
 A partial Scan remains readable but must not skip an unresolved required-source coverage gap. First-use `since_last` defaults to an explicitly disclosed 7-day lookback.
 
 Late-discovered events and revisions are not silently dropped merely because their original publish time predates `L`; they may appear as explicit “late discovery / updated information” additions based on observed time and revision history.
+## 5A. Analysis architecture: broad shallow scan, direction-first synthesis, lazy Deep Dive
+
+The target scan path is **not** a fixed multi-Agent team. It is a bounded analysis pipeline with different cost tiers:
+
+```text
+L0  deterministic identity / revision / aggregation / source authority
+ ↓
+L1  batched ChangeInterpreter over the full Change corpus
+ ↓
+L2  EnvironmentDirectionSynthesizer + ReportComposer over the full shallow corpus
+ ↓
+     Relevant view + Featured 5 presentation
+
+User opens a Change / Direction
+ ↓
+L3  DeepDiveAnalyzer
+     ├─ EvidenceResolver
+     ├─ lightweight Project Usage Resolver
+     ├─ Impact + verification/action reasoning
+     └─ optional SelectiveVerifier only when uncertainty warrants it
+```
+
+The names above describe responsibilities, not a requirement that each box be a separately autonomous Agent. Prefer ordinary functions/services and bounded model calls when autonomy adds no value. There is no scan-time Supervisor LLM deciding which Agent runs next. The deterministic runtime owns stage order, batching, budgets, persistence, permissions, retries, and cache validity.
+
+The current five-Agent implementation remains a regression baseline during migration, but its responsibilities move as follows:
+
+- `SignalSupervisorAgent`: retire from the normal Scan hot path; deterministic routing replaces it.
+- `ContextEvidenceAgent`: move to user-triggered Deep Dive / exceptional evidence repair.
+- `ImpactAnalystAgent` + `ActionPlannerAgent` + `ImpactActionAnalyzerAgent`: consolidate around one DeepDiveAnalyzer responsibility; do not run them for a fixed Top-K every Scan.
+- `SelectiveVerifierAgent`: keep only as conditional Deep Dive verification when uncertainty/evidence conflicts justify the extra cost.
+- `LearningPolicyAgent`: remain outside the Scan hot path in calibration/replay.
+- `ProjectNarrativeAgent`: replace its scan-time product role with full-corpus EnvironmentDirection synthesis and report composition; it must not summarize only a Featured subset.
+
+The cheap ChangeInterpreter must be batch-friendly and schema-bounded so 100–500 Changes can be processed predictably. “Every Change receives shallow interpretation” does **not** mean one provider call per Change: compact multiple ChangeDigests into bounded batches, preserve `change_id` identity in every output row, retry/repair by failed batch or failed item, and persist results independently. It may output a short display summary and lightweight relevance/attention classification, but it may not fabricate source evidence, code reachability, exact affected modules, or detailed remediation. Those claims belong to Deep Dive after evidence is actually resolved.
+
+EnvironmentDirection synthesis should normally receive the **entire compact ChangeInsight corpus for the Scan** so the model can connect weak signals across batches. If the corpus exceeds the selected model's safe context/budget, use an explicit hierarchical reduction whose intermediate summaries retain supporting Change IDs; never silently truncate to Featured or Top-K.
+
 ## 6. Memory and state boundaries
 
 SignalHarness should not treat “memory” as one large JSON blob passed to Agents. Persistent state is separated by lifecycle and authority.

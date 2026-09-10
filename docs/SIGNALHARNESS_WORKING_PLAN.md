@@ -28,19 +28,20 @@ The existing five-Agent implementation is a baseline to preserve for comparison,
 
 P1–P8 remain useful implementation history and tested infrastructure, but they do not mean the current product surface or semantic data flow is accepted. Before a broader pilot, converge the system around the actual product experience.
 
-### P0-A — Full-set environment synthesis
+### P0-A — Full-corpus shallow intelligence + Direction-first synthesis
 
-- Keep deep semantic impact/action analysis bounded to roughly 10–15 high-value Changes.
-- Explicitly separate **Observed Change Corpus → Relevant Projection → Deep-analysis Shortlist**. The current code incorrectly equates pre-funnel deduplicated count with `relevant_count`; fix that semantic boundary.
-- Build an `EnvironmentSynthesis` path that receives the full frozen **Observed/aggregated Change corpus** for the period (for example 300 Changes) through bounded `ChangeDigest` contracts, so weak individual signals can still combine into an emerging direction. Project relevance is an input/weight, not an early Top-K visibility cutoff.
-- The user-facing “All Relevant Changes” projection is a separate, recall-oriented project-relevance view and must not contain raw source noise merely because it was observed.
-- The model-written environment report and “directions to watch” must be grounded across the full environment corpus and reference supporting Change IDs/evidence; project-specific claims must additionally be grounded in Project Profile/usage evidence.
-- Top-K is an analysis budget only. It must never become the semantic horizon for the period report.
+- Remove the fixed scan-time “deep analyze 10–15” product contract. **Every aggregated Change receives bounded shallow interpretation; expensive Deep Dive is lazy and user-triggered.**
+- Explicitly separate **Observed Change Corpus → shallow ChangeInsight for all → Relevant Projection → Featured 5 presentation → optional DeepDiveAnalysis**. The current code incorrectly equates pre-funnel deduplicated count with `relevant_count`; fix that semantic boundary.
+- Build the full-period `EnvironmentSynthesis` path over the entire frozen aggregated Change corpus (for example 300 Changes) through bounded `ChangeDigest + ChangeInsight` contracts, so weak individual signals can combine into an emerging direction.
+- Make `EnvironmentDirection` a first-class versioned object with supporting Change IDs, state (`emerging/strengthening/stable/weakening`), source diversity, project-exposure hints, uncertainty, and `watch_next`. Direction continuity across Scans is part of the product contract.
+- The user-facing “All Relevant Changes” projection is a separate, recall-oriented project-relevance view and must not contain raw source noise merely because it was observed. Every listed Change should already have enough shallow interpretation to explain what changed without requiring a Deep Dive.
+- `Featured 5` is selected from shallow intelligence only for the first-screen reading order. It may receive richer presentation copy, but no automatic evidence research / tool loop / multi-Agent deep analysis.
+- The model-written environment report must be grounded across the full environment corpus and Directions; project-specific claims must additionally be grounded in Project Profile/usage evidence.
 - Prefer Change/ChangeRevision as the synthesis/analyzer unit; do not make source-level `SignalEvent` the permanent product reasoning unit.
 
 ### P0-B — Frontend product redesign
 
-Frontend quality is a product blocker, not optional polish. The normal Web surface should lead with **period environment brief → directions/themes → items requiring attention → all relevant changes → detail**.
+Frontend quality is a product blocker, not optional polish. Treat the frontend as the **primary P0 product asset**: its information architecture defines whether SignalHarness feels like environment intelligence or an Agent debugger. The normal Web surface should lead with **Directions → period environment brief → Featured 5 → all relevant changes → detail / lazy Deep Dive**.
 
 Remove from the normal product UI:
 
@@ -59,10 +60,21 @@ Raw `trace.step` remains an audit stream, but the primary live experience needs 
 ```text
 collecting_sources
 → normalizing_and_aggregating
-→ synthesizing_environment
-→ deep_analyzing_priority_changes
+→ interpreting_changes
+→ forming_environment_directions
 → assembling_report
 → complete
+```
+
+Opening one Change starts a separate lazy product flow:
+
+```text
+loading_change_context
+→ resolving_evidence
+→ checking_project_usage
+→ analyzing_impact
+→ preparing_verification_and_actions
+→ deep_dive_ready
 ```
 
 Expose meaningful progress/count deltas and newly formed themes/changes without rendering every low-level Python/LLM Trace row as the main scan experience.
@@ -76,6 +88,12 @@ Expose meaningful progress/count deltas and newly formed themes/changes without 
 - Move All Changes filtering/sorting/pagination into the persistence query rather than loading an entire Scan into Python before each page.
 - Normalize product feedback APIs around `change_id + scan_id + event/change revision`, not legacy `signal_id` naming.
 - Reduce legacy UI/output fallback paths once the Product Intelligence contract is proven.
+- Retire scan-time LLM Supervisor routing. Stage ownership belongs to deterministic Runtime, not a model deciding which Agent runs next.
+- Move evidence, code-usage inspection, impact/action reasoning, and selective verification out of the normal Scan and behind lazy `DeepDiveAnalysis`.
+- Replace the current per-event narrative boundary with batch-friendly `ChangeInterpreter` plus `EnvironmentDirectionSynthesizer/ReportComposer` responsibilities. These are responsibilities, not a mandate for more autonomous Agents.
+- Preserve the existing five-Agent code only as a regression/eval baseline until the new contracts are green; do not let baseline code continue owning production product semantics.
+- Enforce one domain responsibility per production module during migration: collection never decides relevance; Change assembly never writes presentation copy; shallow interpretation never performs evidence research; Direction synthesis never mutates Change truth; Deep Dive never rewrites Scan history; frontend never recomputes backend ranking/analysis; persistence repositories never import eval code.
+- Break the current production/eval import cycle (`capability_eval ↔ runtime.workflow ↔ providers`) as part of convergence. Eval may depend on stable runtime interfaces; production runtime/provider modules must not depend back on eval modules.
 
 ### P0-E — Model profiles
 
@@ -85,11 +103,14 @@ Expose meaningful progress/count deltas and newly formed themes/changes without 
 
 ### P0 acceptance
 
-- a controlled Scan with >=300 observed/aggregated Changes produces a model-written full-period environment brief and directions grounded across the full corpus while only a bounded shortlist receives expensive deep analysis; Observed, Relevant and Deep-analyzed counts remain semantically distinct;
-- report claims are traceable to supporting Change IDs and do not silently over-generalize from Top-K;
+- a controlled Scan with >=300 observed/aggregated Changes produces bounded shallow ChangeInsights for the full corpus plus a model-written full-period environment brief and first-class Directions grounded across that corpus, without issuing one provider call per Change or silently truncating Direction input to Top-K;
+- no fixed Top-K receives evidence-heavy Deep Dive automatically during Scan; opening a Change explicitly creates/reuses its version-pinned DeepDiveAnalysis;
+- Featured 5 is a presentation projection only and can be regenerated without changing domain truth or Deep Dive state;
+- Observed, Relevant, Featured, and Deep Dive states remain semantically distinct;
+- Direction claims and report claims are traceable to supporting Change IDs and do not silently over-generalize from Featured items;
 - ordinary Web UI contains no numeric impact score, mock/demo/fixture mode, Harness implementation selector, or raw Trace console in the primary flow;
-- live scan progress is understandable without knowing SSE, Agents, schemas or Trace internals;
-- ChangeRevision / aggregation boundary and durable state authority are explicit and tested;
+- live scan progress is understandable without knowing SSE, Agents, schemas or Trace internals, and a clicked Deep Dive has its own understandable progress state;
+- ChangeRevision / ChangeInsight / EnvironmentDirection / DeepDiveAnalysis boundaries and durable state authority are explicit and tested;
 - current Kimi and DeepSeek profiles resolve to `kimi-k3` and `deepseek-v4-pro`;
 - full Python/frontend verification remains green after convergence.
 
@@ -612,7 +633,7 @@ These are intentionally deferred until the relevant phase because they do not bl
 
 **Complete the P0 reset before treating the current UI/data flow as pilot-ready.**
 
-P1–P8 are locally implemented and remain valuable infrastructure, but the 2026-09-11 owner review found four product blockers: the model-written environment narrative currently sees only the deep-analysis shortlist rather than the full relevant set; the normal Web surface exposes engineering/test concepts and numeric scores; raw Trace/SSE is being used as the main live experience; and Event-oriented/legacy-state boundaries still conflict with the target Change-centric architecture. Resolve P0-A through P0-E first. Then move to real-usage pilot, collect feedback/outcomes, and use the existing Calibration replay/promotion gates rather than adding another framework layer. P7's final external-destination delivery remains separately environment-dependent.
+P1–P8 are locally implemented and remain valuable infrastructure, but the 2026-09-11 owner review found the production semantics need to change before pilot: the environment narrative must see the full Change corpus; every Change needs cheap scan-time interpretation; first-class EnvironmentDirections must become the primary product object; fixed Top-K deep analysis should be removed in favor of lazy user-triggered Deep Dive; the normal Web surface must stop exposing engineering/test concepts and numeric scores; raw Trace/SSE cannot be the primary live experience; and Event-oriented/legacy-state boundaries still conflict with the Change-centric target. Resolve P0-A through P0-E first. Then move to real-usage pilot, collect feedback/outcomes, and use the existing Calibration replay/promotion gates rather than adding another framework layer. P7's final external-destination delivery remains separately environment-dependent.
 
 ## RETROSPECTIVE TEMPLATE
 
