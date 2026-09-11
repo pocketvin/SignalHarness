@@ -7,8 +7,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 INTELLIGENCE_VERSION = "environment-v1.6"
-CHANGE_INSIGHT_VERSION = "environment-shallow-v1.6"
-LEGACY_CHANGE_INSIGHT_VERSIONS = ("environment-v1.3",)
+CHANGE_INSIGHT_VERSION = "environment-shallow-v1.7"
+LEGACY_CHANGE_INSIGHT_VERSIONS = ("environment-shallow-v1.6", "environment-v1.3")
 SYNTHESIS_VERSION = "environment-synthesis-v1.6"
 DEEP_DIVE_VERSION = "environment-v1.3"  # deep-dive cache unchanged by report-only evolution
 
@@ -57,7 +57,28 @@ class ShallowInsight(Contract):
     uncertainty: str = Field(default="", max_length=400)
 
 
+class ShallowModelRow(Contract):
+    """Compact provider wire schema; converted to user-facing ShallowInsight in Python."""
+
+    id: str
+    s: str = Field(min_length=1, max_length=96)
+    f: str = Field(min_length=1, max_length=240)
+    r: Literal["direct", "context", "none", "unknown"]
+    b: str = Field(default="", max_length=8)
+    n: str = Field(default="", max_length=72)
+    a: Literal["watch", "normal", "low"]
+    t: list[str] = Field(default_factory=list, max_length=3)
+    e: list[str] = Field(default_factory=list, max_length=8)
+    u: str = Field(default="", max_length=100)
+
+
+class ShallowModelBatch(Contract):
+    x: list[ShallowModelRow]
+
+
 class InsightBatch(Contract):
+    """Legacy/cache-friendly public shallow contract; not the provider wire schema."""
+
     results: list[ShallowInsight]
 
 

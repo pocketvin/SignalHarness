@@ -30,6 +30,8 @@ class FactCapsule:
     primary_excerpt: str
     deterministic_relation: Relation
     deterministic_relation_reason: str
+    deterministic_basis_kind: str
+    deterministic_basis_label: str
     deterministic_eligible: bool
     deterministic_topics: tuple[str, ...]
 
@@ -49,7 +51,6 @@ class FactCapsule:
             "primary_authority": self.primary_authority,
             "title": self.title,
             "known_project_relation": self.deterministic_relation,
-            "known_project_relation_reason": self.deterministic_relation_reason,
         }
 
 
@@ -78,6 +79,47 @@ def _profile_terms(profile: dict[str, Any], *keys: str) -> set[str]:
     return result
 
 
+def _profile_labels(profile: dict[str, Any], *keys: str) -> list[str]:
+    values: list[str] = []
+    for key in keys:
+        raw = profile.get(key, [])
+        if not isinstance(raw, list):
+            continue
+        for value in raw:
+            if isinstance(value, dict):
+                value = value.get("name") or value.get("id") or value.get("repo") or ""
+            text = str(value).strip()
+            if text:
+                values.append(text)
+    return values
+
+
+def _entity_token_in_label(entity: str, label: str) -> bool:
+    if len(entity) < 4:
+        return False
+    tokens = set(re.findall(r"[a-z0-9]+", _norm(label)))
+    return entity in tokens
+
+
+def _relation_entity_candidates(digest: ChangeDigest) -> tuple[set[str], set[str]]:
+    """Return conservative direct aliases and broader ecosystem aliases without mutating identity."""
+    direct = {_norm(digest.entity)} if digest.entity else set()
+    ecosystem = set(direct)
+    for evidence in digest.evidence:
+        source = evidence.source_name.strip()
+        if not source:
+            continue
+        ecosystem.add(_norm(source))
+        if "/" in source:
+            parts = [_norm(part) for part in source.split("/") if part.strip()]
+            if parts:
+                # Repo basename is safe enough for concrete package matching (e.g. pydantic/pydantic).
+                # Owner names are broader context only; they must never create direct dependency exposure.
+                direct.add(parts[-1])
+                ecosystem.update(parts)
+    return {value for value in direct if value}, {value for value in ecosystem if value}
+
+
 def _source_posture(digest: ChangeDigest) -> str:
     kinds = {item.source_type for item in digest.evidence}
     if kinds == {"github_issue"}:
@@ -87,26 +129,44 @@ def _source_posture(digest: ChangeDigest) -> str:
     return "observed_change"
 
 
-def _exact_relation(digest: ChangeDigest, profile: dict[str, Any]) -> tuple[Relation, str]:
+def _exact_relation(
+    digest: ChangeDigest, profile: dict[str, Any]
+) -> tuple[Relation, str, str, str]:
     if digest.corpus_role == "project_activity":
-        return "direct", "这是当前项目自身的代码或发布活动。"
-    entity = _norm(digest.entity)
-    dependencies = _profile_terms(profile, "dependencies", "dependency_evidence")
-    protocols = _profile_terms(profile, "protocols")
-    providers = _profile_terms(profile, "providers")
-    ecosystems = _profile_terms(profile, "monitored_ecosystem")
-    if entity and entity in dependencies:
-        return "direct", f"项目当前直接使用 {digest.entity}。"
-    if entity and entity in protocols:
-        return "direct", f"项目当前直接使用 {digest.entity} 协议。"
-    if entity and entity in providers:
-        return "direct", f"项目当前直接接入 {digest.entity}。"
-    if entity and entity in ecosystems:
-        return "context", f"{digest.entity} 属于项目明确关注的外部生态。"
+        return "direct", "这是当前项目自身的代码或发布活动。", "", ""
+    direct_entities, ecosystem_entities = _relation_entity_candidates(digest)
+    groups = (
+        ("dependency", _profile_labels(profile, "dependencies", "dependency_evidence")),
+        ("protocol", _profile_labels(profile, "protocols")),
+        ("provider", _profile_labels(profile, "providers")),
+    )
+    for kind, labels in groups:
+        for label in labels:
+            if _norm(label) in direct_entities:
+                if kind == "dependency":
+                    reason = f"项目当前直接使用 {label}。"
+                elif kind == "protocol":
+                    reason = f"项目当前直接使用 {label} 协议。"
+                else:
+                    reason = f"项目当前直接接入 {label}。"
+                return "direct", reason, kind, label
+
+    ecosystem_labels = _profile_labels(profile, "monitored_ecosystem")
+    for label in ecosystem_labels:
+        if any(
+            entity == _norm(label) or _entity_token_in_label(entity, label)
+            for entity in ecosystem_entities
+        ):
+            return "context", "该变化属于项目明确关注的外部生态。", "ecosystem", label
+
     if digest.kind == "security_advisory" and digest.entity not in {"OSV", "unknown-package"}:
-        # OSV collection is created only from the project's resolved dependency set.
-        return "direct", f"该安全公告来自项目已解析依赖 {digest.entity} 的匹配结果。"
-    return "unknown", ""
+        return (
+            "direct",
+            f"该安全公告来自项目已解析依赖 {digest.entity} 的匹配结果。",
+            "dependency",
+            digest.entity,
+        )
+    return "unknown", "", "", ""
 
 
 def _deterministic_topics(digest: ChangeDigest) -> tuple[str, ...]:
@@ -120,7 +180,7 @@ def _deterministic_topics(digest: ChangeDigest) -> tuple[str, ...]:
 
 
 def build_fact_capsule(digest: ChangeDigest, profile: dict[str, Any]) -> FactCapsule:
-    relation, reason = _exact_relation(digest, profile)
+    relation, reason, basis_kind, basis_label = _exact_relation(digest, profile)
     primary = max(
         digest.evidence,
         key=lambda item: (_AUTHORITY_ORDER.get(item.authority, 0), -item.event_revision_id),
@@ -154,6 +214,8 @@ def build_fact_capsule(digest: ChangeDigest, profile: dict[str, Any]) -> FactCap
         primary_excerpt=primary.excerpt,
         deterministic_relation=relation,
         deterministic_relation_reason=reason,
+        deterministic_basis_kind=basis_kind,
+        deterministic_basis_label=basis_label,
         deterministic_eligible=structured_fact and relation != "unknown",
         deterministic_topics=_deterministic_topics(digest),
     )

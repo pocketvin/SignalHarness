@@ -13,8 +13,8 @@ from signal_harness.intelligence.contracts import (
     LEGACY_CHANGE_INSIGHT_VERSIONS,
     ChangeDigest,
     EnvironmentReport,
-    InsightBatch,
     ProductChange,
+    ShallowModelBatch,
     Progress,
     ShallowInsight,
     SynthesisOutput,
@@ -28,6 +28,12 @@ from signal_harness.intelligence.fact_capsule import (
     deterministic_insight,
 )
 from signal_harness.intelligence.model_calls import BoundedModelCaller, validate_product_language
+from signal_harness.intelligence.project_projection import (
+    model_row_to_insight,
+    project_reference_map,
+    reference_id_for_basis,
+    shallow_project_context,
+)
 from signal_harness.intelligence.semantic_router import (
     SemanticWorkItem,
     route_capsule,
@@ -317,6 +323,8 @@ class EnvironmentEngine:
         current_keys = {
             digest.change_id: cache_key(digest, CHANGE_INSIGHT_VERSION) for digest in digests
         }
+        project_references = project_reference_map(profile)
+        semantic_project_context = shallow_project_context(profile)
         stats: dict[str, Any] = {
             "cache_hits": 0,
             "legacy_cache_hits": 0,
@@ -390,34 +398,56 @@ class EnvironmentEngine:
             expected = {item.digest.change_id for item in batch}
             digest_by_id = {item.digest.change_id: item.digest for item in batch}
             validated_products: dict[str, ProductChange] = {}
+            converted: dict[str, ShallowInsight] = {}
 
-            def validate(output: InsightBatch) -> None:
-                returned = [row.change_id for row in output.results]
+            def validate(output: ShallowModelBatch) -> None:
+                returned = [row.id for row in output.x]
                 if set(returned) != expected or len(returned) != len(expected):
                     raise ValueError("Every input Change ID must appear exactly once")
-                for row in output.results:
-                    validated_products[row.change_id] = project_change(
-                        digest_by_id[row.change_id], row, profile
+                work_by_id = {item.digest.change_id: item for item in batch}
+                for row in output.x:
+                    work = work_by_id[row.id]
+                    insight = model_row_to_insight(
+                        row,
+                        references=project_references,
+                        digest=work.digest,
+                        known_relation=work.capsule.deterministic_relation,
+                        known_basis_kind=work.capsule.deterministic_basis_kind,
+                        known_basis_label=work.capsule.deterministic_basis_label,
+                    )
+                    validate_product_language(insight)
+                    converted[row.id] = insight
+                    validated_products[row.id] = project_change(
+                        digest_by_id[row.id], insight, profile
                     )
 
             try:
                 stats["semantic_batch_attempts"] += 1
                 async with semaphore:
+                    change_payloads = []
+                    for work in batch:
+                        payload_item = capsule_semantic_payload(work.capsule, work.digest)
+                        basis_id = reference_id_for_basis(
+                            project_references,
+                            kind=work.capsule.deterministic_basis_kind,
+                            label=work.capsule.deterministic_basis_label,
+                        )
+                        if basis_id:
+                            payload_item["known_project_basis_id"] = basis_id
+                        change_payloads.append(payload_item)
                     output = await self.caller.complete(
                         "shallow",
                         {
-                            "project": project_context(profile),
-                            "changes": [
-                                capsule_semantic_payload(item.capsule, item.digest)
-                                for item in batch
-                            ],
+                            "project": semantic_project_context,
+                            "changes": change_payloads,
                         },
-                        InsightBatch,
+                        ShallowModelBatch,
                         validate,
                     )
                 receipt = self.caller.last_receipt()
-                for insight in output.results:
-                    item = validated_products[insight.change_id]
+                for row in output.x:
+                    insight = converted[row.id]
+                    item = validated_products[row.id]
                     products[item.change_id] = item
                     self.repository.cache_insight(
                         current_keys[item.change_id],

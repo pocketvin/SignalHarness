@@ -31,12 +31,19 @@ SYSTEM = (
 )
 ROLES = {
     "shallow": (
-        "逐条解释本批全部changes；每个change_id恰好一个results。写清事实与轻度项目关系，"
-        "不要深挖、调用工具、给详细修改建议、宣称已验证源码影响。evidence_ids只能引用该条已有证据。"
-        "topics使用简短稳定主题。弱相关也必须保留；事实与项目推测分开。"
-        "同一batch里的每个change是互相独立的并行任务：解释当前change时只能使用它自己的evidence，"
-        "其他change不能作为当前change的事实、严重性、主题或项目关系依据。先描述世界事实，再单独判断项目关系。"
-        "用户可见文字必须自然表达，不要提JSON字段名、Change ID或诸如critical_modules/dependencies等内部键。"
+        "逐条解释本批全部changes；输出x中每个输入change_id必须恰好对应一行。"
+        "先仅根据当前change自己的evidence写世界事实，再单独判断项目关系；batch里的其他change不是证据。"
+        "project.g是项目用途；project.r按前缀分组：d依赖、p协议、r运行环境、v外部服务、m关注能力、e关注生态；"
+        "每组数组按1开始编号，因此d1表示project.r.d第1项。project.q是用户明确关注。"
+        "每个change的known_project_relation若为direct/context，是确定性事实，r必须保持一致；"
+        "若同时有known_project_basis_id，b必须使用它；若relation为unknown再自行判断。"
+        "direct只能选择与change.entity同一实体的d/p/r/v具体依据；生态或模块只能是context。"
+        "context若选择d/p/r/v，所选label必须真的出现在当前change事实/证据中，否则应选m/e依据或unknown。"
+        "输出r=direct/context时，b必须填写project.r中存在的一个ref_id；r=none/unknown时b必须为空。"
+        "n只写变化与所选项目依据之间的增量联系或边界，目标不超过70个中文字符；不要重复项目名、ref label或整套技术栈。"
+        "s保持一句短摘要，f只写发生了什么；t最多3个稳定主题。e只能引用当前change自己的evidence_id。"
+        "不要深挖、调用工具、给详细修改建议、宣称已验证源码影响；没有依据时用unknown并在u保留不确定性。"
+        "用户可见文字必须自然简体中文，不要提JSON字段名、Change ID或内部Profile键。"
     ),
     "synthesis": (
         "corpus是本期全部外部环境变化，必须整体综合，不能只看重点；corpus中的短字段由corpus_legend定义，"
@@ -86,6 +93,11 @@ def validate_product_language(output: BaseModel) -> None:
         "watch_next",
         "impact",
         "verification_steps",
+        # Compact ShallowModelRow wire fields: summary/fact/note/uncertainty.
+        "s",
+        "f",
+        "n",
+        "u",
     }
 
     def visit(value: Any, key: str = "") -> None:
@@ -113,6 +125,7 @@ def _validation_code(exc: ValueError) -> str:
     rules = (
         ("product_language", "product_language"),
         ("internal_contract", "internal_product_copy"),
+        ("project_relation_basis", "project_relation_basis_invalid"),
         ("external-environment", "project_activity_used_as_environment"),
         ("same-day", "temporal_same_day_mismatch"),
         ("short-window", "temporal_window_mismatch"),
@@ -142,6 +155,11 @@ _REPAIR_HINTS = {
     "project_activity_used_as_environment": "项目自身活动只能解释项目关联，不能作为环境方向、brief或featured的支持Change。",
     "internal_product_copy": "把内部JSON字段名、Change ID和实现键改写成人类可读的项目概念。",
     "product_language": "所有用户可见标题、说明和建议改写为自然简体中文，专有名词除外。",
+    "project_relation_basis_invalid": (
+        "重新检查project.r与当前change：known_project_relation为direct/context时不得改等级；"
+        "direct必须选择与change.entity同一实体的d/p/r/v；context若选择d/p/r/v，其label必须真实出现在当前change中，"
+        "否则改用m/e依据或unknown。none/unknown的b必须为空，n不要重复项目名或ref label。"
+    ),
 }
 
 

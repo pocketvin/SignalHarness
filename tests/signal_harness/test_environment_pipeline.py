@@ -9,7 +9,11 @@ from typing import Any
 
 import pytest
 
-from signal_harness.intelligence.contracts import InsightBatch, SynthesisOutput
+from signal_harness.intelligence.contracts import (
+    InsightBatch,
+    ShallowModelBatch,
+    SynthesisOutput,
+)
 from signal_harness.intelligence.corpus import (
     assemble_changes,
     finalize_direction,
@@ -40,14 +44,83 @@ class ScriptedIntelligenceProvider:
     async def complete(self, call: AgentCall) -> str:
         self.calls.append(call)
         payload = call.input_payload
+        if call.output_schema == ShallowModelBatch.__name__:
+            refs = payload.get("project", {}).get("r", {})
+            rows = []
+            for item in payload["changes"]:
+                ignored = "ignore" in item["title"]
+                text = " ".join(
+                    [
+                        str(item.get("entity") or ""),
+                        str(item.get("title") or ""),
+                        *(str(ev.get("excerpt") or "") for ev in item.get("evidence", [])),
+                    ]
+                ).casefold()
+                known = str(item.get("known_project_relation") or "unknown")
+                basis_id = ""
+                relation = "none" if ignored else "unknown"
+                if not ignored and known in {"direct", "context"}:
+                    relation = known
+                    basis_id = str(item.get("known_project_basis_id") or "")
+                    if not basis_id:
+                        for prefix, values in refs.items():
+                            for index, label in enumerate(values, start=1):
+                                if str(label).casefold() in text:
+                                    basis_id = f"{prefix}{index}"
+                                    break
+                            if basis_id:
+                                break
+                if not ignored and not basis_id:
+                    for prefix in ("m", "e"):
+                        values = refs.get(prefix, [])
+                        if values:
+                            basis_id = f"{prefix}1"
+                            relation = "context"
+                            break
+                if not ignored and not basis_id:
+                    for prefix in ("d", "p", "r", "v"):
+                        for index, label in enumerate(refs.get(prefix, []), start=1):
+                            if str(label).casefold() in text:
+                                basis_id = f"{prefix}{index}"
+                                relation = "context"
+                                break
+                        if basis_id:
+                            break
+                rows.append(
+                    {
+                        "id": item["change_id"],
+                        "s": "上游工具接口发生调整：" + item["title"],
+                        "f": "来源说明工具注册接口增加了显式版本。",
+                        "r": relation,
+                        "b": "" if relation in {"none", "unknown"} else basis_id,
+                        "n": "该变化可能影响相关接口兼容性"
+                        if relation == "context"
+                        else "未发现明确项目关联",
+                        "a": "watch",
+                        "t": ["tool-registry"],
+                        "e": [item["evidence"][0]["evidence_id"]],
+                        "u": "还没有检查项目运行行为。",
+                    }
+                )
+            if self.fault == "missing":
+                rows = rows[:-1]
+            if self.fault == "foreign_evidence":
+                rows[0]["e"] = ["evr-nonexistent"]
+            if self.fault == "projection_overclaim" and rows:
+                rows[0]["r"] = "direct"
+                rows[0]["b"] = "m1"
+                rows[0]["n"] = "SignalHarness tool registry 可能直接受影响"
+            if self.fault == "large_batch" and len(payload["changes"]) > 4:
+                rows = rows[:-1]
+            return json.dumps({"x": rows}, ensure_ascii=False)
         if call.output_schema == InsightBatch.__name__:
             results = [
                 {
                     "change_id": item["change_id"],
                     "summary": "上游工具接口发生调整：" + item["title"],
                     "what_changed": "来源说明工具注册接口增加了显式版本。",
-                    "project_relation": "direct" if "ignore" not in item["title"] else "none",
-                    "relation_reason": "项目使用工具注册接口，尚未核实具体调用。",
+                    "project_relation": "context",
+                    "relation_reason": "相关依赖可能受到接口兼容性影响。",
                     "attention": "watch",
                     "topics": ["tool-registry"],
                     "evidence_ids": [item["evidence"][0]["evidence_id"]],
@@ -55,12 +128,6 @@ class ScriptedIntelligenceProvider:
                 }
                 for item in payload["changes"]
             ]
-            if self.fault == "missing":
-                results = results[:-1]
-            if self.fault == "foreign_evidence":
-                results[0]["evidence_ids"] = ["evr-nonexistent"]
-            if self.fault == "large_batch" and len(payload["changes"]) > 4:
-                results = results[:-1]
             return json.dumps({"results": results}, ensure_ascii=False)
         if call.output_schema == SynthesisOutput.__name__:
             ids = [item.get("change_id", item.get("id")) for item in payload["corpus"]]
@@ -125,7 +192,12 @@ def setup_engine(
 ) -> tuple[Any, ...]:
     ledger = ChangeLedger(tmp_path / "ledger.sqlite3")
     profile = ledger.ensure_profile_revision(
-        project_id="demo", auto_profile={"project_name": "测试项目", "dependencies": ["mcp"]}
+        project_id="demo",
+        auto_profile={
+            "project_name": "测试项目",
+            "dependencies": ["mcp"],
+            "critical_modules": ["tool registry"],
+        },
     )
     ledger.begin_scan(
         scan_id="scan-test",
@@ -236,7 +308,7 @@ def test_over_budget_never_truncates_to_featured(tmp_path: Path, project_root: P
     report = asyncio.run(engine.run(**kwargs))
     assert report.status == "degraded"
     assert report.counts["interpreted"] == 50
-    assert all(c.output_schema == "InsightBatch" for c in calls)
+    assert all(c.output_schema == "ShallowModelBatch" for c in calls)
 
 
 def test_revision_changes_preserve_old_snapshot(tmp_path: Path, project_root: Path) -> None:
@@ -612,7 +684,7 @@ def test_large_shallow_batch_splits_without_losing_full_corpus(tmp_path: Path, p
     report = asyncio.run(engine.run(**kwargs))
     assert report.status == "complete"
     assert report.counts["interpreted"] == 12
-    shallow_calls = [call for call in calls if call.output_schema == InsightBatch.__name__]
+    shallow_calls = [call for call in calls if call.output_schema == ShallowModelBatch.__name__]
     assert any(len(call.input_payload["changes"]) == 12 for call in shallow_calls)
     assert any(len(call.input_payload["changes"]) <= 3 for call in shallow_calls)
     assert len(calls[-1].input_payload["corpus"]) == 12
@@ -828,7 +900,7 @@ class _ConcurrencyProbeProvider(ScriptedIntelligenceProvider):
         self.tracker = tracker
 
     async def complete(self, call: AgentCall) -> str:
-        if call.output_schema == InsightBatch.__name__:
+        if call.output_schema == ShallowModelBatch.__name__:
             self.tracker["active"] += 1
             self.tracker["max_active"] = max(self.tracker["max_active"], self.tracker["active"])
             await asyncio.sleep(0.03)
@@ -1399,3 +1471,72 @@ def test_model_usage_counts_invalid_attempt_and_success(tmp_path: Path, project_
     assert caller.audit[1]["total_tokens"] == 150
     assert caller.trace.steps[0].total_tokens == 150
     assert caller.trace.steps[1].total_tokens == 150
+
+
+def test_github_issue_source_identity_matches_dependency_without_mutating_change_entity(
+    tmp_path: Path,
+) -> None:
+    ledger = ChangeLedger(tmp_path / "github-package-entity.sqlite3")
+    event = SignalEvent(
+        event_id="issue-package-entity",
+        source_type="github_issue",
+        source_name="pydantic/pydantic",
+        title="JSON Schema constraint issue",
+        content="Schema constraints differ from runtime validation.",
+        url="https://github.com/pydantic/pydantic/issues/1",
+        collected_at=NOW,
+        published_at=NOW,
+        raw_payload={
+            "package_name": "pydantic",
+            "package_registry": "pypi",
+            "author_association": "NONE",
+        },
+    )
+    digest = assemble_changes([event], ledger.persist_observations([event]))[0]
+    assert digest.entity == "pydantic/pydantic"
+    from signal_harness.intelligence.fact_capsule import build_fact_capsule
+
+    capsule = build_fact_capsule(digest, {"dependencies": ["pydantic"]})
+    assert capsule.deterministic_relation == "direct"
+    assert capsule.deterministic_basis_kind == "dependency"
+    assert capsule.deterministic_basis_label == "pydantic"
+
+
+def test_projection_overclaim_resolves_per_item_without_whole_batch_repair(
+    tmp_path: Path, project_root: Path
+) -> None:
+    engine, kwargs, calls, repo, *_ = setup_engine(
+        tmp_path, project_root, 4, "projection_overclaim"
+    )
+    report = asyncio.run(engine.run(**kwargs))
+    assert report.status == "complete"
+    weak_calls = [call for call in calls if call.agent_name == "ChangeInterpreter"]
+    assert len(weak_calls) == 1
+    assert not any(item.get("status") == "invalid_output" for item in engine.caller.audit)
+    page = repo.changes("scan-test", view="all", limit=10)
+    assert page["count"] == 4
+    first = page["items"][0]
+    assert first["project_relation"] == "context"
+    assert "SignalHarness" not in first["relation_reason"]
+    assert len(first["relation_reason"]) < 80
+
+
+def test_github_owner_name_cannot_create_false_direct_dependency_match(tmp_path: Path) -> None:
+    ledger = ChangeLedger(tmp_path / "owner-false-direct.sqlite3")
+    event = SignalEvent(
+        event_id="owner-false-direct",
+        source_type="github_issue",
+        source_name="httpx/unrelated-project",
+        title="Unrelated repository issue",
+        content="This repository does not represent the httpx package.",
+        url="https://github.com/httpx/unrelated-project/issues/1",
+        collected_at=NOW,
+        published_at=NOW,
+        raw_payload={"author_association": "NONE"},
+    )
+    digest = assemble_changes([event], ledger.persist_observations([event]))[0]
+    from signal_harness.intelligence.fact_capsule import build_fact_capsule
+
+    capsule = build_fact_capsule(digest, {"dependencies": ["httpx"]})
+    assert capsule.deterministic_relation == "unknown"
+    assert capsule.deterministic_basis_label == ""

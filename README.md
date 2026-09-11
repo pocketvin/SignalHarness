@@ -8,13 +8,15 @@ SignalHarness 会实时监听项目本地 Git、GitHub、PyPI package registry�
 
 ## 当前产品主线：方向优先，按需核实
 
-正常网页已经改为 **环境方向 → 整体报告 → 建议先看的变化 → 全部相关变化**。扫描时先整理去重，再为全部 Change 分批浅分析，最后让强模型一次综合完整语料；不再自动深挖 Top 12。
+正常网页已经改为 **环境方向 → 整体报告 → 建议先看的变化 → 全部相关变化**。扫描时先整理去重，每个 Change 都得到 ChangeInsight；缓存和确定性 FactCapsule 能处理的不会调用模型，只有语义缺口进入有界 Batch。最后让强模型一次综合完整紧凑语料；不再自动深挖 Top 12。
 
 用户明确点击某条变化，才创建独立、可缓存的 Deep Dive。前端不选择分析模型，不显示分数、mock 模式或原始 Trace 控制台。服务端模型策略位于 `configs/intelligence_policy.yaml`。
 
 当前环境报告还会区分 **外部环境变化** 与 **项目自身活动**：后者只用于解释项目关联，不能制造外部趋势。Direction 会显示证据姿态（问题/讨论信号、混合证据、已观察变化），避免把 GitHub Issue 当成已经发布的事实。
 
 成本侧现在使用 **cache → deterministic FactCapsule → semantic batch** 的三路 ChangeInsight 解析；不是每个 Change 都调用弱模型。只有需要语义理解的 cache miss 才进入默认 12 条/批、并发 3 的队列；强模型读取的是每条 Change 的紧凑 DirectionDigest，而不是再次读取完整证据。
+
+浅层项目关系已经进一步改成 **Python-owned relation/basis + 模型短 note**：模型 wire 不再为每条变化重复整份项目画像或自由写百字级关系说明；已知 direct/context 与具体依据由 FactCapsule 固定，模型越权只在单条上确定性收敛，不会为了一个 relation 错误重跑整个 Batch。
 
 ```bash
 cd /Users/yu0/Workspace/10-Projects/SignalHarness
