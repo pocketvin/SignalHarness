@@ -147,13 +147,44 @@ def test_architecture_refresh_updates_only_snapshot_and_profile_revision(
     config = tmp_path / "configs"
     shutil.copytree(project_root / "configs", config)
     profile_path = config / "project_profiles" / "openclaw-openclaw.yaml"
-    current = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
-    current["custom_review_note"] = "keep-me"
-    current.pop("architecture_snapshot", None)
+    watchlist_path = config / "watchlists" / "openclaw-openclaw.yaml"
+    catalog_path = config / "projects" / "openclaw-openclaw.yaml"
+    profile_path.parent.mkdir(parents=True, exist_ok=True)
+    watchlist_path.parent.mkdir(parents=True, exist_ok=True)
+    catalog_path.parent.mkdir(parents=True, exist_ok=True)
+
+    current = {
+        "project_name": "openclaw",
+        "purpose": "Test multi-provider gateway",
+        "goal": "Monitor changes relevant to the test gateway",
+        "dependencies": ["express"],
+        "repository": {
+            "provider": "github",
+            "repo": "openclaw/openclaw",
+            "url": "https://github.com/openclaw/openclaw",
+        },
+        "custom_review_note": "keep-me",
+    }
     profile_path.write_text(
         yaml.safe_dump(current, allow_unicode=True, sort_keys=False), encoding="utf-8"
     )
-    watchlist_path = config / "watchlists" / "openclaw-openclaw.yaml"
+    watchlist_path.write_text(
+        yaml.safe_dump({"github": {"repositories": []}}, sort_keys=False), encoding="utf-8"
+    )
+    catalog_path.write_text(
+        yaml.safe_dump(
+            {
+                "id": "openclaw-openclaw",
+                "name": "openclaw",
+                "description": "Test connected GitHub project",
+                "project_profile": "../project_profiles/openclaw-openclaw.yaml",
+                "watchlist": "../watchlists/openclaw-openclaw.yaml",
+                "default": False,
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
     watchlist_before = watchlist_path.read_text(encoding="utf-8")
 
     refreshed = draft_project(

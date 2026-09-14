@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -61,12 +63,41 @@ async def test_workflow_collects_local_git_and_osv_into_frozen_scan(
         )
 
     monkeypatch.setattr(SecurityOsvTool, "execute", fake_osv)
+
+    local_repo = tmp_path / "local-repo"
+    local_repo.mkdir()
+    subprocess.run(["git", "init"], cwd=local_repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "signalharness-test@example.test"],
+        cwd=local_repo,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "SignalHarness Test"],
+        cwd=local_repo,
+        check=True,
+    )
+    (local_repo / "README.md").write_text("fixture\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=local_repo, check=True)
+    commit_env = {
+        **os.environ,
+        "GIT_AUTHOR_DATE": "2026-09-08T10:00:00+00:00",
+        "GIT_COMMITTER_DATE": "2026-09-08T10:00:00+00:00",
+    }
+    subprocess.run(
+        ["git", "commit", "-m", "Synthetic local project change"],
+        cwd=local_repo,
+        check=True,
+        capture_output=True,
+        env=commit_env,
+    )
+
     watchlist = tmp_path / "watchlist.yaml"
     watchlist.write_text(
         f"""local_git:
   repositories:
-    - name: SignalHarness
-      path: {project_root}
+    - name: Fixture project
+      path: {local_repo}
 security:
   osv:
     enabled: true
