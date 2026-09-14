@@ -1,16 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import type {
+  ActivitySummary,
   Change,
   DeepDive,
   Filters,
   History,
+  LearningStatus,
   Meta,
   Page,
   Profile,
   Progress,
   Report,
   Scan,
+  TraceEvent,
+  TraceStep,
 } from "./types";
 
 const emptyFilters: Filters = {
@@ -32,7 +36,14 @@ export function useEnvironment() {
   const [error, setError] = useState("");
   const [scan, setScan] = useState<Scan | null>(null);
   const [progress, setProgress] = useState<Progress | null>(null);
+  const [traceByIndex, setTraceByIndex] = useState<Record<number, TraceStep>>({});
+  const [reportTrace, setReportTrace] = useState<TraceStep[]>([]);
+  const [activitySummary, setActivitySummary] = useState<ActivitySummary | null>(null);
+  const [learning, setLearning] = useState<LearningStatus | null>(null);
+  const [learningLoading, setLearningLoading] = useState(false);
+  const [learningError, setLearningError] = useState("");
   const [reconnecting, setReconnecting] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [detail, setDetail] = useState<Change | null>(null);
   const [deep, setDeep] = useState<DeepDive | null>(null);
   const [detailError, setDetailError] = useState("");
@@ -62,6 +73,7 @@ export function useEnvironment() {
     setScan(run);
     setProgress(run.progress);
     setReconnecting(false);
+    setStopping(false);
     const source = new EventSource(run.events_url);
     stream.current = source;
     source.onopen = () => {
@@ -75,6 +87,20 @@ export function useEnvironment() {
     source.addEventListener("product.progress", (event) => {
       if (belongs()) setProgress(JSON.parse((event as MessageEvent).data));
     });
+    const onTrace = (event: Event) => {
+      if (!belongs()) return;
+      const payload = JSON.parse((event as MessageEvent).data) as TraceEvent;
+      if (
+        !Number.isInteger(payload.index) ||
+        payload.index < 0 ||
+        !payload.trace ||
+        typeof payload.trace.step !== "string"
+      )
+        return;
+      setTraceByIndex((old) => ({ ...old, [payload.index]: payload.trace }));
+    };
+    source.addEventListener("trace.step", onTrace);
+    source.addEventListener("trace.step.updated", onTrace);
     source.addEventListener("run.started", () => {
       if (belongs())
         setScan((old) => (old ? { ...old, status: "running" } : old));
@@ -100,8 +126,27 @@ export function useEnvironment() {
       if (!belongs()) return;
       stream.current = null;
       setReconnecting(false);
+      setStopping(false);
       setScan((old) => (old ? { ...old, status: "error" } : old));
       setError("本次更新未完成。上一份报告仍可阅读，请重试。");
+    });
+    source.addEventListener("run.cancelled", () => {
+      source.close();
+      if (!belongs()) return;
+      stream.current = null;
+      setReconnecting(false);
+      setStopping(false);
+      setProgress(null);
+      setTraceByIndex({});
+      setScan((old) => (old ? { ...old, status: "cancelled" } : old));
+      void api
+        .home(project)
+        .then((home) => {
+          if (selectedProject.current !== project) return;
+          setReport(home.report);
+          setHistory(home.history);
+        })
+        .catch((e) => setError(String(e.message || e)));
     });
   }, []);
 
@@ -121,7 +166,14 @@ export function useEnvironment() {
     setDetail(null);
     setDeep(null);
     setProgress(null);
+    setTraceByIndex({});
+    setReportTrace([]);
+    setActivitySummary(null);
+    setLearning(null);
+    setLearningError("");
+    setLearningLoading(true);
     setScan(null);
+    setStopping(false);
     setError("");
     setFilters(emptyFilters);
     setLoading(true);
@@ -139,6 +191,18 @@ export function useEnvironment() {
       .finally(() => {
         if (!stopped) setLoading(false);
       });
+    void api
+      .calibration(projectId)
+      .then((value) => {
+        if (!stopped && selectedProject.current === projectId) setLearning(value);
+      })
+      .catch((e) => {
+        if (!stopped && selectedProject.current === projectId)
+          setLearningError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (!stopped && selectedProject.current === projectId) setLearningLoading(false);
+      });
     return () => {
       stopped = true;
       stream.current?.close();
@@ -151,6 +215,50 @@ export function useEnvironment() {
     },
     [],
   );
+
+  useEffect(() => {
+    if (!report || report.project_id !== projectId || (report.counts.project_activity ?? 0) === 0) {
+      setActivitySummary(null);
+      return;
+    }
+    let cancelled = false;
+    setActivitySummary(null);
+    void api
+      .activitySummary(projectId, report.scan_id)
+      .then((summary) => {
+        if (!cancelled) setActivitySummary(summary);
+      })
+      .catch(() => {
+        // Activity summary is a deterministic presentation projection. Failure must not
+        // make the saved environment report unreadable.
+        if (!cancelled) setActivitySummary(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, report]);
+
+  useEffect(() => {
+    if (!report || report.project_id !== projectId) {
+      setReportTrace([]);
+      return;
+    }
+    let cancelled = false;
+    setReportTrace([]);
+    void api
+      .trace(projectId, report.scan_id)
+      .then((steps) => {
+        if (!cancelled) setReportTrace(steps);
+      })
+      .catch(() => {
+        // Persisted Trace is supplemental observability; a missing/old artifact must not
+        // make an otherwise valid saved report unreadable.
+        if (!cancelled) setReportTrace([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, report]);
 
   useEffect(() => {
     if (!report || report.project_id !== projectId) return;
@@ -179,6 +287,7 @@ export function useEnvironment() {
   async function startScan(body: unknown) {
     const project = projectId;
     setError("");
+    setTraceByIndex({});
     setProgress({ stage: "queued", message: "正在准备本期观察范围" });
     setScan({ run_id: "", status: "queued", progress: null, events_url: "" });
     try {
@@ -190,6 +299,33 @@ export function useEnvironment() {
         setScan(null);
         setProgress(null);
       }
+    }
+  }
+  async function stopScan() {
+    const project = projectId;
+    const runId = scan?.run_id;
+    if (!runId || !scan || !["queued", "running"].includes(scan.status)) return;
+    setError("");
+    setStopping(true);
+    try {
+      const stopped = await api.cancelScan(project, runId);
+      if (selectedProject.current !== project) return;
+      stream.current?.close();
+      stream.current = null;
+      setReconnecting(false);
+      setProgress(null);
+      setTraceByIndex({});
+      setScan(stopped);
+      const home = await api.home(project);
+      if (selectedProject.current === project) {
+        setReport(home.report);
+        setHistory(home.history);
+      }
+    } catch (e) {
+      if (selectedProject.current === project)
+        setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      if (selectedProject.current === project) setStopping(false);
     }
   }
   async function chooseReport(id: string) {
@@ -216,6 +352,7 @@ export function useEnvironment() {
     setDetail(item);
     setDeep(null);
     setDetailError("");
+    if (item.corpus_role === "project_activity") return;
     try {
       // Explicit click only. No GET, hover or evidence-preview starts a billable operation.
       const job = await api.deep(
@@ -265,6 +402,25 @@ export function useEnvironment() {
     const updated = await api.naturalPreference(project, text);
     if (selectedProject.current === project) setProfile(updated);
   }
+  async function refreshArchitecture() {
+    const project = projectId;
+    const updated = await api.refreshArchitecture(project);
+    if (selectedProject.current === project) setProfile(updated);
+  }
+  async function refreshLearning() {
+    const project = projectId;
+    setLearningLoading(true);
+    setLearningError("");
+    try {
+      const value = await api.calibration(project);
+      if (selectedProject.current === project) setLearning(value);
+    } catch (e) {
+      if (selectedProject.current === project)
+        setLearningError(e instanceof Error ? e.message : String(e));
+    } finally {
+      if (selectedProject.current === project) setLearningLoading(false);
+    }
+  }
   return {
     meta,
     projectId,
@@ -281,16 +437,28 @@ export function useEnvironment() {
     setError,
     scan,
     progress,
+    traceSteps: Object.entries(traceByIndex)
+      .sort(([left], [right]) => Number(left) - Number(right))
+      .map(([, step]) => step),
+    reportTrace,
+    activitySummary,
+    learning,
+    learningLoading,
+    learningError,
     reconnecting,
+    stopping,
     detail,
     deep,
     detailError,
     startScan,
+    stopScan,
     chooseReport,
     openChange,
     closeDetail,
     savePreference,
     naturalPreference,
+    refreshArchitecture,
+    refreshLearning,
     refreshMeta,
   };
 }

@@ -230,6 +230,54 @@ async def test_since_last_includes_late_discovery_and_revision_once(
     third = await workflow.scan(window_mode="since_last", scan_id="late-three")
     assert third.all_change_count == 0
 
+
+@pytest.mark.asyncio
+async def test_since_last_does_not_backfill_unknown_coverage_source_history(
+    project_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workflow = SignalHarnessWorkflow(
+        cwd=project_root,
+        output_dir=tmp_path / "out",
+        state_dir=tmp_path / "state",
+        mode=RunMode.DEMO,
+        project_id="signalharness",
+    )
+    now = datetime.now(timezone.utc)
+    checkpoint = now - timedelta(days=1)
+    workflow.ledger.advance_interactive_checkpoint(
+        project_id="signalharness",
+        checkpoint_at=checkpoint,
+        scan_id="prior-scan",
+    )
+    task = SourceTask(
+        task_id="archive-source",
+        source_name="example/project",
+        source_type="github_issue",
+        status="success",
+        coverage_status="unknown",
+        output_count=2,
+    )
+
+    async def fake_collect(*args: object, **kwargs: object) -> CollectionBatch:
+        del args, kwargs
+        return CollectionBatch(
+            events=[
+                _event("historic-backlog", now - timedelta(days=30)),
+                _event("actually-new", now - timedelta(hours=1)),
+            ],
+            failed_sources=[],
+            source_tasks=[task],
+        )
+
+    monkeypatch.setattr(workflow, "_collect_watchlist", fake_collect)
+    result = await workflow.scan(window_mode="since_last", scan_id="unknown-history")
+
+    assert result.all_change_count == 1
+    page = workflow.ledger.list_scan_changes("unknown-history", limit=10)
+    assert [item["event"]["event_id"] for item in page.items] == ["actually-new"]
+    assert page.items[0]["event"]["raw_payload"].get("window_exception") is None
+
+
 @pytest.mark.asyncio
 async def test_non_interactive_scan_never_advances_interactive_checkpoint(
     project_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

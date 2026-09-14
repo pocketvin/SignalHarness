@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -17,6 +18,8 @@ from signal_harness.projects.catalog import ProjectOption, project_catalog, proj
 from signal_harness.projects.state import prepare_project_state
 from signal_harness.service_streaming import StreamRunManager, StreamRunSession
 from signal_harness.signal.policy import load_signal_policy
+
+logger = logging.getLogger(__name__)
 
 ScheduleCadence = Literal["12h", "24h", "daily"]
 
@@ -177,7 +180,7 @@ class ScheduleManager:
             except Exception:
                 # One scheduling iteration must not kill future triggers. Individual
                 # run failures are persisted by StreamRunManager and finalize_schedule.
-                pass
+                logger.exception("SignalHarness scheduler iteration failed")
             await asyncio.sleep(self.poll_seconds)
 
     async def run_due(self, *, now: datetime | None = None) -> list[str]:

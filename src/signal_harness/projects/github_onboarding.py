@@ -10,6 +10,12 @@ from urllib.parse import quote, urlparse
 
 import httpx
 
+from signal_harness.projects.architecture_snapshot import (
+    ArchitectureSourceSample,
+    architecture_neighbor_paths,
+    select_architecture_paths,
+)
+from signal_harness.projects.discovery_profile import with_discovery_profile
 from signal_harness.projects.onboarding import ProjectDraft, ProjectManifest, draft_project
 from signal_harness.tools.github_signal import github_api_headers
 
@@ -73,11 +79,12 @@ async def draft_github_project(
         )
         tree_payload = tree.get("tree")
         tree_rows: list[Any] = tree_payload if isinstance(tree_payload, list) else []
-        paths = [
+        all_paths = [
             str(item.get("path"))
             for item in tree_rows
             if isinstance(item, dict) and item.get("type") == "blob" and item.get("path")
-        ][:_MAX_PATHS]
+        ]
+        paths = all_paths[:_MAX_PATHS]
         manifests: list[ProjectManifest] = []
         manifest_rows = [
             item
@@ -131,11 +138,62 @@ async def draft_github_project(
             manifests.append(
                 ProjectManifest(path=path, content=decoded.decode("utf-8", errors="replace"))
             )
+        source_samples: list[ArchitectureSourceSample] = []
+        rows_by_path = {
+            str(item.get("path")): item
+            for item in tree_rows
+            if isinstance(item, dict) and item.get("type") == "blob" and item.get("path")
+        }
+
+        async def load_source_sample(path: str) -> None:
+            if any(sample.path == path for sample in source_samples):
+                return
+            item = rows_by_path.get(path, {})
+            sha = str(item.get("sha") or "")
+            size = int(item.get("size") or 0)
+            if not sha or size > 96_000:
+                return
+            try:
+                blob = await _get_json(
+                    http,
+                    f"https://api.github.com/repos/{canonical_repo}/git/blobs/{sha}",
+                )
+            except ValueError:
+                # Architecture enrichment is supplemental; one unreadable source blob must not
+                # make an otherwise valid project connection fail.
+                return
+            if str(blob.get("encoding") or "") != "base64":
+                return
+            raw = str(blob.get("content") or "").replace("\n", "")
+            try:
+                decoded = base64.b64decode(raw, validate=True)
+            except (ValueError, binascii.Error):
+                return
+            if len(decoded) > 96_000:
+                return
+            source_samples.append(
+                ArchitectureSourceSample(
+                    path=path, content=decoded.decode("utf-8", errors="replace")
+                )
+            )
+
+        for path in select_architecture_paths(all_paths, manifests, limit=12):
+            await load_source_sample(path)
+        for path in architecture_neighbor_paths(
+            source_samples, all_paths, limit=max(0, 18 - len(source_samples))
+        ):
+            await load_source_sample(path)
     finally:
         if owns_client:
             await http.aclose()
 
-    draft = draft_project(manifests=manifests, paths=paths, name_hint=repo_name)
+    analysis_paths = list(dict.fromkeys([*paths, *(item.path for item in source_samples)]))
+    draft = draft_project(
+        manifests=manifests,
+        paths=analysis_paths,
+        name_hint=repo_name,
+        source_samples=source_samples,
+    )
     project_id = _github_project_id(canonical_repo)
     profile = dict(draft.project_profile)
     description = str(metadata.get("description") or "").strip()
@@ -156,6 +214,9 @@ async def draft_github_project(
     evidence["github_repository"] = canonical_repo
     evidence["github_tree_truncated"] = bool(tree.get("truncated", False))
     profile["evidence"] = evidence
+    # GitHub metadata may have supplied a better purpose after the manifest-only draft was built.
+    # Recompute the project-conditioned discovery profile from the final purpose, not the fallback.
+    profile = with_discovery_profile(profile)
 
     watchlist = dict(draft.watchlist)
     github = dict(watchlist.get("github") or {})

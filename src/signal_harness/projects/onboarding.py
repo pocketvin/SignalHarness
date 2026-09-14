@@ -17,6 +17,13 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
     import tomli as tomllib  # type: ignore[import-not-found,no-redef]
 
+from signal_harness.projects.architecture_snapshot import (
+    ArchitectureSourceSample,
+    collect_local_architecture_samples,
+    collect_local_source_paths,
+    derive_architecture_snapshot,
+)
+from signal_harness.projects.discovery_profile import with_discovery_profile
 from signal_harness.signal.source_identity import github_repository_from_remote
 from signal_harness.utils.fs import atomic_write_text
 
@@ -225,7 +232,16 @@ def inspect_project_directory(project_root: str | Path) -> ProjectDraft:
                 content=path.read_text(encoding="utf-8", errors="replace"),
             )
         )
-    draft = draft_project(manifests=manifests, paths=_collect_paths(root), name_hint=root.name)
+    visible_paths = _collect_paths(root)
+    source_paths = collect_local_source_paths(root)
+    analysis_paths = list(dict.fromkeys([*visible_paths, *source_paths]))
+    source_samples = collect_local_architecture_samples(root, analysis_paths, manifests)
+    draft = draft_project(
+        manifests=manifests,
+        paths=analysis_paths,
+        name_hint=root.name,
+        source_samples=source_samples,
+    )
     watchlist = dict(draft.watchlist)
     github_repo = _local_github_repository(root)
     watchlist["local_git"] = {
@@ -278,7 +294,11 @@ def _local_github_repository(root: Path) -> str | None:
 
 
 def draft_project(
-    *, manifests: list[ProjectManifest], paths: list[str], name_hint: str | None = None
+    *,
+    manifests: list[ProjectManifest],
+    paths: list[str],
+    name_hint: str | None = None,
+    source_samples: list[ArchitectureSourceSample] | None = None,
 ) -> ProjectDraft:
     manifest_map = {item.path.lower(): item.content for item in manifests}
     dependencies: set[str] = set()
@@ -429,6 +449,10 @@ def draft_project(
             "evidence_files": evidence_files,
         },
     }
+    profile["architecture_snapshot"] = derive_architecture_snapshot(
+        profile, paths, source_samples or []
+    )
+    profile = with_discovery_profile(profile)
     watchlist: dict[str, Any] = {}
     if repos:
         repositories: list[dict[str, Any]] = []

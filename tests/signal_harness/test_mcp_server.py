@@ -7,7 +7,11 @@ from pathlib import Path
 import pytest
 from mcp import Client
 
-from signal_harness.mcp_server import build_mcp_server
+from signal_harness.mcp_server import (
+    MCP_TOOL_NAMES,
+    MCP_WRITE_TOOL_NAMES,
+    build_mcp_server,
+)
 
 
 def _write_artifacts(output_dir: Path, state_dir: Path) -> None:
@@ -65,29 +69,30 @@ async def test_mcp_in_process_lists_and_calls_read_only_tools(
     async with Client(server) as client:
         listed = await client.list_tools()
         names = {tool.name for tool in listed.tools}
-        assert names == {
-            "signalharness_get_project_context",
-            "signalharness_search_signal_history",
-            "signalharness_get_latest_assessments",
-            "signalharness_get_run_trace",
-            "signalharness_get_feedback_memory",
-            "signalharness_start_scan",
-            "signalharness_get_scan_status",
-            "signalharness_get_product",
-            "signalharness_list_changes",
-            "signalharness_get_change_detail",
-        }
+        assert names == set(MCP_TOOL_NAMES)
         tools = {tool.name: tool for tool in listed.tools}
-        start_annotations = tools["signalharness_start_scan"].annotations
-        assert start_annotations is not None
-        assert start_annotations.read_only_hint is False
-        assert start_annotations.destructive_hint is False
-        assert start_annotations.idempotent_hint is False
-        assert start_annotations.open_world_hint is True
+        assert set(MCP_WRITE_TOOL_NAMES) <= names
+
+        for name in ("signalharness_start_scan", "signalharness_start_environment_scan"):
+            annotations = tools[name].annotations
+            assert annotations is not None
+            assert annotations.read_only_hint is False
+            assert annotations.destructive_hint is False
+            assert annotations.idempotent_hint is False
+            assert annotations.open_world_hint is True
+
+        for name in ("signalharness_record_change_feedback", "signalharness_record_change_outcome"):
+            annotations = tools[name].annotations
+            assert annotations is not None
+            assert annotations.read_only_hint is False
+            assert annotations.destructive_hint is False
+            assert annotations.idempotent_hint is False
+            assert annotations.open_world_hint is False
+
         assert all(
             tool.annotations and tool.annotations.read_only_hint
             for name, tool in tools.items()
-            if name != "signalharness_start_scan"
+            if name not in MCP_WRITE_TOOL_NAMES
         )
 
         context = await client.call_tool("signalharness_get_project_context", {})

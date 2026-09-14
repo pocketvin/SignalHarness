@@ -114,6 +114,8 @@ def normalize_github_event(
     elif kind in {"github_commit", "github_pull_request"} or raw.get("official") is True:
         authority = "official"
         official = True
+    elif kind == "github_repository":
+        authority, official = "maintainer", False
     elif association in {"OWNER", "MEMBER", "COLLABORATOR"}:
         authority = "maintainer"
         official = False
@@ -122,7 +124,24 @@ def normalize_github_event(
         official = False
     created_at = _datetime_value(raw.get("created_at"))
     updated_at = _datetime_value(raw.get("updated_at"))
-    if kind == "github_commit":
+    if kind == "github_repository":
+        full_name = _text(raw.get("full_name") or source_name, source_name)
+        title = full_name
+        topics = raw.get("topics") if isinstance(raw.get("topics"), list) else []
+        description = _text(raw.get("description"))
+        language = _text(raw.get("language"))
+        message = "; ".join(
+            part
+            for part in (
+                description,
+                f"Language: {language}" if language else "",
+                f"Topics: {', '.join(str(item) for item in topics[:8])}" if topics else "",
+            )
+            if part
+        )
+        observed_at = raw.get("created_at") or raw.get("updated_at")
+        change_kind, current_version = "new", None
+    elif kind == "github_commit":
         commit_value = raw.get("commit")
         commit: dict[str, Any] = commit_value if isinstance(commit_value, dict) else {}
         author_value = commit.get("author")

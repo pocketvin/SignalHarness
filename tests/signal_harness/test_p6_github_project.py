@@ -117,61 +117,87 @@ async def test_github_commit_fetch_uses_since_and_preserves_rich_metadata(
 
 
 @pytest.mark.asyncio
-async def test_github_merged_pull_fetch_filters_unmerged_and_stops_on_updated_cutoff(
+async def test_github_merged_pull_fetch_uses_graphql_merge_identity_and_updated_cutoff(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     real_client = httpx.AsyncClient
-    calls = 0
+    calls: list[httpx.Request] = []
     merge_sha = "c" * 40
 
     def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            return httpx.Response(
-                200,
-                headers={"Link": '<https://api.github.com/repos/acme/demo/pulls?page=2>; rel="next"'},
-                json=[
-                    {
-                        "id": 10,
-                        "number": 10,
-                        "title": "Merge durable scan state",
-                        "body": "Adds restart recovery.",
-                        "html_url": "https://github.com/acme/demo/pull/10",
-                        "created_at": "2026-09-05T08:00:00Z",
-                        "updated_at": "2026-09-08T12:00:00Z",
-                        "merged_at": "2026-09-08T11:00:00Z",
-                        "merge_commit_sha": merge_sha,
-                        "user": {"login": "alice"},
-                        "base": {"ref": "main"},
-                        "head": {"ref": "durable-scan"},
-                        "labels": [{"name": "runtime"}],
-                    },
-                    {
-                        "id": 9,
-                        "number": 9,
-                        "title": "Closed without merge",
-                        "updated_at": "2026-09-07T12:00:00Z",
-                        "merged_at": None,
-                        "merge_commit_sha": None,
-                    },
-                ],
-                request=request,
-            )
-        return httpx.Response(
-            200,
-            headers={"Link": '<https://api.github.com/repos/acme/demo/pulls?page=3>; rel="next"'},
-            json=[
+        calls.append(request)
+        body = json.loads(request.content)
+        after = body["variables"]["after"]
+        if after is None:
+            nodes = [
                 {
-                    "id": 8,
+                    "id": "PR_kwDO10",
+                    "number": 10,
+                    "title": "Merge durable scan state",
+                    "body": "Adds restart recovery.",
+                    "url": "https://github.com/acme/demo/pull/10",
+                    "createdAt": "2026-09-05T08:00:00Z",
+                    "updatedAt": "2026-09-08T12:00:00Z",
+                    "mergedAt": "2026-09-08T11:00:00Z",
+                    "mergeCommit": {"oid": merge_sha},
+                    "author": {"login": "alice"},
+                    "authorAssociation": "MEMBER",
+                    "mergedBy": {"login": "bob"},
+                    "baseRefName": "main",
+                    "headRefName": "durable-scan",
+                    "labels": {"nodes": [{"name": "runtime"}]},
+                },
+                {
+                    "id": "PR_kwDO11",
+                    "number": 11,
+                    "title": "Another recent merge",
+                    "body": "Recent change.",
+                    "url": "https://github.com/acme/demo/pull/11",
+                    "createdAt": "2026-09-04T08:00:00Z",
+                    "updatedAt": "2026-09-07T12:00:00Z",
+                    "mergedAt": "2026-09-07T11:00:00Z",
+                    "mergeCommit": {"oid": "e" * 40},
+                    "author": {"login": "carol"},
+                    "authorAssociation": "CONTRIBUTOR",
+                    "mergedBy": {"login": "bob"},
+                    "baseRefName": "main",
+                    "headRefName": "recent-change",
+                    "labels": {"nodes": []},
+                },
+            ]
+            page_info = {"hasNextPage": True, "endCursor": "cursor-2"}
+        else:
+            nodes = [
+                {
+                    "id": "PR_kwDO8",
                     "number": 8,
                     "title": "Old merged PR",
-                    "updated_at": "2026-08-30T12:00:00Z",
-                    "merged_at": "2026-08-30T11:00:00Z",
-                    "merge_commit_sha": "d" * 40,
+                    "body": "Old change.",
+                    "url": "https://github.com/acme/demo/pull/8",
+                    "createdAt": "2026-08-29T08:00:00Z",
+                    "updatedAt": "2026-08-30T12:00:00Z",
+                    "mergedAt": "2026-08-30T11:00:00Z",
+                    "mergeCommit": {"oid": "d" * 40},
+                    "author": {"login": "dave"},
+                    "authorAssociation": "CONTRIBUTOR",
+                    "mergedBy": {"login": "bob"},
+                    "baseRefName": "main",
+                    "headRefName": "old-change",
+                    "labels": {"nodes": []},
                 }
-            ],
+            ]
+            # Even with hasNextPage true, the updatedAt cutoff must stop here.
+            page_info = {"hasNextPage": True, "endCursor": "cursor-3"}
+        return httpx.Response(
+            200,
+            json={
+                "data": {
+                    "repository": {
+                        "pullRequests": {"nodes": nodes, "pageInfo": page_info}
+                    }
+                }
+            },
             request=request,
         )
 
@@ -190,14 +216,21 @@ async def test_github_merged_pull_fetch_filters_unmerged_and_stops_on_updated_cu
     )
 
     assert result.is_error is False
-    assert calls == 2
+    assert len(calls) == 2
+    assert all(str(request.url) == "https://api.github.com/graphql" for request in calls)
+    assert json.loads(calls[0].content)["variables"]["after"] is None
+    assert json.loads(calls[1].content)["variables"]["after"] == "cursor-2"
     rows = json.loads(result.output)
-    assert [row["number"] for row in rows] == [10]
+    assert [row["number"] for row in rows] == [10, 11]
+    assert rows[0]["merge_commit_sha"] == merge_sha
     assert rows[0]["base_ref"] == "main"
     assert rows[0]["head_ref"] == "durable-scan"
     assert rows[0]["label_names"] == ["runtime"]
+    assert rows[0]["author_login"] == "alice"
+    assert rows[0]["merged_by_login"] == "bob"
     assert result.metadata["coverage_status"] == "complete"
     assert result.metadata["pages_fetched"] == 2
+    assert result.metadata["identity_source"] == "graphql_merge_commit_oid"
     event = normalize_github_event(rows[0], repo="acme/demo", event_kind="github_pull_request")
     identity = git_change_identity(event)
     assert identity is not None
@@ -318,3 +351,78 @@ github:
     assert rows.count == 1
     assert rows.items[0]["basic_relevance_score"] > 0
     assert rows.items[0]["event"]["raw_payload"]["project_owned"] is True
+
+
+@pytest.mark.asyncio
+async def test_github_repository_discovery_is_bounded_and_preserves_provenance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_client = httpx.AsyncClient
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "total_count": 8,
+                "incomplete_results": False,
+                "items": [
+                    {
+                        "id": 123,
+                        "node_id": "R_123",
+                        "name": "sandbox-kit",
+                        "full_name": "acme/sandbox-kit",
+                        "description": "Tool execution sandbox for agent runtimes",
+                        "html_url": "https://github.com/acme/sandbox-kit",
+                        "homepage": "",
+                        "created_at": "2026-09-05T00:00:00Z",
+                        "updated_at": "2026-09-11T00:00:00Z",
+                        "pushed_at": "2026-09-11T00:00:00Z",
+                        "language": "Rust",
+                        "topics": ["sandbox", "agent-runtime"],
+                        "stargazers_count": 42,
+                        "fork": False,
+                        "archived": False,
+                        "owner": {"login": "acme"},
+                    }
+                ],
+            },
+            request=request,
+        )
+
+    def factory(*args: object, **kwargs: object) -> httpx.AsyncClient:
+        del args, kwargs
+        return real_client(transport=httpx.MockTransport(handler))
+
+    monkeypatch.setattr("signal_harness.tools.github_signal.httpx.AsyncClient", factory)
+    result = await GitHubSignalTool().execute(
+        GitHubSignalTool.input_model(
+            action="search_repositories",
+            query='"agent runtime" tools in:name,description,readme',
+            since="2026-09-01T00:00:00Z",
+            max_results=3,
+        ),
+        ToolExecutionContext(cwd=tmp_path),
+    )
+
+    assert result.is_error is False
+    assert len(calls) == 1
+    assert calls[0].url.path == "/search/repositories"
+    assert '"agent runtime" tools' in calls[0].url.params["q"]
+    assert "created:>=2026-09-01" in calls[0].url.params["q"]
+    assert calls[0].url.params["per_page"] == "3"
+    rows = json.loads(result.output)
+    assert rows[0]["full_name"] == "acme/sandbox-kit"
+    assert rows[0]["discovery_origin"] == "discovered"
+    assert rows[0]["discovery_basis"] == '"agent runtime" tools in:name,description,readme'
+    assert rows[0]["discovery_stars"] == 42
+    assert result.metadata["coverage_status"] == "unknown"
+    event = normalize_github_event(
+        rows[0], repo=rows[0]["full_name"], event_kind="github_repository"
+    )
+    assert event.source_type == "github_repository"
+    assert event.source_name == "acme/sandbox-kit"
+    assert event.published_at == datetime(2026, 9, 5, tzinfo=timezone.utc)
+    assert "Tool execution sandbox" in event.content

@@ -1,16 +1,25 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from mcp import Client
+from typer.testing import CliRunner
 
+from signal_harness.cli import app as cli_app
 from signal_harness.intelligence.usage import inspect_usage
+from signal_harness.learning.proposal_risk import ProposalRiskReport
+from signal_harness.learning.staging import StagedLearningProposal, save_learning_staging
+from signal_harness.mcp_server import build_mcp_server
+from signal_harness.projects.state import prepare_project_state
 from signal_harness.providers.task_policy import TaskPolicy
 from signal_harness.runtime.workflow import CollectionBatch, SignalHarnessWorkflow
 from signal_harness.service import create_app
+from signal_harness.utils.fs import atomic_write_text
 from test_environment_pipeline import ScriptedIntelligenceProvider
 
 
@@ -75,6 +84,9 @@ def run_scan(client, project):
     with client.stream("GET", run["events_url"]) as stream:
         text = "\n".join(stream.iter_lines())
     assert "event: product.progress" in text
+    assert "event: trace.step" in text
+    assert "event: trace.step.updated" in text
+    assert '"index":' in text and '"trace":' in text
     assert "event: run.completed" in text
     home = client.get(f"/intelligence/projects/{project}").json()
     assert home["report"] is not None, text[-4000:]
@@ -155,6 +167,49 @@ def test_direction_evidence_pagination_and_history(intelligence_app):
     assert history["items"][0]["revision_id"] == direction["revision_id"]
 
 
+def test_saved_environment_trace_is_project_scoped_and_product_safe(intelligence_app):
+    app, client, project, _ = intelligence_app
+    run, report = run_scan(client, project)
+    trace_path = (
+        app.state.environment_application.output_dir
+        / "service-runs"
+        / run["run_id"]
+        / "agent_trace.json"
+    )
+    raw_trace = json.loads(trace_path.read_text(encoding="utf-8"))
+    model_step = next(step for step in raw_trace if step.get("step") == "llm_agent_call")
+    model_step["metadata"] = {
+        "attempt": 1,
+        "validation_code": "unverified_trend_velocity",
+        "repair_mode": "localized",
+        "input_bytes": 999999,
+        "public_summary": "internal-only",
+    }
+    trace_path.write_text(json.dumps(raw_trace, ensure_ascii=False), encoding="utf-8")
+
+    response = client.get(
+        f"/intelligence/projects/{project}/reports/{report['scan_id']}/trace"
+    )
+    assert response.status_code == 200
+    trace = response.json()
+    assert trace
+    exposed = next(step for step in trace if step["step"] == "llm_agent_call")
+    assert exposed["metadata"] == {
+        "attempt": 1,
+        "validation_code": "unverified_trend_velocity",
+        "repair_mode": "localized",
+    }
+    assert all("detail" not in step for step in trace)
+    assert all("source_tasks" not in step for step in trace)
+    assert all("error" not in step for step in trace)
+    assert (
+        client.get(
+            f"/intelligence/projects/missing-project/reports/{report['scan_id']}/trace"
+        ).status_code
+        == 404
+    )
+
+
 def test_task_policy_honors_new_model_pin_without_changing_legacy_env(project_root, monkeypatch):
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-only-secret")
     monkeypatch.setenv("DEEPSEEK_BASE_URL", "https://example.com/v1")
@@ -164,6 +219,26 @@ def test_task_policy_honors_new_model_pin_without_changing_legacy_env(project_ro
     assert provider.profile.max_input_tokens > 100000
     assert provider.request_options == {"thinking": {"type": "enabled"}, "reasoning_effort": "high"}
     asyncio.run(provider.close())
+
+
+def test_task_policy_uses_supported_kimi_reasoning_tiers(project_root, monkeypatch):
+    monkeypatch.setenv("KIMI_API_KEY", "test-only-secret")
+    monkeypatch.setenv("KIMI_BASE_URL", "https://example.com/v1")
+    policy = TaskPolicy.load(project_root / "configs")
+    shallow = policy.create_provider("kimi", "shallow")
+    synthesis = policy.create_provider("kimi", "synthesis")
+    deep_dive = policy.create_provider("kimi", "deep_dive")
+    try:
+        assert shallow.profile.reasoning_effort == "low"
+        assert synthesis.profile.reasoning_effort == "low"
+        assert deep_dive.profile.reasoning_effort == "high"
+        assert synthesis.profile.max_output_tokens == 8192
+        assert shallow.profile.recommended_temperature == 1.0
+        assert synthesis.profile.recommended_temperature == 1.0
+    finally:
+        asyncio.run(shallow.close())
+        asyncio.run(synthesis.close())
+        asyncio.run(deep_dive.close())
 
 
 def test_usage_skips_private_symlinks_secrets_and_changes_cache_fingerprint(tmp_path: Path):
@@ -243,3 +318,235 @@ def test_committed_report_recovery_skips_collection_and_preserves_profile(
     assert repo.profile_for_scan(report["scan_id"]) == original_profile
     assert repo.report(report["scan_id"]) == report
     assert len(calls) == count
+
+
+def test_mvp_synthesis_provider_order_prefers_kimi_then_qwen(project_root, monkeypatch):
+    for prefix in ("QWEN", "KIMI", "DEEPSEEK"):
+        monkeypatch.setenv(f"{prefix}_API_KEY", "test-only-secret")
+        monkeypatch.setenv(f"{prefix}_BASE_URL", "https://example.com/v1")
+    policy = TaskPolicy.load(project_root / "configs")
+    assert policy.providers("synthesis") == ["kimi", "qwen"]
+
+
+def test_activity_summary_endpoint_is_project_scoped_and_model_free(intelligence_app):
+    _, client, project, calls = intelligence_app
+    _, report = run_scan(client, project)
+    before = len(calls)
+    base = f"/intelligence/projects/{project}/reports/{report['scan_id']}"
+    response = client.get(base + "/activity-summary")
+    assert response.status_code == 200
+    assert response.json() == {
+        "total_count": 0,
+        "groups": [],
+        "other_count": 0,
+        "type_counts": {},
+    }
+    assert len(calls) == before
+    assert (
+        client.get(
+            f"/intelligence/projects/missing-project/reports/{report['scan_id']}/activity-summary"
+        ).status_code
+        == 404
+    )
+
+
+def test_current_change_feedback_and_outcome_share_durable_calibration(intelligence_app):
+    _, client, project, calls = intelligence_app
+    _, report = run_scan(client, project)
+    base = f"/intelligence/projects/{project}/reports/{report['scan_id']}"
+    change = client.get(base + "/changes?view=relevant&limit=1").json()["items"][0]
+    path = f"{base}/changes/{change['change_id']}"
+    before_report = client.get(base).json()
+    before_calls = len(calls)
+
+    feedback = client.post(
+        path + "/feedback",
+        json={"label": "useful", "note": "current product feedback"},
+    )
+    assert feedback.status_code == 201, feedback.text
+    assert feedback.json()["change_id"] == change["change_id"]
+    assert feedback.json()["policy_applied"] is False
+
+    outcome = client.post(
+        path + "/outcome",
+        json={"impact_observed": True, "note": "confirmed after review"},
+    )
+    assert outcome.status_code == 201, outcome.text
+    assert outcome.json()["change_id"] == change["change_id"]
+
+    calibration = client.get(f"/intelligence/projects/{project}/calibration").json()
+    assert calibration["feedback_count"] == 1
+    assert calibration["outcome_count"] == 1
+    assert calibration["episode_count"] >= 1
+    assert calibration["ready_for_replay"] is False
+    assert calibration["feedback_labels"] == {"useful": 1}
+    assert calibration["labels_needed"] == 2
+    assert calibration["learning_state"] == "collecting"
+    assert calibration["candidate"]["proposal_id"]
+    assert calibration["candidate_replay"]["recommendation"] == "insufficient_evidence"
+    assert calibration["candidate_replay"]["promotion_allowed"] is False
+    assert calibration["staged_proposals"] == []
+    assert calibration["policy_revisions"] == []
+    assert client.get(base).json() == before_report
+    assert len(calls) == before_calls  # feedback/evolution writes never invoke the report models.
+
+
+def test_learning_read_model_keeps_staged_candidate_blocked_without_durable_gate(
+    intelligence_app,
+):
+    app, client, project, calls = intelligence_app
+    application = app.state.environment_application
+    state = prepare_project_state(
+        application.state_dir,
+        project,
+        migrate_legacy_default=True,
+    )
+    save_learning_staging(
+        state,
+        [
+            StagedLearningProposal(
+                proposal_id="proposal-staged-but-not-promotable",
+                status="staged",
+                created_at="2026-09-13T00:00:00+00:00",
+                risk=ProposalRiskReport(
+                    risk_level="low",
+                    reasons=["offline staging exists"],
+                    auto_stage_allowed=True,
+                    apply_requires_approval=False,
+                    replay_gate_passed=True,
+                ),
+                learning={},
+            )
+        ],
+    )
+    atomic_write_text(
+        state / "calibration_replay.json",
+        json.dumps(
+            {
+                "recommendation": "insufficient_evidence",
+                "promotion_allowed": False,
+            }
+        )
+        + "\n",
+    )
+    before_calls = len(calls)
+
+    status = client.get(f"/intelligence/projects/{project}/calibration")
+    assert status.status_code == 200
+    payload = status.json()
+    assert payload["learning_state"] == "candidate_blocked"
+    assert payload["staged_proposals"][0]["status"] == "staged"
+    assert payload["durable_replay"]["promotion_allowed"] is False
+    assert len(calls) == before_calls
+
+
+@pytest.mark.asyncio
+async def test_current_mcp_reads_same_environment_truth_as_rest(intelligence_app):
+    app, client, project, calls = intelligence_app
+    _, report = run_scan(client, project)
+    application = app.state.environment_application
+    server = build_mcp_server(
+        cwd=application.cwd,
+        config_dir=application.config_dir,
+        output_dir=application.output_dir,
+        state_dir=application.state_dir,
+        stream_manager=app.state.stream_manager,
+        environment_application=application,
+    )
+    base = f"/intelligence/projects/{project}/reports/{report['scan_id']}"
+    rest_changes = client.get(base + "/changes?view=relevant&limit=3").json()
+    before_calls = len(calls)
+
+    async with Client(server) as mcp_client:
+        mcp_report = await mcp_client.call_tool(
+            "signalharness_get_environment_report",
+            {"project_id": project, "scan_id": report["scan_id"]},
+        )
+        assert mcp_report.is_error is False
+        mcp_report_payload = mcp_report.structured_content or {}
+        assert mcp_report_payload["scan_id"] == report["scan_id"]
+        assert mcp_report_payload["directions"] == report["directions"]
+        assert mcp_report_payload["radar"] == report["radar"]
+
+        mcp_changes = await mcp_client.call_tool(
+            "signalharness_list_environment_changes",
+            {
+                "project_id": project,
+                "scan_id": report["scan_id"],
+                "view": "relevant",
+                "limit": 3,
+            },
+        )
+        assert mcp_changes.is_error is False
+        mcp_change_payload = mcp_changes.structured_content or {}
+        assert [item["change_id"] for item in mcp_change_payload["items"]] == [
+            item["change_id"] for item in rest_changes["items"]
+        ]
+
+        context = await mcp_client.call_tool(
+            "signalharness_get_project_context", {"project_id": project}
+        )
+        assert context.is_error is False
+        context_payload = context.structured_content or {}
+        rest_profile = client.get(f"/projects/{project}/profile").json()
+        assert context_payload["profile_revision_id"] == rest_profile["profile_revision_id"]
+        assert context_payload["project_profile"] == rest_profile["effective_profile"]
+
+    assert len(calls) == before_calls
+
+
+def test_current_cli_reads_same_environment_truth_as_rest(intelligence_app):
+    app, client, project, calls = intelligence_app
+    _, report = run_scan(client, project)
+    application = app.state.environment_application
+    runner = CliRunner()
+    common = [
+        "--project",
+        project,
+        "--cwd",
+        str(application.cwd),
+        "--config-dir",
+        str(application.config_dir),
+        "--state-dir",
+        str(application.state_dir),
+    ]
+    before_calls = len(calls)
+
+    cli_report = runner.invoke(
+        cli_app, ["environment-report", "--scan", report["scan_id"], *common]
+    )
+    assert cli_report.exit_code == 0, cli_report.output
+    cli_report_payload = json.loads(cli_report.output)
+    assert cli_report_payload["scan_id"] == report["scan_id"]
+    assert cli_report_payload["directions"] == report["directions"]
+    assert cli_report_payload["radar"] == report["radar"]
+
+    cli_changes = runner.invoke(
+        cli_app,
+        [
+            "environment-changes",
+            "--scan",
+            report["scan_id"],
+            "--view",
+            "relevant",
+            "--limit",
+            "2",
+            *common,
+        ],
+    )
+    assert cli_changes.exit_code == 0, cli_changes.output
+    cli_change_payload = json.loads(cli_changes.output)
+    rest_changes = client.get(
+        f"/intelligence/projects/{project}/reports/{report['scan_id']}/changes?view=relevant&limit=2"
+    ).json()
+    assert [item["change_id"] for item in cli_change_payload["items"]] == [
+        item["change_id"] for item in rest_changes["items"]
+    ]
+
+    cli_context = runner.invoke(cli_app, ["environment-context", *common])
+    assert cli_context.exit_code == 0, cli_context.output
+    cli_context_payload = json.loads(cli_context.output)
+    rest_context = client.get(f"/projects/{project}/profile").json()
+    assert cli_context_payload["profile_revision_id"] == rest_context["profile_revision_id"]
+    assert cli_context_payload["effective_profile"] == rest_context["effective_profile"]
+    assert len(calls) == before_calls

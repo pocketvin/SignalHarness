@@ -13,7 +13,15 @@ from typing import Any, Literal
 from signal_harness.intelligence.contracts import ChangeDigest, ShallowInsight, ShallowModelRow
 
 ProjectRelation = Literal["direct", "context", "none", "unknown"]
-ReferenceKind = Literal["dependency", "protocol", "runtime", "provider", "module", "ecosystem"]
+ReferenceKind = Literal[
+    "dependency",
+    "protocol",
+    "runtime",
+    "provider",
+    "module",
+    "ecosystem",
+    "discovery",
+]
 
 _KIND_PREFIX: dict[ReferenceKind, str] = {
     "dependency": "d",
@@ -22,6 +30,7 @@ _KIND_PREFIX: dict[ReferenceKind, str] = {
     "provider": "v",
     "module": "m",
     "ecosystem": "e",
+    "discovery": "x",
 }
 _KIND_LABEL: dict[ReferenceKind, str] = {
     "dependency": "依赖",
@@ -30,6 +39,7 @@ _KIND_LABEL: dict[ReferenceKind, str] = {
     "provider": "外部服务",
     "module": "关注能力",
     "ecosystem": "关注生态",
+    "discovery": "问题空间",
 }
 
 
@@ -65,7 +75,7 @@ def build_project_references(profile: dict[str, Any]) -> list[ProjectReference]:
         ("ecosystem", "monitored_ecosystem"),
     )
     seen: set[str] = set()
-    counters: dict[ReferenceKind, int] = {kind: 0 for kind, _ in groups}
+    counters: dict[ReferenceKind, int] = {**{kind: 0 for kind, _ in groups}, "discovery": 0}
     refs: list[ProjectReference] = []
     for kind, key in groups:
         for label in _values(profile, key):
@@ -78,6 +88,30 @@ def build_project_references(profile: dict[str, Any]) -> list[ProjectReference]:
                 ProjectReference(
                     ref_id=f"{_KIND_PREFIX[kind]}{counters[kind]}",
                     kind=kind,
+                    label=label,
+                )
+            )
+    discovery = profile.get("discovery_profile", {})
+    if isinstance(discovery, dict):
+        labels = [
+            str(value).strip()
+            for value in [
+                discovery.get("project_domain"),
+                *list(discovery.get("problem_spaces", []) or []),
+                *list(discovery.get("solution_categories", []) or []),
+            ]
+            if str(value or "").strip()
+        ]
+        for label in labels:
+            normalized = label.casefold()
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            counters["discovery"] += 1
+            refs.append(
+                ProjectReference(
+                    ref_id=f"x{counters['discovery']}",
+                    kind="discovery",
                     label=label,
                 )
             )
@@ -102,10 +136,23 @@ def shallow_project_context(profile: dict[str, Any]) -> dict[str, Any]:
     groups: dict[str, list[str]] = {}
     for item in refs:
         groups.setdefault(item.ref_id[0], []).append(item.label)
+    discovery = profile.get("discovery_profile", {})
+    discovery_context: list[str] = []
+    if isinstance(discovery, dict):
+        discovery_context = [
+            str(value).strip()
+            for value in [
+                discovery.get("project_domain"),
+                *list(discovery.get("problem_spaces", []) or []),
+                *list(discovery.get("solution_categories", []) or []),
+            ]
+            if str(value or "").strip()
+        ][:10]
     return {
         "g": goal[:180],
         "r": groups,
         "q": preferences[:24],
+        "x": discovery_context,
     }
 
 
@@ -166,9 +213,38 @@ def _clean_note(note: str, reference: ProjectReference | None = None) -> str:
     value = " ".join(note.split()).strip("；。 ,，")
     value = re.sub(r"SignalHarness", "项目", value, flags=re.IGNORECASE)
     if reference and reference.label:
-        value = re.sub(re.escape(reference.label), "", value, flags=re.IGNORECASE)
+        # Preserve grammar when a repeated reference appears inside a sentence. Deleting the
+        # label globally can turn "基于 pydantic 的模型定义" into the broken "基于 的模型定义".
+        # The stable prefix already names the exact reference, so use a short anaphor instead.
+        anaphor = {
+            "dependency": "该依赖",
+            "protocol": "该协议",
+            "runtime": "该运行环境",
+            "provider": "该外部服务",
+            "module": "该关注能力",
+            "ecosystem": "该生态",
+            "discovery": "该问题空间",
+        }[reference.kind]
+        value = re.sub(
+            re.escape(reference.label), anaphor, value, flags=re.IGNORECASE
+        )
     value = re.sub(r"\s{2,}", " ", value).strip("；。 ,，")
+    value = re.sub(r"(?<=[\u4e00-\u9fff])\s+(?=[\u4e00-\u9fff])", "", value)
     return value
+
+
+def normalize_relation_reason_copy(value: str) -> str:
+    """Remove narrow, deterministic boilerplate without changing relation semantics."""
+    cleaned = " ".join(value.split())
+    cleaned = re.sub(
+        r"(?:本项目|当前项目|项目)(?:的)?(?:核心)?依赖该依赖",
+        "该依赖",
+        cleaned,
+    )
+    cleaned = re.sub(
+        r"(?:呼应|关联)项目对(.{1,80}?)的关注能力(?=[；。]|$)", r"与\1直接相关", cleaned
+    )
+    return cleaned
 
 
 def resolve_model_projection(
@@ -212,14 +288,14 @@ def resolve_model_projection(
     if row.r == "direct":
         if reference.kind in concrete and label and label == entity:
             return "direct", row.b, note
-        if reference.kind in {"module", "ecosystem"}:
+        if reference.kind in {"module", "ecosystem", "discovery"}:
             return "context", row.b, note
         tokens = [token for token in label.split() if len(token) >= 3]
         if reference.kind in concrete and tokens and all(token in change_text for token in tokens):
             return "context", row.b, note
         return "unknown", "", ""
 
-    if reference.kind in {"module", "ecosystem"}:
+    if reference.kind in {"module", "ecosystem", "discovery"}:
         return "context", row.b, note
     tokens = [token for token in label.split() if len(token) >= 3]
     if reference.kind in concrete and tokens and all(token in change_text for token in tokens):
@@ -242,7 +318,8 @@ def render_relation_reason(
             raise ValueError("project_relation_basis_reference_invalid")
         reference = references[basis_id]
         prefix = f"{_KIND_LABEL[reference.kind]}：{reference.label}"
-        return f"{prefix}；{note}。" if note else f"{prefix}。"
+        rendered = f"{prefix}；{note}。" if note else f"{prefix}。"
+        return normalize_relation_reason_copy(rendered)
     if basis_id:
         raise ValueError("project_relation_basis_must_be_empty")
     if note:

@@ -32,6 +32,7 @@ class FactCapsule:
     deterministic_relation_reason: str
     deterministic_basis_kind: str
     deterministic_basis_label: str
+    interpretation_hint: str
     deterministic_eligible: bool
     deterministic_topics: tuple[str, ...]
 
@@ -198,6 +199,7 @@ def build_fact_capsule(digest: ChangeDigest, profile: dict[str, Any]) -> FactCap
         and primary.authority in {"official", "maintainer"}
         and not abnormal_package_metadata
     )
+    routine_issue = digest.kind == "github_issue" and digest.interpretation_hint == "routine_issue"
     return FactCapsule(
         change_id=digest.change_id,
         revision_id=digest.revision_id,
@@ -216,7 +218,8 @@ def build_fact_capsule(digest: ChangeDigest, profile: dict[str, Any]) -> FactCap
         deterministic_relation_reason=reason,
         deterministic_basis_kind=basis_kind,
         deterministic_basis_label=basis_label,
-        deterministic_eligible=structured_fact and relation != "unknown",
+        interpretation_hint=digest.interpretation_hint,
+        deterministic_eligible=(structured_fact or routine_issue) and relation != "unknown",
         deterministic_topics=_deterministic_topics(digest),
     )
 
@@ -225,28 +228,41 @@ def deterministic_insight(capsule: FactCapsule) -> ShallowInsight:
     if not capsule.deterministic_eligible:
         raise ValueError("FactCapsule is not deterministic-insight eligible")
     version = capsule.current_version or ""
-    if capsule.corpus_role == "project_activity":
+    attention: Literal["watch", "normal", "low"]
+    if capsule.kind == "github_issue" and capsule.interpretation_hint == "routine_issue":
+        summary = f"社区 Issue：{capsule.title}"[:220]
+        what_changed = f"社区在上游仓库报告或提议了“{capsule.title}”。"[:700]
+        uncertainty = "这是尚未升级为维护者确认或高优先级信号的社区 Issue；只作为报告/讨论事实，不等同于已确认缺陷或已发布变化。"
+        topics = ["社区问题报告"]
+        attention = "low"
+    elif capsule.corpus_role == "project_activity":
         summary = f"项目自身更新：{capsule.title}"
         what_changed = f"项目仓库记录了新的代码提交或合并活动，原始标题为“{capsule.title}”。"
         uncertainty = "这是项目自身活动，只作为项目背景，不用于证明外部环境方向。"
+        topics = list(capsule.deterministic_topics)
+        attention = "normal"
     elif capsule.kind == "security_advisory":
         summary = f"{capsule.entity} 出现与当前依赖匹配的安全公告"
         what_changed = (
             f"安全公告匹配到项目当前使用的 {capsule.entity}{f' {version}' if version else ''}。"
         )
         uncertainty = "这里只确认公告与依赖版本匹配；是否存在实际可达风险需要按需深入核实。"
+        topics = list(capsule.deterministic_topics)
+        attention = "watch"
     else:
         summary = f"{capsule.entity} 发布版本 {version}".strip()
         what_changed = f"官方或维护者来源记录了 {capsule.entity} 版本 {version} 的发布。"
         uncertainty = "这里只确认版本发布事实；具体行为变化需要读取发布说明后再判断。"
+        topics = list(capsule.deterministic_topics)
+        attention = "normal"
     return ShallowInsight(
         change_id=capsule.change_id,
         summary=summary,
         what_changed=what_changed,
         project_relation=capsule.deterministic_relation,
         relation_reason=capsule.deterministic_relation_reason,
-        attention="watch" if capsule.kind == "security_advisory" else "normal",
-        topics=list(capsule.deterministic_topics),
+        attention=attention,
+        topics=topics,
         evidence_ids=list(capsule.evidence_ids),
         uncertainty=uncertainty,
     )

@@ -16,10 +16,10 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from signal_harness.environment_application import EnvironmentApplication
 from signal_harness.intelligence.deep_dive import DeepDiveManager
 from signal_harness.service_intelligence import intelligence_router
 from signal_harness.agent_integration.mode import RunMode
-from signal_harness.calibration import build_calibration_dataset, evaluate_calibration_replay
 from signal_harness.capability_eval import load_capability_suite
 from signal_harness.mcp_server import (
     MCP_TOOL_NAMES,
@@ -77,7 +77,7 @@ from signal_harness.signal.feedback import (
     generate_policy_proposal,
     save_policy_proposal,
 )
-from signal_harness.signal.policy import load_signal_policy, load_yaml_mapping
+from signal_harness.signal.policy import load_signal_policy
 from signal_harness.signal.schemas import FeedbackLabel
 from signal_harness.ui.demo import (
     demo_asset_dir,
@@ -352,7 +352,7 @@ def create_app(
     output_dir: str | Path = "outputs",
     state_dir: str | Path = ".signal-harness",
 ) -> FastAPI:
-    """Create a local API and mount the read-only MCP HTTP transport."""
+    """Create the local REST/SSE API and mount the MCP HTTP transport."""
 
     paths = ServicePaths.resolve(
         cwd=cwd,
@@ -367,6 +367,14 @@ def create_app(
         state_dir=paths.state_dir,
     )
     deep_dives = DeepDiveManager(paths.config_dir, paths.state_dir)
+    environment = EnvironmentApplication(
+        cwd=paths.cwd,
+        config_dir=paths.config_dir,
+        output_dir=paths.output_dir,
+        state_dir=paths.state_dir,
+        streams=streams,
+        deep_dives=deep_dives,
+    )
     schedules = ScheduleManager(
         stream_manager=streams,
         config_dir=paths.config_dir,
@@ -378,6 +386,7 @@ def create_app(
         output_dir=paths.output_dir,
         state_dir=paths.state_dir,
         stream_manager=streams,
+        environment_application=environment,
     )
 
     @asynccontextmanager
@@ -397,10 +406,11 @@ def create_app(
     app = FastAPI(
         title="SignalHarness API",
         version="0.1.0",
-        description="Local API for bounded SignalHarness runs, trace, signals, and feedback.",
+        description="Local API for Project Environment Intelligence, trace, feedback, and compatibility runs.",
         lifespan=lifespan,
     )
-    app.include_router(intelligence_router(config_dir=paths.config_dir, streams=streams, deep_dives=deep_dives, schedules=schedules))
+    app.include_router(intelligence_router(application=environment, deep_dives=deep_dives, schedules=schedules))
+    app.state.environment_application = environment
     app.state.deep_dive_manager = deep_dives
     app.state.stream_manager = streams
     app.state.schedule_manager = schedules
@@ -493,14 +503,9 @@ def create_app(
 
     def project_profile_snapshot(project_id: str) -> tuple[dict[str, Any], ChangeLedger]:
         try:
-            option = project_option(project_id, paths.config_dir)
+            return environment.profile_snapshot(project_id), environment.ledger(project_id)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail="Project not found") from exc
-        auto_profile = load_yaml_mapping(option.project_profile_path)
-        ledger = ChangeLedger(paths.project_state(project_id) / "change_ledger.sqlite3")
-        return ledger.ensure_profile_revision(
-            project_id=project_id, auto_profile=auto_profile
-        ), ledger
 
     def require_profile_write_permission() -> None:
         policy = load_signal_policy(paths.config_dir / "signal_policy.yaml")
@@ -639,6 +644,19 @@ def create_app(
             "profile": snapshot,
             "applied_files": {key: str(value) for key, value in applied.items()},
         }
+
+    @app.post("/projects/{project_id}/architecture/refresh")
+    async def refresh_project_architecture(project_id: str) -> dict[str, Any]:
+        """Refresh the shared bounded Architecture Snapshot without starting a Scan."""
+
+        try:
+            return await environment.refresh_architecture(project_id)
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail="当前项目不允许刷新项目结构。") from exc
+        except ValueError as exc:
+            message = str(exc)
+            code = 409 if "GitHub" in message or "仓库" in message else 400
+            raise HTTPException(status_code=code, detail=message) from exc
 
     @app.get("/projects/{project_id}/inbox")
     async def get_project_inbox(
@@ -1083,31 +1101,25 @@ def create_app(
     async def record_project_outcome(
         project_id: str, request: OutcomeRequest
     ) -> dict[str, Any]:
+        """Compatibility endpoint; current product adapters use the shared application layer."""
+
         try:
-            project_option(project_id, paths.config_dir)
+            return environment.record_outcome(
+                project_id,
+                request.scan_id,
+                request.change_id,
+                impact_observed=request.impact_observed,
+                action_taken=request.action_taken,
+                action_helpful=request.action_helpful,
+                resolved=request.resolved,
+                note=request.note,
+                source="api-compat",
+                require_environment_report=False,
+            )
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail="Outcome save is not allowed") from exc
         except ValueError as exc:
-            raise HTTPException(status_code=404, detail="Unknown project selection") from exc
-        policy = load_signal_policy(paths.config_dir / "signal_policy.yaml")
-        SignalPermissionGuard(policy).require("save_outcome")
-        ledger = ChangeLedger(paths.project_state(project_id) / "change_ledger.sqlite3")
-        metadata = ledger.scan_metadata(request.scan_id)
-        if metadata is None or metadata.get("project_id") != project_id:
-            raise HTTPException(status_code=404, detail="Scan not found for project")
-        frozen = ledger.scan_change(scan_id=request.scan_id, change_id=request.change_id)
-        if frozen is None:
-            raise HTTPException(status_code=404, detail="Change not found in frozen Scan")
-        return ledger.record_outcome(
-            project_id=project_id,
-            scan_id=request.scan_id,
-            change_id=request.change_id,
-            event_revision_id=int(frozen["event_revision_id"]),
-            impact_observed=request.impact_observed,
-            action_taken=request.action_taken,
-            action_helpful=request.action_helpful,
-            resolved=request.resolved,
-            note=request.note,
-            source="api",
-        )
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.get("/projects/{project_id}/outcomes")
     async def list_project_outcomes(project_id: str) -> dict[str, Any]:
@@ -1124,44 +1136,16 @@ def create_app(
     async def get_project_calibration(
         project_id: str, include_episodes: bool = Query(default=False)
     ) -> dict[str, Any]:
+        """Compatibility route over the shared environment calibration read model."""
+
         try:
-            snapshot, ledger = project_profile_snapshot(project_id)
+            return environment.calibration_status(
+                project_id, include_episodes=include_episodes
+            )
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail="Calibration read is not allowed") from exc
         except ValueError as exc:
-            raise HTTPException(status_code=404, detail="Unknown project selection") from exc
-        policy = load_signal_policy(paths.config_dir / "signal_policy.yaml")
-        SignalPermissionGuard(policy).require("read_calibration")
-        dataset = build_calibration_dataset(ledger=ledger, project_id=project_id)
-        proposal_path = paths.project_state(project_id) / "policy_update_proposal.json"
-        proposal = _read_json(proposal_path, {})
-        replay_payload: dict[str, Any] | None = None
-        if isinstance(proposal, dict) and isinstance(proposal.get("new_policy"), dict):
-            replay_payload = evaluate_calibration_replay(
-                dataset,
-                project_profile=dict(snapshot["effective_profile"]),
-                old_policy=policy,
-                proposed_policy=dict(proposal["new_policy"]),
-            ).model_dump(mode="json")
-        return {
-            "project_id": project_id,
-            "dataset_version": dataset.version,
-            "feedback_count": dataset.feedback_count,
-            "outcome_count": dataset.outcome_count,
-            "episode_count": len(dataset.episodes),
-            "labeled_count": dataset.labeled_count,
-            "positive_count": dataset.positive_count,
-            "negative_count": dataset.negative_count,
-            "ambiguous_count": dataset.ambiguous_count,
-            "unlabeled_count": dataset.unlabeled_count,
-            "orphan_feedback_count": dataset.orphan_feedback_count,
-            "minimum_labeled_required": 3,
-            "ready_for_replay": dataset.labeled_count >= 3,
-            "candidate_replay": replay_payload,
-            "episodes": (
-                [item.model_dump(mode="json") for item in dataset.episodes]
-                if include_episodes
-                else []
-            ),
-        }
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.post("/feedback")
     async def save_feedback(request: FeedbackRequest) -> dict[str, Any]:

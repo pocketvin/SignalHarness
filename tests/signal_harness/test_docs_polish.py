@@ -50,6 +50,8 @@ def test_public_ci_stays_offline_and_focused(project_root: Path) -> None:
     assert "--mode agent" not in ci
     assert "signal-harness scan" not in ci
     assert "signal-harness calibrate" not in ci
+    assert "regression-eval" not in ci
+    assert "project-eval" not in ci
 
 
 def test_agent_runner_split_modules_exist(project_root: Path) -> None:
@@ -76,3 +78,40 @@ def test_model_eval_matrix_uses_stable_result_labels(project_root: Path) -> None
     assert "timeout_count == 0" in script
     assert "total_tool_error_count == 0" in script
     assert "No stable provider on this fixture" in script
+
+
+def test_public_readmes_describe_current_product_in_both_languages(project_root: Path) -> None:
+    zh = (project_root / "README.md").read_text(encoding="utf-8")
+    en = (project_root / "README.en.md").read_text(encoding="utf-8")
+
+    assert "Project Environment Intelligence" in zh
+    assert "README.en.md" in zh
+    assert "Project Environment Intelligence" in en
+    assert "README.md" in en
+    assert "deterministic workflow + bounded model stages" in zh
+    assert "deterministic workflow + bounded model stages" in en
+    assert "docs/REPAIR_PASS.md" in zh
+    assert "docs/MODEL_EVAL_RESULTS.md" in zh
+    assert "docs/REAL_SOURCE_SMOKE.md" in zh
+
+
+def test_provider_env_example_matches_current_catalog_contract(project_root: Path) -> None:
+    env = (project_root / ".env.example").read_text(encoding="utf-8")
+    for prefix in ("OPENAI", "QWEN", "KIMI", "DEEPSEEK"):
+        assert f"{prefix}_API_KEY=" in env
+        assert f"{prefix}_BASE_URL=" in env
+        assert f"\n{prefix}_KEY=" not in env
+
+
+def test_public_product_copy_no_longer_claims_legacy_multi_agent_or_read_only_mcp(
+    project_root: Path,
+) -> None:
+    cli = (project_root / "src/signal_harness/cli.py").read_text(encoding="utf-8")
+    service = (project_root / "src/signal_harness/service.py").read_text(encoding="utf-8")
+    project = (project_root / "configs/projects/signalharness.yaml").read_text(encoding="utf-8")
+
+    assert "Project Environment Intelligence for software engineering changes." in cli
+    assert "read-only context and traces over MCP stdio" not in cli
+    assert "read-only MCP HTTP transport" not in service
+    assert "Project Environment Intelligence" in project
+    assert "Multi-Agent Harness / Eval / Tooling Platform" not in project

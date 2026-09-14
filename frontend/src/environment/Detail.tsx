@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { BookOpen, Check, ExternalLink, LoaderCircle, X } from "lucide-react";
-import { dateText, request, safeUrl } from "./api";
+import { api, dateText, safeUrl } from "./api";
 import type { Change, DeepDive } from "./types";
 
 export function ChangeDetail({
@@ -11,6 +11,8 @@ export function ChangeDetail({
   scanId,
   onClose,
   onRetry,
+  onLearningStateChanged,
+  onOpenLearning,
 }: {
   change: Change | null;
   deep: DeepDive | null;
@@ -19,31 +21,51 @@ export function ChangeDetail({
   scanId: string;
   onClose: () => void;
   onRetry: () => void;
+  onLearningStateChanged: () => void;
+  onOpenLearning: () => void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const [outcomeStatus, setOutcomeStatus] = useState("");
+  const [feedbackStatus, setFeedbackStatus] = useState("");
+  const [feedbackSaved, setFeedbackSaved] = useState(false);
+  const [outcomeSaved, setOutcomeSaved] = useState(false);
   useEffect(() => {
     const node = ref.current;
     if (change && node && !node.open) node.showModal();
     if (!change && node?.open) node.close();
     setOutcomeStatus("");
+    setFeedbackStatus("");
+    setFeedbackSaved(false);
+    setOutcomeSaved(false);
   }, [change?.change_id]);
-  const busy = !deep || ["queued", "running"].includes(deep.status);
+  const projectActivity = change?.corpus_role === "project_activity";
+  const busy = !projectActivity && (!deep || ["queued", "running"].includes(deep.status));
+  async function feedback(
+    label: "useful" | "not_useful" | "false_positive" | "too_generic",
+  ) {
+    if (!change) return;
+    try {
+      await api.changeFeedback(projectId, scanId, change.change_id, label);
+      setFeedbackSaved(true);
+      setFeedbackStatus("已加入校准样本。不会立即改变当前报告或策略。");
+      onLearningStateChanged();
+    } catch (e) {
+      setFeedbackSaved(false);
+      setFeedbackStatus(e instanceof Error ? e.message : String(e));
+    }
+  }
   async function outcome(value: boolean) {
     if (!change) return;
     try {
-      await request(
-        `/projects/${encodeURIComponent(projectId)}/outcomes`,
-        "POST",
-        {
-          scan_id: scanId,
-          change_id: change.change_id,
-          impact_observed: value,
-          note: "",
-        },
-      );
+      await api.changeOutcome(projectId, scanId, change.change_id, {
+        impact_observed: value,
+        note: "",
+      });
+      setOutcomeSaved(true);
       setOutcomeStatus("实际结果已记录。不会自动改写本期报告。");
+      onLearningStateChanged();
     } catch (e) {
+      setOutcomeSaved(false);
       setOutcomeStatus(e instanceof Error ? e.message : String(e));
     }
   }
@@ -60,7 +82,7 @@ export function ChangeDetail({
         <div className="detail-content">
           <header className="detail-header">
             <div>
-              <span className="context-label">变化核实</span>
+              <span className="context-label">{projectActivity ? "项目活动" : "变化核实"}</span>
               <p>
                 {change.entity} <span>{dateText(change.published_at)}</span>
               </p>
@@ -85,6 +107,15 @@ export function ChangeDetail({
               <p className="quiet-note">{change.uncertainty}</p>
             )}
           </section>
+          {projectActivity ? (
+            <section className="project-activity-detail-note">
+              <h3>项目活动</h3>
+              <p>
+                这是当前项目自身已经发生的提交、合并或发布记录。这里直接展示已保存的一手证据，
+                不会再创建模型 Deep Dive。
+              </p>
+            </section>
+          ) : (
           <section className="deep-section">
             <div className="section-heading">
               <h3>深入核实</h3>
@@ -152,6 +183,7 @@ export function ChangeDetail({
               </details>
             )}
           </section>
+          )}
           <section>
             <h3>
               <BookOpen size={17} /> 来源与证据
@@ -197,6 +229,24 @@ export function ChangeDetail({
               </p>
             )}
           </section>
+          {!projectActivity && (
+            <section className="change-feedback">
+              <h3>这条判断对你有用吗</h3>
+              <p>反馈进入可回放的校准数据，不会让当前扫描自己改规则。</p>
+              <div className="button-row">
+                <button onClick={() => void feedback("useful")}>有用</button>
+                <button onClick={() => void feedback("not_useful")}>不太有用</button>
+                <button onClick={() => void feedback("false_positive")}>与项目无关</button>
+                <button onClick={() => void feedback("too_generic")}>太泛</button>
+              </div>
+              <p role="status">{feedbackStatus}</p>
+              {feedbackSaved && (
+                <button className="text-button" onClick={onOpenLearning}>
+                  查看这条反馈进入哪里
+                </button>
+              )}
+            </section>
+          )}
           {deep?.result && (
             <section className="outcome">
               <h3>后来验证的实际情况</h3>
@@ -208,6 +258,11 @@ export function ChangeDetail({
                 </button>
               </div>
               <p role="status">{outcomeStatus}</p>
+              {outcomeSaved && (
+                <button className="text-button" onClick={onOpenLearning}>
+                  查看校准状态
+                </button>
+              )}
             </section>
           )}
         </div>

@@ -5,7 +5,8 @@ batch_input_bytes: 42000
 shallow_concurrency: 3
 tiny_fast_path_max_changes: 4
 tiny_fast_path_max_input_bytes: 24000
-direction_fact_chars: 88
+direction_fact_chars: 56
+project_activity_context_max_items: 24
 global_input_bytes: 450000
 max_provider_attempts: 2
 retry_split_min_batch: 4
@@ -18,7 +19,9 @@ shallow:
   timeout_seconds: 75
   max_output_tokens: 8192
 synthesis:
-  providers: [deepseek, kimi, qwen]
+  # Kimi K3 low-reasoning is the proven MVP primary; Qwen is the fast fallback.
+  # DeepSeek remains configured but last while this account returns HTTP 402.
+  providers: [kimi, qwen, deepseek]
   timeout_seconds: 180
   max_output_tokens: 14000
 deep_dive:

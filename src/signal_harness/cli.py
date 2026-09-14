@@ -110,7 +110,7 @@ from signal_harness.ui.trace_view import render_trace_table, write_trace_summary
 
 app = typer.Typer(
     name="signal-harness",
-    help="Project-centric multi-agent signal intelligence.",
+    help="Project Environment Intelligence for software engineering changes.",
     no_args_is_help=True,
 )
 
@@ -931,7 +931,7 @@ def mcp_server(
     output_dir: Path = typer.Option(Path("outputs"), "--output-dir"),
     state_dir: Path = typer.Option(Path(".signal-harness"), "--state-dir"),
 ) -> None:
-    """Serve SignalHarness read-only context and traces over MCP stdio."""
+    """Serve SignalHarness current-product and compatibility tools over MCP stdio."""
 
     from signal_harness.mcp_server import build_mcp_server
 

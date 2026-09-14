@@ -2,6 +2,35 @@
 
 SignalHarness 的目标产品是 Project Environment Intelligence。P1/P2 建立 SQLite Change Ledger、冻结 Scan Window、Coverage 与可恢复本地 Run；P3 增加 versioned ProfileRevision 与显式 Preference Engine；P4 用 frozen Harness ablation 评估 Analyzer 组件；P5 将 frozen Scan 投影成 Overall → Top → All → Detail，并让 CLI/REST/Web/MCP 共用同一产品状态。真实 `agent` 当前默认 `deterministic-evidence-impact-action` 两调用路径；五-Agent routed analyzer 继续作为受保护 baseline/rollback，`mock-agent` 默认仍覆盖完整五-Agent。
 
+> **当前产品热路径（2026-09）**：网页 `/demo`、`environment` CLI 与 `/intelligence/*` 已切到 Direction-first Environment Intelligence。下面较早的 Agent Harness flowchart 继续作为 legacy/regression 架构说明，不代表网页主链仍固定经过 Candidate Funnel → ImpactAction → Narrative。
+
+```mermaid
+flowchart LR
+    Catalog[Project Catalog] --> Profile[Effective Profile + Preferences]
+    Catalog --> Watchlist[Project Watchlist]
+    Profile --> Discovery[Project-conditioned DiscoveryProfile]
+    Watchlist --> Sources[GitHub / PyPI / OSV / RSS / Web / Local Git]
+    Discovery --> DiscoverSource[Bounded GitHub repository discovery]
+    DiscoverSource --> Freeze
+    Sources --> Freeze[Collect / Normalize / Frozen Window / Revision Dedup]
+    Freeze --> Ledger[(Change Ledger)]
+    Ledger --> Changes[Change Revisions]
+    Profile --> Insight[Project-aware ChangeInsight]
+    Changes --> Insight
+    Insight --> Route{cache / deterministic / semantic}
+    Route --> Corpus[Full interpreted corpus]
+    Corpus --> Synthesis[Strong-model global synthesis]
+    Profile --> Synthesis
+    Synthesis --> Guard[Python identity + source-independence guards]
+    Guard --> Report[Brief + Directions + Radar + Featured + All Changes]
+    Report --> Persist[(SQLite / History)]
+    Persist --> App[EnvironmentApplication]
+    App --> Surface[CLI / REST / MCP / React]
+    Trace[TraceRecorder] --> SSE[SSE append / update] --> Surface
+```
+
+当前主链更完整的数据所有权、时序与失败降级见 [`DATA_FLOW.md`](DATA_FLOW.md)。核心边界是：**模型负责难以规则化的语义理解与全局综合；Python/runtime 负责来源事实、冻结窗口、Change identity、项目 Profile、缓存、来源独立性、持久化和失败边界。**
+
 ## Workflow flowchart
 
 ```mermaid
@@ -84,10 +113,10 @@ sequenceDiagram
   Project Catalog：为每个可选项目绑定显示名、Project Profile 与项目级 Watchlist；新增项目不需要修改 Runtime 代码。
 
 - `configs/project_profile.yaml` / `configs/project_profiles/*.yaml`
-  自动/显式项目事实的兼容输入：purpose、技术栈、dependencies 与 lockfile evidence、runtime/protocol/provider、critical modules、monitored ecosystem、focus keywords。运行时实际使用的 effective Profile 会版本化进入 project Ledger。
+  自动/显式项目事实的兼容输入：purpose、技术栈、dependencies 与 lockfile evidence、runtime/protocol/provider、critical modules、monitored ecosystem、focus keywords。运行时会从这些事实确定性派生 `DiscoveryProfile`（project domain / problem spaces / adjacent solution categories / bounded discovery queries / exclusions），并随 effective Profile 一起版本化进入 project Ledger。Discovery scope 由项目本身决定，不存在全局 AI/Agent 默认主题。
 
 - `configs/watchlist.yaml` / `configs/watchlists/*.yaml`
-  project-scoped source watchlist：实时 GitHub、PyPI package registry、RSS + 配置化 public HTTP(S) snapshot/diff。GitHub release 可携带 package identity，用于与 Registry release 聚合同一 Change；官方 Registry/RSS/Web page 的 provenance 由 Python/runtime 持有。
+  project-scoped source watchlist：实时 GitHub、PyPI package registry、RSS + 配置化 public HTTP(S) snapshot/diff。Direction-first product path 还会基于 `DiscoveryProfile` 发出最多 3 条 bounded GitHub repository search；发现源是补充来源，失败不会降低核心 Scan coverage/checkpoint。GitHub release 可携带 package identity，用于与 Registry release 聚合同一 Change；官方 Registry/RSS/Web page 的 provenance 由 Python/runtime 持有。
 
 - `configs/signal_policy.yaml`
   deterministic scoring weights、category weights、thresholds、tool allowlist、permission policy。
@@ -107,8 +136,11 @@ sequenceDiagram
 - `src/signal_harness/evals.py`
   Eval 分层：40-case Regression protection；32-case Capability Golden + fair shared-evidence baseline；逐 case Trajectory contract；cross-project context；provider contract/model eval；Narrative blind human calibration。
 
+- `src/signal_harness/environment_application.py`
+  当前 Direction-first application layer：统一 Project/ProfileRevision、Architecture、EnvironmentReport/Direction/Radar、Change/Activity/Trace、Environment Scan 与 Change feedback/outcome/calibration 语义。REST、CLI、MCP 只能做协议适配，不重复拼 Ledger/report ownership。
+
 - `src/signal_harness/mcp_server.py`
-  当前 10 个 structured MCP tools：9 个只读 product/context 查询 + 1 个复用 persistent StreamRunManager 的 fresh-scan starter；不能绕过 Project scope、fixture allowlist 或 permission policy。
+  19 个 structured MCP tools：10 个 current Environment tools + 9 个 compatibility tools；15 个只读、4 个显式写动作。current tools 委托 `EnvironmentApplication`，legacy tools 继续服务旧 Harness/fixture，不成为当前产品 truth。
 
 - `src/signal_harness/service.py`
   FastAPI REST + SSE + MCP Streamable HTTP 服务层；每次 run 隔离 output/trace，同时按 `project_id` 连接共享的持久 Project State，并携带 source mode 与 provider selection。
@@ -174,11 +206,31 @@ sequenceDiagram
 - **OSV exact-version matching**：`security_osv` 只接受 Project Profile/lockfile 已解析出的具体 `name + ecosystem + resolved_version`，不会根据公告正文猜依赖是否受影响；单 dependency 查询失败会形成 partial coverage，全部失败则 source failure。
 - **Security identity / applicability**：OSV advisory 优先使用 CVE alias，其次 GHSA/OSV id 做稳定 Change identity；受影响 resolved version 是直接依赖证据，不复用 release 的 `installed = already satisfied` 语义，避免把真实漏洞错误降权。
 - **Real-source Git/OSV evidence**：2026-09-09 当前仓库只读 Git smoke 正确解析为 `pocketvin/signalharness`；OSV 对 `pydantic==2.13.4` 与 `httpx==0.28.1` 两条真实 PyPI resolved-version 查询均成功，coverage=complete，本次返回 0 advisory。
-- **GitHub own-project facts**：GitHub commit 直接使用 API `since`；merged PR 因 list endpoint 无 `since`，按 `updated desc` 分页并在安全 cutoff 后停止，再用 `merged_at` 做窗口成员判断。commit / merged PR 与 Local Git 共用 `(repository, final commit SHA)` Change identity，同时保留 GitHub author/merger/ref/label/signature 等证据。
-- **Project-owned Git semantics**：local onboarding 只读解析 GitHub origin，把当前项目 repo 标成 `project_owned` 并启用 commits + merged PR；这类事实按项目自身代码变化处理，不伪装成上游 dependency release。
+- **GitHub own-project facts**：GitHub commit 直接使用 REST API `since`；merged PR 使用 GitHub GraphQL `pullRequests(states: MERGED, orderBy: UPDATED_AT)` 分页，并读取 `mergeCommit.oid` 作为 source-owned final commit SHA。这样 commit / merged PR / Local Git 真正共用 `(repository, final commit SHA)` Change identity；同一 merge 只形成一个 Change、保留多份 evidence。GraphQL 仍按 `updatedAt` 安全 cutoff 停止，再以 `mergedAt` 判断冻结窗口成员。
+- **Project-owned Git semantics**：local onboarding 只读解析 GitHub origin，把当前项目 repo 标成 `project_owned` 并启用 commits + merged PR；这类事实按项目自身代码变化处理，不伪装成上游 dependency release。项目活动 Change 全量持久化/可查询，但只作为 Direction 的关联背景；强模型只接收完整活动统计 + 最多 24 条按 kind 平衡的近期代表项，不能让高频仓库活动挤占外部环境语料。
 - **Usage-bound changelog identity**：RSS/Web Watchlist 可声明 `entity_type + entity_name`（dependency/provider/protocol/runtime）。Context/Ranking 只在 Effective Project Profile 确认使用同一实体时建立结构化相关性；显式 Preference 也直接对该身份生效。绑定存在但 Profile 未使用时不靠正文关键词补猜。
 - **Bounded Web restraint**：网页源仍保持现有 body-size/security 边界。FastAPI 全历史 release-notes 页面实测超过 1 MB，因此继续由 GitHub + PyPI 覆盖，而不是为单页放宽所有 Web Snapshot 上限。OpenAI API changelog 与 MCP specification 的真实 baseline smoke 均成功。
 - **Real-source GitHub evidence**：2026-09-09 对 `pocketvin/signalharness` 的认证只读 smoke 在 7 日窗口返回 19 commits（complete / 1 page），merged PR 当前 0 条（complete / 1 page）；认证来自本机已授权 GitHub CLI keyring，token 未写入配置或日志。
+
+## Project Understanding V2 / bounded architecture snapshot
+
+- **同一 Project Profile**：项目理解没有新建第二套生命周期。`architecture_snapshot` 是 Project Profile 的一部分，ProfileRevision 继续负责版本化；显式 Preference、Scan frozen profile 与历史报告边界保持原样。
+- **有界静态源码读取**：GitHub onboarding 与已授权本地目录只从安全 path inventory 中挑选少量生产源码。优先 manifest 声明入口、`main/index/server/app/cli/bootstrap` 等入口线索，再按子系统均衡取样；`test/spec/suite/mock/fixture/e2e/example/scripts/config` 不占生产架构样本预算。单文件有大小上限，总样本默认最多 18 个。
+- **一跳结构扩展**：初始样本解析静态 import 后，最多沿相对 import 扩一跳；TypeScript 中源码写 `./foo.js` 而仓库实际保存 `foo.ts/.tsx` 的常见模式会规范化匹配。输出的 `static_edges` 只表示静态 import 线索，不声明 runtime reachability 或完整 call graph。
+- **证据而不是源码副本**：Project Profile 只保存子系统、入口、`dependency_usage` 的 `path + line + excerpt`、静态边和 evidence path；原始源码样本只在 onboarding/refresh 进程内短暂使用，不整份持久化。带 secret/token 模式的行不会成为 usage excerpt，路径 traversal / symlink / `Private-NoAI` 均被拒绝或跳过。
+- **真实项目上下文**：EnvironmentSynthesizer 的 project context 现在包含紧凑子系统、入口、依赖使用文件与静态边，因此“和项目哪一层有关”不再只有 manifest dependency/module 标签。
+- **Deep Dive 复用**：显式 Deep Dive 仍可在已授权本地 root 做 bounded text/import lookup；同时可复用 frozen Project Profile 中保存的 architecture import refs。GitHub-only 项目即使服务器没有 checkout，也可以引用真实 `path + line + import`。静态匹配仍明确不等于运行可达。
+- **显式刷新**：`POST /projects/{project_id}/architecture/refresh` 只适用于已连接 GitHub 项目，只替换 profile 中的 `architecture_snapshot`，保留原 purpose、Watchlist 与用户偏好；React Settings 暴露“重新分析项目结构”。该动作不创建 Environment Scan，也不调用 Qwen/Kimi/DeepSeek。
+- **浏览器目录边界**：浏览器目录导入继续只上传支持的 manifest 与 path inventory；未显式上传源码时 Architecture Snapshot 会诚实停在 `manifest_paths_only`，不会因为浏览器选了目录就暗中发送整份源码。
+
+## Project-conditioned discovery boundary
+
+- **不是全局风口榜**：DiscoveryProfile 从当前项目用途/问题空间派生。项目用途明确为小游戏时，即使目录分析误带 `Agent orchestration`，也不会切到 Agent/LLM/MCP 搜索；用途缺失时 generic fallback 也会过滤这类偶然模块。
+- **Open-world discovery**：原 Watchlist 继续负责已知依赖/协议/仓库；GitHub repository search 负责发现此前未跟踪的 entity。V1 只检索 repository name/description，不用 README 全文，避免热门仓库因顺带提到关键词污染候选。
+- **Observation-time semantics**：repo 即使早于当前 Scan 窗口创建，只要今天第一次被这个项目的 Radar 发现，也可以用 `discovered_during_scan` 进入一次；同一项目之后已经见过的 repo 不会因为 stars/updated_at 变化反复制造“新方案”。
+- **同一主链**：discovered repo 仍归一化成普通 external Change，保留 `discovery_origin/discovery_basis`，走现有 ChangeInsight、Evidence、History 和同一次 EnvironmentSynthesizer，不增加额外 strong-model stage。
+- **趋势证据门**：`new_solution` 可由一个 discovered Change 建立，但禁止写“趋势/风口/升温/爆发”；`emerging_direction` 至少需要两个不同 discovered Change，并且跨独立 entity/source。单 Change Brief 同样禁止市场级趋势断言。
+- **失败隔离**：GitHub discovery search 的 failed/unknown coverage 只进入 source diagnostics；不把核心 Environment coverage 降成 partial，也不阻止安全的 interactive checkpoint。
 
 ## P7 continuous-monitoring boundary
 
@@ -200,6 +252,7 @@ sequenceDiagram
 - **Promotion boundary**：real-project `apply_staged_learning` requires both the existing risk/human-approval gate and a durable `calibration_replay.json` with `promotion_allowed=true`. A Scan-time Agent cannot write this gate or directly change active policy.
 - **Version / rollback**：each policy apply snapshots old/new policy under `policy_revisions/`. Explicit `learning-rollback --yes` only restores the prior policy if no newer policy has replaced that revision, then records rollback history.
 - **Hot-path isolation**：normal Scan/Analyzer execution does not require Calibration, outcomes, or Episodes. Calibration is an asynchronous/read-model improvement path over already durable Scan facts.
+- **Web Learning read model**：`EnvironmentApplication.calibration_status()` now projects the same durable Feedback/Outcome, frozen Episode counts, candidate replay, staged proposals and policy revision history into `/demo` 的「学习与校准」页。它不新增第二套学习存储，也不赋予网页绕过 `apply_staged_learning` / durable replay / approval / rollback gates 的权限；历史 staged proposal 若 durable replay 未通过，页面必须显示 blocked，而不是“待批准可应用”。
 - **Current real evidence**：2026-09-09 current project has no durable labeled Episodes yet. A legacy feedback-derived candidate therefore correctly returns `insufficient_evidence / promotion_allowed=false`; no real P8 policy improvement is claimed.
 
 ## Project state / candidate / provenance boundaries
@@ -260,4 +313,4 @@ Source checkout、wheel install 与 Docker 共享同一 runtime contract。`uv b
 
 `signal-harness serve` 会先读取项目根目录可选的 `.env`（不覆盖显式进程环境变量），`signal-harness scan --mode agent` 也使用同一规则；demo/mock scan 不加载真实凭证。随后 FastAPI，提供 health、同步 run、trace、assessment、signals、feedback，以及 `/demo` Golden Demo；Golden Demo 默认中文并支持 EN 切换，`/demo/meta` 暴露非敏感 Project Catalog 与 Provider readiness。每个 stream-run 先选择 `project_id`，再按该项目的 profile/watchlist 构造 Workflow 上下文；`/stream-runs/{id}/events` 使用 SSE 推送同一 `TraceRecorder` 的真实 append/update。原 `POST /runs` 仍同步；`POST /stream-runs` 创建后立即启动后台任务，queued/running 输入与状态落盘并支持服务启动时的有界恢复。断线后任务继续，`Last-Event-ID` 可补发当前进程内的事件历史；服务重启后 SSE event replay history 不恢复，因此这里不声称拥有分布式 durable queue。Docker 镜像运行相同入口并包含 `/health` healthcheck。
 
-MCP 是薄适配层，不是新的业务平面：当前 9 个 product/context 工具只读，`signalharness_start_scan` 是明确标注副作用的持久 fresh-scan starter，并复用同一 StreamRunManager/Workflow。其他可写行为仍由原有 REST/CLI、permission guard、Schedule/Outbox 或 learning gate 控制。
+MCP 是薄适配层，不是新的业务平面：current Environment tools 直接委托 `EnvironmentApplication`，其中 Report/Change/Architecture/Activity/Calibration 为只读，Environment Scan、Change feedback、Change outcome 是显式副作用；旧 `signalharness_start_scan/get_product/list_changes/...` 作为 compatibility tools 保留。current REST/CLI/MCP 的 Scan 都收敛到同一 `StreamRunManager → SignalHarnessWorkflow(intelligence_pipeline=True)`；Learning 的 policy promotion 仍只能经过 replay + approval + rollback gate。

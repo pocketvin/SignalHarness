@@ -22,11 +22,12 @@ from signal_harness.runtime.tracing import TraceChangeKind
 from signal_harness.runtime.workflow import SignalHarnessWorkflow
 from signal_harness.runtime.windows import ResolvedScanWindow, WindowMode, resolve_scan_window
 from signal_harness.signal.schemas import SourceTask, TraceStep
+from signal_harness.tools.web_snapshot import discard_pending_web_snapshots
 from signal_harness.utils.fs import atomic_write_text
 
-StreamRunStatus = Literal["queued", "running", "success", "error"]
+StreamRunStatus = Literal["queued", "running", "success", "error", "cancelled"]
 StreamSourceMode = Literal["live", "fixture"]
-_TERMINAL_EVENTS = {"run.completed", "run.failed"}
+_TERMINAL_EVENTS = {"run.completed", "run.failed", "run.cancelled"}
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,7 @@ class StreamRunSession:
     result: dict[str, Any] | None = None
     events: list[StreamEvent] = field(default_factory=list)
     task: asyncio.Task[None] | None = None
+    cancel_requested: bool = False
     _subscribers: set[asyncio.Queue[StreamEvent]] = field(default_factory=set)
 
     def publish(self, event: str, data: dict[str, Any]) -> StreamEvent:
@@ -347,6 +349,25 @@ class StreamRunManager:
             name=f"signalharness-stream-{session.run_id}",
         )
 
+    async def cancel(self, run_id: str, *, project_id: str) -> StreamRunSession:
+        """Cancel exactly one active user run and wait until its task is no longer executing."""
+
+        session = self.sessions.get(run_id)
+        if session is None or session.project.id != project_id or not session.intelligence_pipeline:
+            raise KeyError(run_id)
+        if session.status == "cancelled":
+            return session
+        if session.status not in {"queued", "running"}:
+            raise RuntimeError("run already finished")
+        session.cancel_requested = True
+        task = session.task
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        if session.status not in {"success", "error", "cancelled"}:
+            self._mark_cancelled(session)
+        return session
+
     async def shutdown(self) -> None:
         tasks = [
             session.task
@@ -451,6 +472,11 @@ class StreamRunManager:
                 },
             )
             session.status = "success"
+        except asyncio.CancelledError:
+            if session.cancel_requested:
+                self._mark_cancelled(session)
+                return
+            raise
         except Exception as exc:
             session.completed_at = datetime.now(timezone.utc).isoformat()
             session.result = {
@@ -479,6 +505,31 @@ class StreamRunManager:
             if provider is not None:
                 await provider.close()
 
+    def _mark_cancelled(self, session: StreamRunSession) -> None:
+        if session.status == "cancelled":
+            return
+        discard_pending_web_snapshots(session.state_dir, session.run_id)
+        ChangeLedger(session.state_dir / "change_ledger.sqlite3").cancel_scan(
+            scan_id=session.run_id
+        )
+        previous = session.progress or {}
+        session.completed_at = datetime.now(timezone.utc).isoformat()
+        session.progress = Progress(
+            stage="cancelled",
+            message="本次检查已停止",
+            completed=int(previous.get("completed") or 0),
+            total=(int(previous["total"]) if previous.get("total") is not None else None),
+            status="cancelled",
+        ).model_dump(mode="json")
+        session.status = "cancelled"
+        session.result = {
+            **self._session_metadata(session),
+            "status": "cancelled",
+            "cancelled_by": "user",
+        }
+        _write_run_metadata(session.output_dir, session.result)
+        session.publish("run.cancelled", {"run": session.result})
+
     def _on_progress(self, session: StreamRunSession, progress: Progress) -> None:
         session.progress = progress.model_dump(mode="json")
         session.publish("product.progress", session.progress)
@@ -504,7 +555,7 @@ class StreamRunManager:
         removable = [
             run_id
             for run_id, session in self.sessions.items()
-            if session.status in {"success", "error"}
+            if session.status in {"success", "error", "cancelled"}
         ]
         while len(self.sessions) >= self.max_sessions and removable:
             self.sessions.pop(removable.pop(0), None)

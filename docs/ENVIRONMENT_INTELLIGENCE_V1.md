@@ -1,6 +1,6 @@
 # 方向优先的环境情报：首个可运行闭环
 
-更新日期：2026-09-11。当前实现范围：`environment-v1.6`。这是第一轮工程闭环，不代表完整产品质量验收已经结束。
+更新日期：2026-09-11。当前实现范围：`environment-v1.7`。这是第一轮工程闭环，不代表完整产品质量验收已经结束。
 
 ## 正常产品流程
 
@@ -149,7 +149,8 @@ SQLite schema 升级为 v8，新增 ChangeRevision / 证据关联、ScanInsight�
 `intelligence/quality.py` 只拦截可以从冻结数据确定为不合法的输出，不尝试替模型判断趋势真伪：
 
 - Direction 只能引用外部环境 Change；
-- 默认至少跨两个实体；如果只围绕同一实体，则至少 3 个 Change 且来自 2 个来源；
+- 默认至少跨两个确定性的 entity family；如果只围绕同一 entity family，则至少 3 个 Change 且来自 2 个独立 source channel；
+- 明显的 publisher/repository alias 会收敛到同一 entity family，例如 `OpenAI News` / `openai` / `openai/openai-python`。同一 GitHub repository 的 Issue/Release/PR 等 surface 只算一个 source channel，不能靠换 endpoint 冒充独立来源；
 - 高度共享同一证据集、且文本主题相近的 Direction 必须合并；
 - “同日/当天”必须与全部引用日期一致；“短时间内/短期内”必须有完整日期且跨度不超过 7 天；
 - “加速/增强/减弱/同比/环比”等跨期状态不能由单次模型直接写入 Direction 标题/解释，状态由可比历史窗口确定性计算；
@@ -162,7 +163,17 @@ Direction 还增加确定性 `evidence_posture`：`reported_issue / mixed / obse
 
 V1 删除了强模型输出 Schema 中独立的 `risks` / `opportunities` 字段。风险、机会和下一步观察统一收进对应 Direction 的 `watch_next`；`EnvironmentReport` 仍保留空数组字段以兼容旧读者。这样减少第二套自由发挥的结论，也避免和 Direction 重复。
 
-浅层和全局综合的版本身份已经分开。当前 shallow provider/cache identity 已进入 `environment-shallow-v1.7`；经过现行 Schema/语言/证据约束验证的 `environment-shallow-v1.6` 与旧 `environment-v1.3` cache 仍可迁移复用。报告/综合版本单独管理，因此修改 Direction 质量规则时不必重新支付浅层模型调用。当前浅层默认 12 条/批；大批失败会确定性二分后局部重试，仍不会退回 Top-K。
+浅层和全局综合的版本身份已经分开。当前 shallow provider/cache identity 已进入 `environment-shallow-v1.8`；经过现行 Schema/语言/证据约束验证的 `environment-shallow-v1.7`、`environment-shallow-v1.6` 与旧 `environment-v1.3` cache 仍可迁移复用。报告/综合版本单独管理，因此修改 Direction 质量规则时不必重新支付浅层模型调用。当前浅层默认 12 条/批；大批失败会确定性二分后局部重试，仍不会退回 Top-K。
+
+### 2026-09-11 fresh 48h Direction 质量证据
+
+一次隔离的 fresh 48h 采集得到 1,378 条原始观察、151 条窗口内观察和 **141 个 Change**（131 external + 10 project activity）。全部 141 条都取得 ChangeInsight，109 条进入 Relevant；没有自动 Deep Dive。首次 Qwen shallow 用 11 个 batch 完成 130 条 semantic Change，未发生 batch split。后续相同 Revision 可复用 cache，修复一条残缺的 Pydantic project-relation 文案时只重算了 1 条 shallow，而不是重跑整个 corpus。
+
+DeepSeek V4 Pro 在这份约 56 KB synthesis 请求上暴露了接近/超过 180 秒的长尾：一轮先产生 `direction_source_diversity` 无效结果后 repair 超时，另一轮首调用直接超时。Kimi K3 fallback 则先暴露出 provider profile 的确定性接入错误（旧 profile 发送了 K3 不接受的 temperature）；修复为 role-specific reasoning tier 后，真实健康探针通过，同一 141-Change synthesis 在第二次有界尝试成功。成功轮的两次 Kimi 调用分别约 141.6s / 164.3s，共 47,192 provider-reported tokens；当前 model profile 没有完整价格元数据，因此美元成本未知。
+
+成功模型输出给出 5 个候选 Direction，但人工/工程抽检发现其中 3 个只是结构性“伪独立”：两个是同一 OpenAI 发布事件的官方新闻 + SDK 跟进，一个是同一 `openai/openai-python` repository 内密集 Issue + Release。新增 deterministic entity-family/source-channel 规则后，对这份**已经付费的冻结输出做 0 API replay**，3 条被降回 Change/Featured 层，仅保留 2 条：跨 GitHub 与 LangGraph 的 agent governance/audit/control 信号，以及跨 PyPI registry 与 Pydantic GitHub repository 的 2.14 beta/validation-edge 信号。过滤后的 synthesis 继续通过 temporal / overlap / citation / language guards。
+
+这证明“模型 Schema 合法”不等于 Direction 产品质量足够；Direction 的独立性边界应由可确定的 identity/provenance 规则掌握。单一不满足 source-diversity 的候选现在可以局部剔除，不再为了一个候选把整份强模型输出重新生成；其他语义/时间/引用错误仍保留 bounded repair。
 
 ### 真实保存来源回放结果
 
@@ -302,10 +313,39 @@ ChangeRevision
 
 ## 本轮未宣称完成的能力
 
-1. 已用 71 条真实保存来源观察（67 Change）验证当前结构门和方向非重复性，但尚未以 100–500 条**重新采集且人工抽检**的真实语料验证 Direction 的准确率、召回、漏掉的重要方向和跨期稳定性。
+1. 已完成一次 141-Change **fresh real-source** 运行并对 5 个模型 Direction 做工程/人工抽检，暴露并修复 entity/source 独立性问题；但这仍不是完整 human-labelled benchmark。Direction 的 precision/coverage、漏掉的重要方向和跨期稳定性仍需更多冻结窗口与明确人工标签验证，300–500 Change 更大 fresh corpus 仍未完成。
 2. 无强 ID 的语义去重/纠错暂未实现；优先保留两条可能相关的 Change，而不是误合并。
 3. 超出全局容量时明确降级，尚未实现可追溯的分层综合；不得默默截取 Top-K。
 4. Code Usage 只是有界引用匹配，尚非完整调用图、跨语言可达性或执行过的兼容性测试。
 5. Direction 级 Deep Dive、选择性强核验器、Coding Agent ActionPacket、Direction 通知尚未实现。现有通知和校准仍主要围绕旧 Assessment。
 6. 旧 CLI/MCP 与旧 JSON/Agent 兼容路径尚未全部退役；新产品入口不得反向导入旧 Eval 实现。
 7. 页面已重构且有桌面/移动端自动验收，仍需用户实际阅读后评判信息密度、中文文案与交互是否满意。
+
+## 2026-09-14 Full-corpus 成本与局部 Repair（shallow-v1.8 / synthesis-v1.11）
+
+这一轮不改变“完整外部 Change corpus 必须参与全局综合”的产品语义，而是压缩 wire representation 和失败重试成本。外部 DirectionDigest 的 `id` 与 compact fact 保持逐条存在；重复的 entity/kind/date/posture/relation/origin/discovery/source 由 `corpus_legend.tables` 做确定性字典编码，强模型 fact 上限收紧到 56 字，自由 topic 标签继续保存在 ChangeInsight，但不再在全局 wire 里为每条 Change 重复。
+
+冻结真实 openclaw `run-6821eeba86d8` 的 378 条 external Changes 离线重建后，完整 synthesis payload 从 **159,246 bytes 降到 86,672 bytes（-45.6%）**，仍然是 378/378 Change IDs，不涉及 Top-K 或丢证据。
+
+`environment-shallow-v1.8` 新增 routine community-Issue front gate：Issue 仍全部采集/冻结/可搜索；只有当 project relation 已由 Project Profile 确定，而且没有维护者参与、P0/P1/P2/security 类标签、>=4 comments 或严重故障 marker 时，才允许 Python 直接生成低关注的 reported-issue Insight。该 Insight 只陈述“社区报告/提议了什么”，并明确不等于 confirmed defect。相同冻结数据的离线路由从 **378 semantic + 3 deterministic** 变为 **306 semantic + 75 deterministic**，12-item Qwen batch 从 32 降到 26；relation 仍 unknown 的 routine Issue 不会被绕过模型。
+
+`environment-synthesis-v1.11` 将 repair 分成两类：证据引用/独立性/结构错误仍使用 full-context retry；`unverified_trend_velocity`、部分 temporal/prose/style 等局部约束失败可以只传 invalid structured output + referenced compact Changes + bounded window/context 做 localized repair。Trace 会把第一次 invalid structured result 标成“已自动修正”而不是 terminal failure；只有修复仍失败或 provider call 本身失败才继续作为真正 error。旧历史 Trace 若没有 `validation_code / repair_mode`，Web 只在 `EnvironmentSynthesizer` 已返回 completion usage、且后面存在同 provider/model 成功结果时将旧 error 兼容显示为“随后修正成功”，避免把网络/Provider 失败误洗成修复成功。
+
+## 2026-09-12 Project-conditioned Discovery Radar（environment-v1.7）
+
+这一轮解决的是 closed-world monitor 的结构限制：原链路主要从 dependency map / Watchlist 观察已经知道的依赖、协议和 repo，因此“项目周边变化”强，但“以前不知道的新方案”弱。V1.7 没有增加全局 AI 新闻流，而是在现有 Project Profile 上确定性派生 `DiscoveryProfile`：`project_domain / problem_spaces / solution_categories / discovery_queries / exclusions`。
+
+当前实现边界：
+
+- `src/signal_harness/projects/discovery_profile.py` 根据当前项目用途优先分类领域。AI/Agent gateway 会得到 agent runtime / tool protocol / model gateway；微信小游戏会得到 WeChat Mini Game / gesture interaction / 2D engine。用途明确时高于路径噪声；用途缺失的 generic fallback 会过滤偶然出现的 Agent/LLM/MCP module。
+- `github_signal.search_repositories` 使用 GitHub repository Search API，最多 3 个 query × 5 结果、30 日 lookback，只搜索 `name,description`，不搜索 README 全文；候选保留 `discovery_origin=discovered` 与 `discovery_basis=query`。
+- Discovery source 是 supplemental：失败不会降低核心 source coverage/checkpoint。候选去掉已知 Watchlist repo、同轮重复 repo，并按项目 exclusions 做确定性过滤。
+- discovered repo 仍进入现有 Event → Change → ChangeInsight → full external DirectionDigest；`DirectionDigest.o/b` 分别保留 watched/discovered identity 与 discovery basis。没有新的数据库事实系统，也没有第二次 strong synthesis。
+- Synthesis v1.10 同一次返回 `brief + directions + radar + featured`。`new_solution` 可以引用一个此前未知的新 repo，但不能写成风口/趋势；`emerging_direction` 至少引用 2 个不同 discovered Change，并跨独立 entity/source。Repository Discovery 只能证明多个独立方案重复出现，不能证明采用率、行业共识或市场份额，因此 Radar 与仅由 discovered Change 支撑的 Brief 都不得写成“标配 / 普遍 / 广泛采用或复刻 / 基本盘 / 成为主流”。
+- 前端首页增加“项目外部雷达”，Settings 显示“系统理解的问题空间 / 外部雷达会寻找”。Radar 只展示最多 3 条，并明确这是当前项目条件化发现，不是全局技术热门榜。
+
+真实 0-model source smoke（2026-09-12）验证：
+
+- `openclaw` 的 3 条 query 返回 Agent runtime、tool protocol gateway、multi-provider model gateway 等相邻方案；production-shape collect 得到 15 个未知 repo，项目自身 repo 被 known-source filter 排除。
+- `magic-kitchen` 的 query 返回 WeChat Mini Game、gesture game interaction、TypeScript 2D game engine；production-shape collect 得到 5 个候选，没有 DeepSeek Harness / LLM agent / MCP server 污染，项目自身 repo 同样被过滤。
+- 全过程没有调用 Qwen/Kimi/DeepSeek；真实 GitHub Search 只验证 source/discovery contract，不代表这些 repo 已经通过最终语义 Radar 选择。

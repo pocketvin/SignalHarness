@@ -16,6 +16,7 @@ from signal_harness.intelligence.model_calls import BoundedModelCaller
 from signal_harness.intelligence.usage import inspect_usage
 from signal_harness.persistence import ChangeLedger
 from signal_harness.persistence.intelligence import IntelligenceRepository, utc_now
+from signal_harness.projects.architecture_snapshot import architecture_usage_references
 from signal_harness.projects.catalog import project_catalog, project_option
 from signal_harness.projects.state import prepare_project_state
 from signal_harness.providers.task_policy import TaskPolicy
@@ -23,6 +24,10 @@ from signal_harness.runtime.permissions import SignalPermissionGuard
 from signal_harness.runtime.tracing import TraceRecorder
 from signal_harness.signal.policy import load_signal_policy, load_yaml_mapping
 from signal_harness.tools.web_snapshot import fetch_public_text, normalize_web_text
+
+
+class ProjectActivityDeepDiveUnsupported(RuntimeError):
+    """Project-owned activity already has first-party evidence; no model deep dive is created."""
 
 
 class DeepDiveManager:
@@ -60,6 +65,10 @@ class DeepDiveManager:
         change = repo.change(scan_id, change_id)
         if change is None:
             raise ValueError("Change not found in this project's scan")
+        if change.get("corpus_role") == "project_activity":
+            raise ProjectActivityDeepDiveUnsupported(
+                "项目活动已经是当前项目的一手记录，不创建额外模型核实任务"
+            )
         frozen = repo.profile_for_scan(scan_id)
         guard = SignalPermissionGuard(load_signal_policy(self.config_dir / "signal_policy.yaml"))
         guard.require("read_project_context")
@@ -71,6 +80,25 @@ class DeepDiveManager:
             if isinstance(item, dict) and item.get("path")
         ]
         usage = await asyncio.to_thread(inspect_usage, roots, str(change["entity"]))
+        persisted_refs = architecture_usage_references(frozen["profile"], str(change["entity"]))
+        if persisted_refs:
+            existing = {
+                (str(item.get("path") or ""), int(item.get("line") or 0))
+                for item in usage.get("references", [])
+                if isinstance(item, dict)
+            }
+            usage["references"] = [
+                *usage.get("references", []),
+                *[
+                    item
+                    for item in persisted_refs
+                    if (str(item.get("path") or ""), int(item.get("line") or 0)) not in existing
+                ],
+            ][:30]
+            usage["notice"] = (
+                str(usage.get("notice") or "").rstrip("。")
+                + "；同时复用项目连接时保存的有界静态 import 证据。"
+            )
         policy = TaskPolicy.load(self.config_dir)
         # Source refresh TTL + usage fingerprint invalidate stale deep-dive answers.
         cache_key = identity(

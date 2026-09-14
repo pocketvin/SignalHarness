@@ -6,7 +6,7 @@ import asyncio
 import json
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal, cast
 from uuid import uuid4
@@ -33,6 +33,7 @@ from signal_harness.persistence.intelligence import IntelligenceRepository
 from signal_harness.providers.adapter import AgentProvider
 from signal_harness.providers.factory import provider_from_env
 from signal_harness.providers.mock_provider import MockProvider
+from signal_harness.projects.discovery_profile import with_discovery_profile
 from signal_harness.runtime.cache import SourceFetchCache
 from signal_harness.runtime.permissions import SignalPermissionGuard
 from signal_harness.runtime.tool_executor import SignalToolExecutor
@@ -311,8 +312,16 @@ class SignalHarnessWorkflow:
             before_window = len(events)
             filtered_events: list[SignalEvent] = []
             late_count = 0
+            source_tasks = {
+                (task.source_type, task.source_name): task for task in collection.source_tasks
+            }
             for event in events:
-                selected = self._select_for_window(event, window)
+                task = source_tasks.get((event.source_type, event.source_name))
+                selected = self._select_for_window(
+                    event,
+                    window,
+                    late_discovery_eligible=self._late_discovery_eligible(task),
+                )
                 if selected is not None:
                     filtered_events.append(selected)
                     if selected.raw_payload.get("window_exception"):
@@ -705,6 +714,7 @@ class SignalHarnessWorkflow:
         loaded = [json.loads(result.output) for result in results]
         if not all(isinstance(item, dict) for item in loaded):
             raise RuntimeError("SignalHarness config tools returned invalid payloads")
+        loaded[0] = with_discovery_profile(cast(dict[str, Any], loaded[0]))
         return cast(
             tuple[dict[str, Any], dict[str, Any], dict[str, Any]],
             tuple(loaded),
@@ -924,18 +934,93 @@ class SignalHarnessWorkflow:
                     )
                 )
 
+        discovery = (profile or {}).get("discovery_profile", {})
+        discovery_exclusions: list[str] = []
+        if self.intelligence_pipeline and isinstance(discovery, dict):
+            discovery_exclusions = [
+                str(value).strip().casefold()
+                for value in discovery.get("exclusions", [])
+                if str(value).strip()
+            ][:8]
+            queries = [
+                str(value).strip()
+                for value in discovery.get("discovery_queries", [])
+                if str(value).strip()
+            ][:3]
+            if queries:
+                guard.require("read_github_discovery")
+                lookback_days = max(1, min(90, int(discovery.get("lookback_days") or 30)))
+                created_after = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+                max_results = max(
+                    1, min(10, int(discovery.get("max_results_per_query") or 5))
+                )
+                for index, query in enumerate(queries):
+                    jobs.append(
+                        SourceJob(
+                            tool_name="github_signal",
+                            arguments={
+                                "action": "search_repositories",
+                                "query": query,
+                                "since": created_after,
+                                "max_results": max_results,
+                            },
+                            source_name=f"GitHub Discovery · {index + 1}",
+                            source_type="github_repository",
+                            ttl_seconds=1800,
+                            official=False,
+                        )
+                    )
+
         results = await asyncio.gather(*(self._run_source_job(job) for job in jobs))
         collected: list[dict[str, Any]] = []
         failures: list[str] = []
         source_tasks: list[SourceTask] = []
+        known_repositories = {
+            str(entry.get("repo") or "").casefold()
+            for entry in watchlist.get("github", {}).get("repositories", [])
+            if isinstance(entry, dict) and str(entry.get("repo") or "").strip()
+        }
+        discovered_repositories: set[str] = set()
         for payload, task, job in results:
             source_tasks.append(task)
             if task.status in {"failed", "partial_failure"}:
+                if job.source_type == "github_repository":
+                    # Discovery is supplemental. Its failure remains visible in source diagnostics
+                    # but does not make the core environment scan partial.
+                    continue
                 failures.append(
                     f"{job.source_type}:{job.source_name}: {task.error or 'source failed'}"
                 )
                 continue
             for item in payload:
+                if job.source_type == "github_repository":
+                    raw_item = dict(item)
+                    repository = str(raw_item.get("full_name") or "").strip()
+                    identity = repository.casefold()
+                    discovery_text = " ".join(
+                        [
+                            repository,
+                            str(raw_item.get("description") or ""),
+                            str(raw_item.get("language") or ""),
+                            *[str(value) for value in raw_item.get("topics", []) if value],
+                        ]
+                    ).casefold()
+                    if (
+                        not repository
+                        or identity in known_repositories
+                        or identity in discovered_repositories
+                        or any(term in discovery_text for term in discovery_exclusions)
+                    ):
+                        continue
+                    discovered_repositories.add(identity)
+                    collected.append(
+                        {
+                            "_collector_source_name": repository,
+                            "_collector_source_type": job.source_type,
+                            "_collector_raw": raw_item,
+                        }
+                    )
+                    continue
                 if job.source_type == "web_change":
                     raw_item = dict(item)
                     if job.entity_type and job.entity_name:
@@ -1233,8 +1318,25 @@ class SignalHarnessWorkflow:
             return [], task, job
 
     def _select_for_window(
-        self, event: SignalEvent, window: ResolvedScanWindow
+        self,
+        event: SignalEvent,
+        window: ResolvedScanWindow,
+        *,
+        late_discovery_eligible: bool = False,
     ) -> SignalEvent | None:
+        if (
+            event.source_type == "github_repository"
+            and event.raw_payload.get("discovery_origin") == "discovered"
+        ):
+            # Discovery is an observation-time concept: a repository may have been created before
+            # this Scan window but is new to this project's radar today. Surface it exactly once;
+            # later metadata revisions do not repeatedly manufacture a "new solution".
+            if self.ledger.observation_state(event) != "new":
+                return None
+            raw_payload = dict(event.raw_payload)
+            if not self._is_within_window(event, window.lower, window.upper):
+                raw_payload["window_exception"] = "discovered_during_scan"
+            return event.model_copy(update={"raw_payload": raw_payload})
         if self._is_within_window(event, window.lower, window.upper):
             return event
         # Snapshot diffs are observations created by this Scan, not source facts with a
@@ -1245,6 +1347,12 @@ class SignalHarnessWorkflow:
             raw_payload["window_exception"] = "observed_during_scan"
             return event.model_copy(update={"raw_payload": raw_payload})
         if window.mode != "since_last" or window.first_use or window.lower is None:
+            return None
+        # A source that cannot claim bounded/complete history cannot distinguish a truly
+        # late fact from an old backlog item that happened to be returned today. Without
+        # this guard, archival feeds can turn thousands of historic entries into fake
+        # "late discoveries" on every new project checkpoint.
+        if not late_discovery_eligible:
             return None
         published = event.published_at
         if published is None:
@@ -1269,19 +1377,30 @@ class SignalHarnessWorkflow:
         return event.model_copy(update={"raw_payload": raw_payload})
 
     @staticmethod
+    def _late_discovery_eligible(task: SourceTask | None) -> bool:
+        return bool(
+            task is not None
+            and task.status == "success"
+            and task.coverage_status == "complete"
+            and not task.history_limited
+        )
+
+    @staticmethod
     def _coverage_status(source_tasks: list[SourceTask], failed_sources: list[str]) -> str:
+        core_tasks = [task for task in source_tasks if task.source_type != "github_repository"]
         if failed_sources or any(
-            task.coverage_status == "partial" or task.history_limited for task in source_tasks
+            task.coverage_status == "partial" or task.history_limited for task in core_tasks
         ):
             return "partial"
-        if any(task.coverage_status == "unknown" for task in source_tasks):
+        if any(task.coverage_status == "unknown" for task in core_tasks):
             return "unknown"
         return "complete"
 
     @staticmethod
     def _checkpoint_safe(source_tasks: list[SourceTask], failed_sources: list[str]) -> bool:
+        core_tasks = [task for task in source_tasks if task.source_type != "github_repository"]
         return not failed_sources and not any(
-            task.coverage_status == "partial" or task.history_limited for task in source_tasks
+            task.coverage_status == "partial" or task.history_limited for task in core_tasks
         )
 
     @staticmethod

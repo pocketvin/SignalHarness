@@ -58,7 +58,8 @@ def test_kimi_profile_uses_max_completion_tokens(project_root: Path) -> None:
     assert profile.supports_native_tool_calling is False
     assert profile.schema_strategy == "prompt_json_retry"
     assert profile.tool_strategy == "controlled_tool_request"
-    assert profile.recommended_temperature == 0.0
+    assert profile.recommended_temperature == 1.0
+    assert profile.reasoning_effort == "high"
 
 
 def test_model_profile_rejects_native_tool_calling_claim() -> None:
@@ -174,6 +175,8 @@ def test_kimi_payload_uses_only_max_completion_tokens(project_root: Path) -> Non
     assert requests[0]["max_completion_tokens"] == 8192
     assert "max_tokens" not in requests[0]
     assert requests[0]["response_format"] == {"type": "json_object"}
+    assert requests[0]["reasoning_effort"] == "high"
+    assert "temperature" not in requests[0]
 
 
 def test_http_status_error_includes_safe_body_without_sensitive_headers(

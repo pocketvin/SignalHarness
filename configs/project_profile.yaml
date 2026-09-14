@@ -1,138 +1,188 @@
 project_name: SignalHarness
-goal: >-
-  Build a project-centric signal intelligence harness that identifies
-  external changes relevant to a small developer team.
+goal: 'Build evidence-backed Project Environment Intelligence for developer teams:
+  understand project context and bounded code structure, monitor internal/external
+  changes, synthesize directions and discovery radar, support on-demand deep dives,
+  and improve through review-first calibration.'
 tech_stack:
-  - Python 3.10+
-  - Pydantic
-  - Typer
-  - FastAPI
-  - MCP Python SDK
-  - SignalHarness runtime
+- Python 3.10+
+- Pydantic
+- Typer
+- FastAPI
+- MCP Python SDK
+- SignalHarness runtime
 critical_modules:
-  - signal normalization
-  - evidence verification
-  - impact scoring
-  - feedback memory
-  - asyncio
-  - event loop
-  - provider adapter
-  - SSE
-  - mcp
-  - agent eval
-  - evaluation
-  - observability
-  - latency
-  - permission control
-  - checkpoint persistence
-  - agent regression evaluation
-  - MCP integration
-  - token cost latency observability
-  - API service
+- project profile and discovery profile
+- bounded architecture understanding
+- source collection and normalization
+- change ledger and revision identity
+- change interpretation and project projection
+- environment synthesis and quality guards
+- discovery radar
+- on-demand deep dive
+- feedback and calibration
+- REST / SSE / MCP / CLI adapters
+- provider routing and token-cost observability
+- legacy Harness / eval compatibility
+- signal normalization
+- evidence verification
+- impact scoring
+- feedback memory
+- asyncio
+- event loop
+- provider adapter
+- SSE
+- mcp
+- agent eval
+- evaluation
+- observability
+- latency
+- permission control
+- checkpoint persistence
+- agent regression evaluation
+- MCP integration
+- token cost latency observability
+- API service
 dependencies:
-  - pydantic
-  - typer
-  - httpx
-  - rich
-  - pyyaml
-  - fastapi
-  - mcp
-  - uvicorn
+- pydantic
+- typer
+- httpx
+- rich
+- pyyaml
+- fastapi
+- mcp
+- uvicorn
 monitored_ecosystem:
-  - langchain-ai/langgraph
-  - LangGraph
-  - OpenAI-compatible provider APIs
-  - agent tool-calling ecosystem
-  - Model Context Protocol
-  - agent evaluation and observability ecosystem
+- Model Context Protocol
+- GitHub platform and developer tooling
+- OpenAI-compatible provider APIs
+- Python application/runtime ecosystem
+- agent runtime and tool interoperability ecosystem
+- software supply-chain and dependency intelligence
+- langchain-ai/langgraph
+- LangGraph
+- agent tool-calling ecosystem
+- agent evaluation and observability ecosystem
 competitors:
-  - LangGraph
-  - CrewAI
-  - AutoGen
+- GitHub Dependabot
+- Renovate
+- LangGraph
+- CrewAI
+- AutoGen
 focus_keywords:
-  - agent harness
-  - checkpoint persistence
-  - tool registry
-  - multi-agent
-  - structured output
-  - permission guard
-  - feedback memory
-  - asyncio
-  - event loop
-  - provider adapter
-  - SSE
+- project environment intelligence
+- dependency and ecosystem change
+- Model Context Protocol
+- tool protocol compatibility
+- provider API compatibility
+- runtime reliability
+- observability
+- software supply chain
+- change evidence
+- developer tooling
+- agent harness
+- checkpoint persistence
+- tool registry
+- multi-agent
+- structured output
+- permission guard
+- feedback memory
+- asyncio
+- event loop
+- provider adapter
+- SSE
 ignore_keywords:
-  - cryptocurrency price
-  - gaming promotion
-  - consumer giveaway
-
+- cryptocurrency price
+- gaming promotion
+- consumer giveaway
 purpose: Project Environment Intelligence for software engineering changes
 runtimes:
-  - Python
-  - ASGI
+- Python
+- ASGI
 protocols:
-  - Model Context Protocol
+- Model Context Protocol
 providers: []
 dependency_evidence:
-  - name: fastapi
-    declared: fastapi>=0.116,<1
-    resolved_version: 0.141.1
-    source_files: [pyproject.toml, uv.lock]
-    confidence: verified
-    ecosystem: PyPI
-  - name: httpx
-    declared: httpx>=0.27.0
-    resolved_version: 0.28.1
-    source_files: [pyproject.toml, uv.lock]
-    confidence: verified
-    ecosystem: PyPI
-  - name: mcp
-    declared: mcp>=2,<3
-    resolved_version: 2.1.1
-    source_files: [pyproject.toml, uv.lock]
-    confidence: verified
-    ecosystem: PyPI
-  - name: pydantic
-    declared: pydantic>=2.0.0
-    resolved_version: 2.13.4
-    source_files: [pyproject.toml, uv.lock]
-    confidence: verified
-    ecosystem: PyPI
-  - name: python-dotenv
-    declared: python-dotenv>=1,<2
-    resolved_version: 1.2.3
-    source_files: [pyproject.toml, uv.lock]
-    confidence: verified
-    ecosystem: PyPI
-  - name: pyyaml
-    declared: pyyaml>=6.0
-    resolved_version: 6.0.3
-    source_files: [pyproject.toml, uv.lock]
-    confidence: verified
-    ecosystem: PyPI
-  - name: rich
-    declared: rich>=13.0.0
-    resolved_version: 15.0.0
-    source_files: [pyproject.toml, uv.lock]
-    confidence: verified
-    ecosystem: PyPI
-  - name: typer
-    declared: typer>=0.12.0
-    resolved_version: 0.26.7
-    source_files: [pyproject.toml, uv.lock]
-    confidence: verified
-    ecosystem: PyPI
-  - name: uvicorn
-    declared: uvicorn>=0.35,<1
-    resolved_version: 0.52.4
-    source_files: [pyproject.toml, uv.lock]
-    confidence: verified
-    ecosystem: PyPI
+- name: fastapi
+  declared: fastapi>=0.116,<1
+  resolved_version: 0.141.1
+  source_files:
+  - pyproject.toml
+  - uv.lock
+  confidence: verified
+  ecosystem: PyPI
+- name: httpx
+  declared: httpx>=0.27.0
+  resolved_version: 0.28.1
+  source_files:
+  - pyproject.toml
+  - uv.lock
+  confidence: verified
+  ecosystem: PyPI
+- name: mcp
+  declared: mcp>=2,<3
+  resolved_version: 2.1.1
+  source_files:
+  - pyproject.toml
+  - uv.lock
+  confidence: verified
+  ecosystem: PyPI
+- name: pydantic
+  declared: pydantic>=2.0.0
+  resolved_version: 2.13.4
+  source_files:
+  - pyproject.toml
+  - uv.lock
+  confidence: verified
+  ecosystem: PyPI
+- name: python-dotenv
+  declared: python-dotenv>=1,<2
+  resolved_version: 1.2.3
+  source_files:
+  - pyproject.toml
+  - uv.lock
+  confidence: verified
+  ecosystem: PyPI
+- name: pyyaml
+  declared: pyyaml>=6.0
+  resolved_version: 6.0.3
+  source_files:
+  - pyproject.toml
+  - uv.lock
+  confidence: verified
+  ecosystem: PyPI
+- name: rich
+  declared: rich>=13.0.0
+  resolved_version: 15.0.0
+  source_files:
+  - pyproject.toml
+  - uv.lock
+  confidence: verified
+  ecosystem: PyPI
+- name: typer
+  declared: typer>=0.12.0
+  resolved_version: 0.26.7
+  source_files:
+  - pyproject.toml
+  - uv.lock
+  confidence: verified
+  ecosystem: PyPI
+- name: uvicorn
+  declared: uvicorn>=0.35,<1
+  resolved_version: 0.52.4
+  source_files:
+  - pyproject.toml
+  - uv.lock
+  confidence: verified
+  ecosystem: PyPI
 evidence:
-  manifest_files: [pyproject.toml, uv.lock]
+  manifest_files:
+  - pyproject.toml
+  - uv.lock
 unknowns:
-  - external providers/APIs are configured outside supported project manifests
+- external providers/APIs are configured outside supported project manifests
 onboarding:
   review_required: false
   auto_active: true
-  evidence_files: [pyproject.toml, uv.lock]
+  evidence_files:
+  - pyproject.toml
+  - uv.lock

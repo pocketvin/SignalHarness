@@ -12,12 +12,13 @@ SignalHarness is a **Project Environment Intelligence** system for continuously 
 
 After a user connects a GitHub repository or authorized local project, SignalHarness should automatically build and continuously maintain a project environment profile, collect environmental changes from relevant sources, decide which changes matter to that project, explain the impact, recommend actions, and expose the same intelligence through Web, CLI, REST API, and MCP/Tool interfaces.
 
-The product must continuously answer four questions:
+The product must continuously answer five questions:
 
 1. What changed around my project?
 2. Which changes actually matter to this project?
-3. What could they affect?
-4. What should I do?
+3. What previously-untracked adjacent tools or solution approaches are now worth knowing about for this project?
+4. What could they affect?
+5. What should I do?
 
 Multi-Agent orchestration, single-Agent analysis, rules, search, scoring, and model choice are implementation techniques rather than the product identity.
 ## 2. Core product experience
@@ -53,6 +54,8 @@ The scan-time semantic budget and the on-demand Deep Dive budget are different c
 Keep **Observed corpus**, **Relevant projection**, **Featured projection**, and **On-demand Deep Dive state** distinct. Weak individual observations may still combine into a supported emerging direction, while raw source noise must not be mislabeled as project-relevant.
 
 Project-owned activity and external-environment evidence are also distinct. Project activity may explain why an external Direction matters to the current codebase, but it must never establish that external Direction. Issue/discussion observations must retain a “reported/discussed” evidence posture rather than being promoted to shipped or confirmed behavior.
+
+Project-conditioned discovery is distinct from a global trend/news feed. SignalHarness may derive a bounded problem/solution-space discovery scope from the versioned Project Profile and use it to discover previously-untracked entities. A single new entity may be surfaced as a new solution, but it must not be described as a market trend; emerging/trend language requires independent evidence across multiple entities/sources. Projects unrelated to AI must not inherit AI/Agent/MCP discovery merely because those topics are globally popular or appear incidentally in a dependency/path.
 
 A compact change row/card should show only the user-facing change type, a short Chinese summary, and one sentence of likely project impact. **Numeric relevance/impact scores are internal ranking/audit data and are not a primary product-facing concept.** Full details are progressive disclosure: what happened, why it is relevant, affected modules/capabilities, recommended actions, Before/After when real evidence exists, sources/evidence, and optional audit reasoning/score/trace.
 
@@ -141,7 +144,7 @@ L1  FactCapsule + cache/deterministic SemanticRouter
  ↓
 L1.5 DirectionDigestBuilder + deterministic CorpusOrganizer
  ↓
-L2  ONE EnvironmentSynthesizer call over every compact external DirectionDigest
+L2  ONE global EnvironmentSynthesizer pass over every compact external DirectionDigest; bounded localized repair may follow only for repairable deterministic validation failures
     returns Directions + overall brief + Featured IDs
  ↓
      Relevant view + Featured 5 presentation

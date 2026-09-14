@@ -6,6 +6,7 @@ from signal_harness.intelligence.contracts import ShallowModelRow
 from signal_harness.intelligence.project_projection import (
     build_project_references,
     model_row_to_insight,
+    normalize_relation_reason_copy,
     project_reference_map,
     render_relation_reason,
     shallow_project_context,
@@ -68,6 +69,81 @@ def test_model_row_renders_one_basis_plus_short_incremental_note() -> None:
     assert insight.relation_reason == "关注能力：SSE；若走该流式路径，需要关注兼容性。"
     assert "SignalHarness" not in insight.relation_reason
     assert len(insight.relation_reason) < 60
+
+
+def test_repeated_reference_inside_note_keeps_sentence_grammar() -> None:
+    from signal_harness.intelligence.contracts import ChangeDigest, Evidence
+
+    digest = ChangeDigest(
+        change_id="c-pydantic",
+        revision_id="r-pydantic",
+        title="Alias configuration inheritance issue",
+        entity="pydantic",
+        kind="github_issue",
+        published_at="2026-09-11T00:00:00+00:00",
+        evidence=[
+            Evidence(
+                evidence_id="e1",
+                event_revision_id=1,
+                source_name="pydantic/pydantic",
+                source_type="github_issue",
+                url="https://example.com/pydantic",
+                authority="community",
+                excerpt="alias configuration inheritance issue",
+            )
+        ],
+    )
+    insight = model_row_to_insight(
+        ShallowModelRow(
+            id=digest.change_id,
+            s="Pydantic 别名配置继承出现异常",
+            f="问题报告描述了派生配置错误继承到子类。",
+            r="direct",
+            b="d1",
+            n="直接影响本项目基于 pydantic 的模型定义、字段验证与别名行为一致性",
+            a="watch",
+            t=["数据验证"],
+            e=["e1"],
+        ),
+        references=project_reference_map(PROFILE),
+        digest=digest,
+        known_relation="direct",
+        known_basis_kind="dependency",
+        known_basis_label="pydantic",
+    )
+    assert insight.relation_reason == (
+        "依赖：pydantic；直接影响本项目基于该依赖的模型定义、字段验证与别名行为一致性。"
+    )
+    assert "基于 的" not in insight.relation_reason
+
+
+def test_relation_reason_copy_removes_narrow_project_boilerplate() -> None:
+    assert normalize_relation_reason_copy(
+        "依赖：pydantic；暴露项目核心依赖该依赖在JSON解析路径下的枚举容错缺陷。"
+    ) == "依赖：pydantic；暴露该依赖在JSON解析路径下的枚举容错缺陷。"
+    assert normalize_relation_reason_copy(
+        "依赖：pydantic；影响项目核心依赖该依赖的序列化鲁棒性。"
+    ) == "依赖：pydantic；影响该依赖的序列化鲁棒性。"
+    assert normalize_relation_reason_copy(
+        "关注生态：langchain-ai/langgraph；呼应项目对agent eval和observability的关注能力。"
+    ) == "关注生态：langchain-ai/langgraph；与agent eval和observability直接相关。"
+
+
+def test_product_language_guard_rejects_cached_incomplete_reference_copy() -> None:
+    from signal_harness.intelligence.contracts import ShallowInsight
+    from signal_harness.intelligence.model_calls import validate_product_language
+
+    broken = ShallowInsight(
+        change_id="c1",
+        summary="上游配置行为发生变化",
+        what_changed="问题报告描述了配置继承异常。",
+        project_relation="direct",
+        relation_reason="依赖：pydantic；直接影响本项目基于 的模型定义。",
+        attention="watch",
+        evidence_ids=["e1"],
+    )
+    with pytest.raises(ValueError, match="incomplete_reference"):
+        validate_product_language(broken)
 
 
 def test_invalid_or_forbidden_basis_is_rejected() -> None:

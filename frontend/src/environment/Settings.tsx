@@ -14,11 +14,13 @@ export function ProjectSettings({
   onPreference,
   onNatural,
   onConnect,
+  onRefreshArchitecture,
 }: {
   profile: Profile | null;
   onPreference: (scope: string, key: string, value: string) => Promise<void>;
   onNatural: (text: string) => Promise<void>;
   onConnect: (id?: string) => Promise<void>;
+  onRefreshArchitecture: () => Promise<void>;
 }) {
   const [instruction, setInstruction] = useState("");
   const [url, setUrl] = useState("");
@@ -119,6 +121,118 @@ export function ProjectSettings({
             <span key={item}>{item}</span>
           ))}
         </div>
+        {profile?.effective_profile.discovery_profile && (
+          <section className="discovery-profile-panel">
+            <div className="discovery-profile-title">
+              <span>系统理解的问题空间</span>
+              <b>{profile.effective_profile.discovery_profile.project_domain || "软件项目"}</b>
+            </div>
+            {!!profile.effective_profile.discovery_profile.problem_spaces?.length && (
+              <div>
+                <small>正在解决的问题</small>
+                <div className="discovery-tags">
+                  {profile.effective_profile.discovery_profile.problem_spaces.map((item) => (
+                    <span key={`problem-${item}`}>{item}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+            {!!profile.effective_profile.discovery_profile.solution_categories?.length && (
+              <div>
+                <small>外部雷达会寻找</small>
+                <div className="discovery-tags secondary">
+                  {profile.effective_profile.discovery_profile.solution_categories.map((item) => (
+                    <span key={`solution-${item}`}>{item}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+            <p className="quiet-note">
+              这决定“项目外部雷达”去哪里找此前未跟踪的新方案，不会给所有项目套同一组 AI 或热门技术主题。
+            </p>
+          </section>
+        )}
+        {(profile?.effective_profile.architecture_snapshot ||
+          profile?.effective_profile.repository?.provider === "github") && (
+          <section className="architecture-profile-panel">
+            <div className="discovery-profile-title">
+              <span>系统理解的项目结构</span>
+              <div className="architecture-title-actions">
+                <b>
+                  {profile?.effective_profile.architecture_snapshot?.coverage === "source_sampled"
+                    ? `已读取 ${profile.effective_profile.architecture_snapshot.source_files_sampled || 0} 个源码样本`
+                    : "尚未读取源码结构"}
+                </b>
+                {profile?.effective_profile.repository?.provider === "github" && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() =>
+                      void perform(onRefreshArchitecture, "项目结构已重新分析并保存。")
+                    }
+                  >
+                    {busy ? "分析中…" : "重新分析项目结构"}
+                  </button>
+                )}
+              </div>
+            </div>
+            {!!profile?.effective_profile.architecture_snapshot?.subsystems?.length && (
+              <div>
+                <small>主要子系统</small>
+                <div className="architecture-grid">
+                  {profile.effective_profile.architecture_snapshot.subsystems.slice(0, 6).map((item) => (
+                    <div className="architecture-group" key={item.name}>
+                      <strong>{item.name}</strong>
+                      {item.paths.slice(0, 3).map((path) => (
+                        <code key={`${item.name}-${path}`}>{path}</code>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {!!profile?.effective_profile.architecture_snapshot?.entrypoints?.length && (
+              <div>
+                <small>入口线索</small>
+                <div className="architecture-paths">
+                  {profile.effective_profile.architecture_snapshot.entrypoints.slice(0, 6).map((item) => (
+                    <code key={item.path}>{item.path}</code>
+                  ))}
+                </div>
+              </div>
+            )}
+            {!!profile?.effective_profile.architecture_snapshot?.dependency_usage?.length && (
+              <div>
+                <small>已定位的依赖使用</small>
+                <div className="architecture-usage-list">
+                  {profile.effective_profile.architecture_snapshot.dependency_usage.slice(0, 8).map((item) => (
+                    <div key={item.dependency}>
+                      <strong>{item.dependency}</strong>
+                      <span>{item.files.slice(0, 3).join(" · ")}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {!!profile?.effective_profile.architecture_snapshot?.static_edges?.length && (
+              <div>
+                <small>静态 import 线索</small>
+                <div className="architecture-edge-list">
+                  {profile.effective_profile.architecture_snapshot.static_edges.slice(0, 8).map((item) => (
+                    <div key={`${item.from}->${item.to}`}>
+                      <code>{item.from}</code>
+                      <span>→</span>
+                      <code>{item.to}</code>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <p className="quiet-note">
+              这里只展示有路径或 import 证据的静态结构；它不是运行时调用图，也不会把未采样文件当成“没有使用”。
+            </p>
+          </section>
+        )}
         <form
           className="preference-form"
           onSubmit={(e) => {

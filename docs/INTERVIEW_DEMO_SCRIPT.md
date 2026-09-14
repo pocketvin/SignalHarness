@@ -1,104 +1,221 @@
 # SignalHarness 面试展示讲稿
 
-这份讲稿用于把 SignalHarness 讲成一个“AI Agent / Agent Harness / 工程可解释性”项目，而不是普通聊天机器人、普通爬虫或静态 dashboard。
+这份讲稿对应当前 `/demo` 与 `environment` 主链。旧 five-Agent Harness、scoring、MCP 和 Eval 仍是工程积累与回归链路，但不再作为产品第一叙事。
+
+## 一句话
+
+**SignalHarness 是一个面向持续开发项目的 Project Environment Intelligence 系统：它先理解项目，再持续收集项目周围的工程变化，把大量来源整理成与项目有关的 Change、Direction 和 Brief，并保留完整证据与执行 Trace。**
 
 ## 30 秒版本
 
-SignalHarness 是一个 project-centric signal intelligence harness。它监听 GitHub、RSS、Web change 或 fixture 输入，把外部变化路由给五个 Agent：Supervisor 做分类和路由，ContextEvidence 做证据验证，ImpactAnalyst 判断项目影响，ActionPlanner 生成安全行动建议，LearningPolicy 产出 review-only 学习提案。
+真实项目每天会面对 GitHub Release/Issue、依赖版本、安全公告、Provider API、RSS、协议和网页变更。普通聚合器只会告诉我“发生了什么”，但我更想知道“哪些变化和这个项目有关、为什么、是否形成了方向、接下来要关注什么”。
 
-关键点是：LLM 不直接执行工具、不直接写文件、也不能决定最终分数。Python runtime 负责 schema validation、permission guard、tool allowlist、scoring、fallback、trace 和本地 dashboard/report。所以它不是聊天机器人，而是一个可审计的 Agent Harness。
+SignalHarness 会先读取 Project Profile 和 Watchlist，再采集并冻结一个时间窗口内的来源事实。每个 Change 先走 cache / deterministic FactCapsule / bounded shallow model 三路解析，只有真正需要语义理解的变化才调用弱模型。最后强模型读取紧凑的完整环境 corpus，形成 Brief、Direction 和 Featured；Python 再负责 source independence、schema、历史状态、缓存、失败降级和持久化。Web、CLI 和历史报告读取的是同一份业务状态。
 
 ## 3 分钟版本
 
-SignalHarness 解决的是一个真实工程问题：小团队每天会面对大量 GitHub issue/release、RSS、API 更新和生态变化，但真正影响项目的信号很少。普通爬虫只能收集信息，普通 dashboard 只能展示信息，普通 chatbot 又缺少可审计边界。SignalHarness 的目标是把“外部信息”变成“项目上下文里的可解释判断”。
+### 1. 为什么做
 
-输入层支持 GitHub、RSS、Web change 和 fixture。数据进入后会经过 source collection、normalization、deduplication、noise filter 和 clustering。然后进入五个 Agent 的 routed workflow：
+工程信息很多，但“新”不等于“对当前项目重要”。例如一个 OpenAI SDK Issue、Pydantic 版本、MCP 规范更新或者 GitHub 安全规则，只有结合项目当前依赖、Provider、协议和模块才能判断是否值得看。
 
-1. `SignalSupervisorAgent`：判断每条 signal 是否值得分析，以及需要哪些下游 Agent。
-2. `ContextEvidenceAgent`：请求只读工具，读取 Python runtime 返回的 tool observations，合成证据。
-3. `ImpactAnalystAgent`：结合项目 profile 判断 affected modules、semantic relevance、impact reasoning。
-4. `ActionPlannerAgent`：只提出 review / investigation / documentation 这类安全行动建议。
-5. `LearningPolicyAgent`：读取 memory infrastructure，产出 policy / skill / watchlist 的 review-only proposal。`mock-agent` 演示完整五 Agent；真实交互扫描会把 Learning 的 LLM reflection 后置到显式 calibration/learning，先把用户需要的 guarded decision 返回。
+所以 SignalHarness 的核心不是新闻摘要，而是：
 
-Python runtime 是安全边界：它负责 schema validation、permission guard、tool allowlist、scoring、fallback、trace、local dashboard 和 report。LLM 负责 classification、evidence synthesis、impact reasoning、action planning 和 learning proposal，但不拥有外部副作用。
-
-如果 fallback 出现，SignalHarness 会明确展示，而不是隐藏。因为这类系统真正重要的是 auditability：面试时我会强调 fallback 不是“失败要掩盖”，而是系统在模型不稳定时仍能给出可追踪、保守、安全的审计输出。Learning 也是 review-only，不会自动改配置，因为高风险配置变更必须有人审查。
-
-我现在会优先展示 regression evidence：`resume-v1` 有 40 个标签 case，当前 offline mock-agent contract gate 是 decision/category 40/40，priority precision/recall 都是 100%，FPR/FNR 都是 0%。第一版 baseline 只有 75% decision accuracy、28.57% priority recall，回归集真实暴露了 category 权重重复、mock context 漏接和否定语义误判，修复后才达到当前结果。这个数字只代表 SignalHarness 项目 contract，不包装成通用 LLM benchmark。
-
-## 5 分钟版本
-
-SignalHarness 可以从三个角度讲。
-
-第一，它是一个 Agent Harness。它不是开放式 ReAct loop，也不是让模型随便调用工具。它固定了五个 Agent 角色，并让 Python runtime 管住所有可验证边界：schemas、tools、permissions、scoring、fallback、trace、local outputs。这样设计的好处是面试官能看到每一步为什么发生、模型说了什么、工具执行了什么、哪些结果被 fallback 或 audit completion 接管。
-
-第二，它是 project-centric signal intelligence。输入不是用户聊天，而是外部变化源：GitHub repositories、RSS/Atom feeds、Web change fixtures、offline fixtures。项目 profile 里有 dependencies、critical modules、focus keywords、monitored ecosystem。系统会把“外部事件”转成“对当前项目的影响判断”，例如 provider API compatibility、tool calling behavior、schema validation、security/supply-chain、source health、evaluation signal。
-
-第三，它强调工程可解释性。Dashboard 不是为了好看堆 section，而是展示运行健康：Executive Summary、Signal Summary、No high-priority signals / Top observed signals、Source health、Tool health、Model/profile/limits、Agent trace/tools、Score breakdown、review-only learning。Trace 里能看到 tools_requested、tools_executed、permission checks、schema retry、fallback、source task health。
-
-这里有几个边界是我会主动讲的：
-
-- LLM 不能直接执行工具，只能提出 tool requests；Python tool executor 决定是否允许。
-- LLM 不能直接写文件；所有 outputs 都由 runtime/report writer 生成。
-- LLM 不能决定最终分数；最终 score 由 deterministic base、semantic relevance、evidence confidence 和 policy multiplier 组合。
-- Learning proposal 不能自动 apply；必须 review，且高风险或 replay gate failed 的 proposal 不会自动生效。
-
-工程证据可以分三层讲：第一层是 40-case regression gate，验证产品决策；第二层是 model-eval，验证 provider schema/retry/fallback/tool/latency/token/cost contract；第三层是 service/MCP/Docker，证明 Harness 能作为真实接口被外部 Agent 或服务调用。历史 live provider 结果仍可以作为 dated snapshot 展示，但不会把一次 live run 当成长期质量证明。
-
-
-## Golden Demo 网页入口
-
-```bash
-uv run signal-harness serve --host 127.0.0.1 --port 8001
+```text
+外部变化 + 当前项目上下文
+        ↓
+哪些真的相关？
+        ↓
+是否只是一个事件，还是多个独立变化形成了方向？
+        ↓
+为什么与项目有关？下一步看什么？
 ```
 
-打开 `http://127.0.0.1:8001/demo`。页面默认中文，右上角可切换 EN。面试默认选择“离线五 Agent 演示（推荐）”，它不需要 API Key，但仍走真实五 Agent orchestration、Tool Guard、Trace 与 SSE。真实 `agent` 模式只有在本地 Provider 配置完整时才可选；页面只展示 readiness，不暴露 API Key/Base URL。Model Profile 还会标记 capability freshness；已知下线 alias 会解析到当前 profile 并明确 warning，未知模型不会继承未经验证的 capability。
+### 2. 主数据流
+
+```text
+Project Catalog
+  ├─ Effective Project Profile
+  └─ Project Watchlist
+            ↓
+GitHub / PyPI / OSV / RSS / Web / Local Git
+            ↓
+Collect → Normalize → Frozen Window → Revision Dedup
+            ↓
+Project-scoped Change Ledger
+            ↓
+Change Revisions
+            ↓
+cache ───────────────┐
+deterministic capsule ├→ ChangeInsight
+shallow model batch ──┘
+            ↓
+External corpus + Project activity context
+            ↓
+Compact DirectionDigest
+            ↓
+Strong-model global synthesis
+            ↓
+Python source/entity independence + semantic guards
+            ↓
+Brief + Directions + Featured + All Changes
+            ↓
+SQLite / History
+            ↓
+CLI / REST / SSE / React
+```
+
+关键设计是 **LLM 负责难以规则化的语义压缩与综合，Python 负责可以验证的事实、约束、身份、持久化和失败边界。**
+
+### 3. 为什么不是每条都让大模型分析
+
+成本和稳定性都不划算。当前 ChangeInsight 使用三路：
+
+1. 命中相同项目上下文和策略的缓存就直接复用；
+2. FactCapsule 已经能确定项目关系的简单变化走 deterministic path；
+3. 只有语义缺口进入 bounded shallow batches。
+
+然后强模型只做一次高层 synthesis，而且读取的是压缩后的 DirectionDigest，不重新吞完整网页正文和全部证据。
+
+### 4. 为什么 Direction 不是模型说了算
+
+最近真实测试里，模型会把“OpenAI 新闻 + openai-python release”误当成两个独立来源，从而把一次厂商发布包装成趋势。
+
+现在 Python 会规范化：
+
+- `OpenAI News` / `openai` / `openai/openai-python` → 同一 entity family；
+- 同一 GitHub repo 的 Issue / Release → 同一 source channel；
+- 默认 Direction 需要多个独立 entity family；同一 family 只有满足更严格的多 Change、多 channel 条件才允许保留。
+
+所以单个重要发布仍可以是 **Featured Change**，但不会因为“重要”就被强行叫成 Direction。
+
+### 5. Trace 为什么可信
+
+扫描进度不是前端定时器。后端 `TraceRecorder` 在真实 workflow 执行时产生 `trace.step`，同一个模型调用完成后按相同 index 发 `trace.step.updated`。React 只消费 SSE 并展示白名单字段：阶段、Agent/模型、输入输出数、耗时、Token、缓存与 fallback。
+
+因此面试时可以直接证明：页面上的执行过程与后端同一条数据链连接，而不是为了 Demo 写的假动画。
 
 ## 现场 Demo 推荐顺序
 
-先启动：
+启动：
 
 ```bash
-uv run signal-harness serve --host 127.0.0.1 --port 8000
+cd /Users/yu0/Workspace/10-Projects/SignalHarness
+uv run signal-harness serve --host 127.0.0.1 --port 8001
 ```
 
-浏览器打开 `http://127.0.0.1:8000/demo`。
+打开：
 
-1. 先指顶部 40-case regression evidence 和 5 个 read-only MCP tools，说明这是当前 committed/CI evidence，不是通用 LLM benchmark。
-2. 点击 **Run Golden Demo**。`POST /stream-runs` 已立即启动真实 workflow；SSE 只是订阅同一运行中的 Trace，因此五 Agent、Tool Guard、Trace 的变化来自真实 runtime event，不是前端定时器。
-3. 点击 `ContextEvidenceAgent`，展示 schema valid、requested/executed tools、permission checks、fallback/retry。
-4. 看右侧 Final decisions，解释 LLM 提供 semantics，但 Python owns the final score/decision。
-5. 下拉到 Live trace ledger，说明同一份 TraceRecorder 同时写审计 JSON 和推 SSE；断线后 workflow 继续，浏览器可用 `Last-Event-ID` 补事件。
-6. 最后说明 `/mcp`、同步 REST 和 Docker 都复用同一 Workflow；queued/running 输入与状态支持本地有界恢复，但 SSE replay 仍是 in-process observability layer，不冒充 Redis/Celery 分布式 durable queue。
+```text
+http://127.0.0.1:8001/demo
+```
 
-如果时间只有 2-3 分钟，只展示 `/demo` 的一次 mock-agent run + Evidence Tool Guard + Final decisions。终端 regression command 作为追问时的第二证据。
+### 2–3 分钟稳定版
 
-## 面试官可能追问
+1. **选择 `SignalHarness` 项目**。先指出左侧 Project Context：不同项目有独立 Profile、Watchlist 和 Ledger，不是一个全局关键词列表。
+2. **直接展示已保存报告**，不现场依赖 Provider。当前 2026-09-11 保存快照来自真实来源：1533 observations → 307 Changes，其中 228 relevant，3 Featured，5 Directions。这个数字是一次 dated product snapshot，不是 benchmark。
+3. **展开一个 Direction**。先讲 explanation / project connection / watch next，再点击“查看支持与反向证据”，说明 Direction 能回到具体 Change，而不是不可审计的总结。
+4. **看 Featured**。说明“单个很重要的事件”和“跨变化形成的 Direction”被刻意分开。
+5. **切到全部变化**。展示 228 条相关变化仍然在，不是只把 Top-K 喂给模型后把其他事实丢掉。
+6. **最后看技术审计 / Trace**。说明真实扫描时这里通过 SSE 实时出现；每个模型调用先 running、再原 index update，能看到 latency/token/cache/fallback，但不展示隐藏 chain-of-thought。
+7. **终端补一个无模型读取**：
 
-### 为什么要做这个项目？
+```bash
+uv run signal-harness environment-report --project signalharness
+```
 
-因为真实团队的信息来源非常碎：GitHub issue/release、provider API update、RSS、security blog、framework changelog 都可能影响项目。人工看很累，纯爬虫没有项目判断，纯 LLM 又难以审计。SignalHarness 把这些合成一个项目上下文驱动的 Agent Harness。
+强调 CLI 与 Web 读的是同一个持久化 EnvironmentReport。
 
-### 和普通 RAG / 爬虫 / dashboard 有什么区别？
+### 如果面试官要求现场跑
 
-爬虫只收集，dashboard 只展示，RAG 通常回答用户问题。SignalHarness 是 batch-oriented Agent Harness：它有 routing、tool-use loop、impact assessment、guarded scoring、trace、fallback 和 review-only learning。重点不是“问答”，而是“可解释地把外部变化转成项目决策信号”。
+可以点击“检查最新变化”，但要提前说明真实来源和强模型 synthesis 可能需要分钟级时间；这是当前 MVP 的性能债，不应该拿现场网络和 Provider 状态赌演示成功。
 
-### 为什么不用 LangGraph 直接做？
+更稳的表达是：
 
-SignalHarness 借鉴了 supervisor routing、handoff 可解释性和 trace 思想，但这个项目更想展示底层 harness 能力：Python runtime 怎么掌控 schema、tools、permissions、scoring 和 local outputs。引入 LangGraph 会让面试焦点变成框架使用，而不是我对 Agent Harness 边界的设计。
+> 我保留实时入口证明链路可以跑，但面试主 Demo 默认读取最近一次真实完整 Scan，因为环境情报产品本来就应该把历史报告持久化，而不是刷新页面就重新烧模型。
 
-### fallback 是不是说明模型不稳定？
+## 当前保存 Demo 的真实状态
 
-fallback 说明真实模型路径可能遇到 schema、timeout、provider 或 coverage 问题。成熟系统不应该假装这些不会发生，而应该把 fallback 做成 guardrail，并在 trace/dashboard 明确展示。v4 live run 的 fallback_count=0，但如果未来出现 fallback，也应该被看见。
+2026-09-11 的正式 `signalharness` 项目保存报告：
 
-### 为什么不自动学习？
+- 1533 observations
+- 307 Changes
+- 279 external environment Changes
+- 28 project activity Changes
+- 228 relevant
+- 3 Featured
+- 5 Directions
+- 0 automatic Deep Dive
+- report status: complete
+- coverage: unknown
 
-因为 learning proposal 可能改变 scoring、watchlist 或 policy。自动应用会制造隐性反馈回路，尤其在高风险类别上不安全。SignalHarness 把 Memory 作为 infrastructure，LearningPolicyAgent 只能提出 review-only proposal，最终应用必须显式批准。
+另外，2026-09-11 新做过一轮独立 48h fresh quality slice：141 Changes。该轮暴露并修复了 shallow copy、Kimi K3 provider contract、Direction source-independence 等真实问题。它用于工程验收，不需要为了面试再重复调用 API。
 
-### 这个项目如何迁移到别的项目？
+## 和常见项目相比怎么讲
 
-主要替换 `configs/project_profile.yaml`、`configs/watchlist.yaml` 和 `configs/signal_policy.yaml`。Agent workflow、tool guard、trace、dashboard、model profiles 可以复用。也可以通过 fixture 先离线评估，再启用 live watchlist。
+### 和新闻聚合 / RSS Reader
 
-### 线上化还缺什么？
+它们擅长收集和分类；SignalHarness 多了一层 **project-relative interpretation**：同一个变化在不同项目里可以有不同相关性，显式 Preference 也会进入 effective Profile。
 
-缺生产级 auth、multi-tenant state、任务调度、长期存储、告警审批流、成本预算、provider quota 管控、可观测性平台集成和更丰富 eval fixtures。但这些都可以在现有 harness 边界上逐步加，不需要推翻核心架构。
+### 和普通 RAG
+
+RAG 通常是“用户提问 → 检索 → 回答”。SignalHarness 是周期性的 **environment scan**：先冻结一个完整时间窗口，把 Change 和 evidence 持久化，再形成 Direction，并支持历史连续观察。
+
+### 和 LangGraph / CrewAI
+
+这些是通用 Agent orchestration framework。SignalHarness 当前的特色不是“自己重写一个更大的框架”，而是展示我对生产边界的理解：
+
+- source collection 与模型推理解耦；
+- Python owns frozen window / identity / permission / persistence；
+- cheap shallow → expensive synthesis 的分层成本结构；
+- evidence-backed Direction；
+- real SSE Trace；
+- degraded report / provider fallback；
+- CLI/Web 共用一条 workflow。
+
+旧 five-Agent Harness 仍保留，说明项目曾深入做过 routing、tool guard、scoring、repair、eval；但当前产品主线已经收敛，不为了“Agent 数量多”继续复杂化。
+
+## 项目特色，面试时重点讲 4 个
+
+1. **Project-aware，不是 generic feed**：Profile/依赖/Provider/协议/Preference 真正进入 ChangeInsight 和 synthesis。
+2. **Full-corpus first**：所有 Change 先持久化并浅解释，再形成 Direction；Featured 只改变阅读顺序，不决定事实是否存在。
+3. **Direction 有确定性独立性约束**：防止单厂商/单仓库自己制造“趋势”。
+4. **真实可观察链路**：TraceRecorder → SSE → React；CLI/REST/Web 读同一持久状态，错误可以 degraded 而不是假装成功。
+
+## 当前已知债务，要主动讲清楚
+
+这些不是现在要继续重构的理由，但面试官问“如果上线还要做什么”时可以回答：
+
+- 141 Change 的强模型 synthesis 目前约 140–180 秒，下一阶段会压缩输入、优化 reasoning effort / provider policy，必要时再评估 hierarchical synthesis；
+- 一次采集可能拿到很多最终落在窗口外的 raw observations，source-side checkpoint / ETag / `since` 仍可优化；
+- coverage 对部分来源只能标 `unknown`，不会冒充完整互联网覆盖；
+- Direction/Brief 目前有真实样本审计，但没有足够人工标注形成正式 quality benchmark；
+- 当前是单机 SQLite + 本地 StreamRunManager，不冒充 Redis/Celery/Temporal 级分布式任务系统；
+- 生产级 auth、multi-tenant、quota/budget 和外部 notification delivery 仍属于下一阶段。
+
+这些债务不推翻当前架构：Sources、Project State、Change Ledger、Model Layer、Persistence 和 Interface 已经分层，可以逐步替换。
+
+## 常见追问
+
+### 为什么不用一个强模型直接读全部网页？
+
+因为成本、上下文体积、可重复性和证据审计都会变差。来源事实先由 Python 冻结和结构化，大部分 Change 用 cache/deterministic/shallow 处理，强模型只看 compact corpus 做真正需要全局视角的 synthesis。
+
+### 为什么 Direction 还需要 Python guard？
+
+模型很擅长归纳，但不适合成为“来源是否独立”的最终裁判。同一厂商博客、SDK repo 和 Issue 看起来是三条链接，本质可能是一个主体。身份归一和最小独立证据要求属于确定性约束。
+
+### 为什么不用向量数据库？
+
+当前 MVP 的核心规模和访问模式由 frozen window + SQLite Change Ledger 足够覆盖。向量检索只有在长历史跨窗口检索成为真实瓶颈后再引入，否则只是额外复杂度。
+
+### 为什么不继续五 Agent？
+
+项目早期用多 Agent 拆责任来验证 Tool Guard、schema、fallback 和 eval 边界。产品收敛后发现大量步骤可以由 deterministic runtime 和两层模型更简单地完成，所以当前主链故意减少 orchestration，而不是为了展示 Agent 概念保留复杂度。
+
+### 项目最难的地方是什么？
+
+不是接一个 LLM API，而是定义哪些东西应该由模型决定、哪些必须由 runtime 决定。例如 Change identity、时间窗口、source independence、权限、缓存和历史状态都不能靠 Prompt 保证；而“这个变化为什么和项目有关”“多个变化是否共同形成一个方向”更适合模型。SignalHarness 的主要工程价值就在这条边界。
+
+## 最后一句
+
+> 我没有把 SignalHarness 做成一个追求 Agent 数量的 Demo，而是把它收敛成一个真实可跑的项目环境情报闭环：来源事实可追溯、项目上下文真的参与判断、模型只做需要语义理解的部分、结果能持久化、前端能实时看到真实执行过程，失败也有明确降级边界。

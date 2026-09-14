@@ -1,8 +1,9 @@
 id: signalharness
 name: SignalHarness
 description: >-
-  Multi-Agent Harness / Eval / Tooling Platform. Monitor runtime, provider,
-  dependency, MCP, evaluation, observability, and checkpoint-related changes.
+  Project Environment Intelligence for software engineering changes. Understand the
+  project first, then monitor external changes, synthesize directions and radar, and
+  support evidence-backed deep dives plus review-first learning.
 project_profile: ../project_profile.yaml
 watchlist: ../watchlist.yaml
 default: true

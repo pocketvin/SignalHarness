@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from signal_harness.agent_integration.mode import RunMode
+from signal_harness.mcp_server import MCP_TOOL_NAMES, MCP_WRITE_TOOL_NAMES
 from signal_harness.runtime.tracing import TraceRecorder
 from signal_harness.service import create_app
 from signal_harness.service_streaming import StreamEvent, StreamRunManager
@@ -92,7 +93,9 @@ def test_demo_page_and_metadata(
         assert "/intelligence/projects/" in javascript.text
         assert "/projects/connect/github" in javascript.text
         assert "/preferences/natural-language" in javascript.text
-        assert "/outcomes" in javascript.text
+        assert "/feedback" in javascript.text
+        assert "/outcome" in javascript.text
+        assert "/outcomes" not in javascript.text
         assert "product.progress" in javascript.text
         assert "deep.updated" in javascript.text
         assert "mock-agent" not in javascript.text
@@ -108,9 +111,12 @@ def test_demo_page_and_metadata(
         assert payload["regression"]["suite"] == "resume-v1"
         assert payload["regression"]["cases"] == 40
         assert payload["regression"]["passed"] is True
-        assert payload["mcp"]["tool_count"] == 10
-        assert payload["mcp"]["read_only_tool_count"] == 9
-        assert payload["mcp"]["write_tool_count"] == 1
+        assert payload["mcp"]["tool_count"] == len(MCP_TOOL_NAMES)
+        assert payload["mcp"]["read_only_tool_count"] == (
+            len(MCP_TOOL_NAMES) - len(MCP_WRITE_TOOL_NAMES)
+        )
+        assert payload["mcp"]["write_tool_count"] == len(MCP_WRITE_TOOL_NAMES)
+        assert payload["mcp"]["tools"] == list(MCP_TOOL_NAMES)
         assert payload["streaming"] == {
             "transport": "sse",
             "durability": "persistent-run-retry",

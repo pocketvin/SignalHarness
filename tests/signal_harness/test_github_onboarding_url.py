@@ -29,7 +29,9 @@ def test_github_url_onboarding_reads_safe_manifests_and_marks_project_owned() ->
             "dependencies": {"openai": "^1.0.0", "react": "^19.0.0"},
         }
     ).encode()
+    source = b'import OpenAI from "openai";\nexport function main() { return new OpenAI(); }\n'
     blob = base64.b64encode(package).decode()
+    source_blob = base64.b64encode(source).decode()
 
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -64,6 +66,8 @@ def test_github_url_onboarding_reads_safe_manifests_and_marks_project_owned() ->
             )
         if path == "/repos/Acme/Demo/git/blobs/blob-package":
             return httpx.Response(200, json={"encoding": "base64", "content": blob})
+        if path == "/repos/Acme/Demo/git/blobs/code":
+            return httpx.Response(200, json={"encoding": "base64", "content": source_blob})
         raise AssertionError(f"unexpected request: {request.url}")
 
     async def run():
@@ -88,6 +92,14 @@ def test_github_url_onboarding_reads_safe_manifests_and_marks_project_owned() ->
     assert owned["project_owned"] is True
     assert {"commits", "pull_requests", "releases"}.issubset(set(owned["events"]))
     assert draft.evidence_files == ["package.json"]
+    architecture = draft.project_profile["architecture_snapshot"]
+    assert architecture["coverage"] == "source_sampled"
+    assert architecture["source_files_sampled"] == 1
+    assert architecture["entrypoints"] == [{"path": "src/index.ts", "reason": "入口命名"}]
+    openai_usage = next(
+        item for item in architecture["dependency_usage"] if item["dependency"] == "openai"
+    )
+    assert openai_usage["references"][0]["path"] == "src/index.ts"
 
 
 def test_github_onboarding_prefers_root_manifest_over_nested_examples() -> None:
@@ -164,3 +176,37 @@ def test_github_onboarding_prefers_root_manifest_over_nested_examples() -> None:
     assert draft.project_profile["purpose"] == "Root project purpose"
     assert "openai" in draft.project_profile["dependencies"]
     assert "react" not in draft.project_profile["dependencies"]
+
+
+def test_github_metadata_purpose_recomputes_project_conditioned_discovery_profile() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/repos/Acme/Game":
+            return httpx.Response(
+                200,
+                json={
+                    "full_name": "Acme/Game",
+                    "name": "Game",
+                    "default_branch": "main",
+                    "description": "Magic Kitchen WeChat mini game",
+                    "html_url": "https://github.com/Acme/Game",
+                    "private": False,
+                },
+            )
+        if path == "/repos/Acme/Game/git/trees/main":
+            return httpx.Response(200, json={"truncated": False, "tree": []})
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    async def run():
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+            base_url="https://api.github.com",
+        ) as client:
+            return await draft_github_project("https://github.com/Acme/Game", client=client)
+
+    draft = asyncio.run(run())
+    discovery = draft.project_profile["discovery_profile"]
+    assert draft.project_profile["purpose"] == "Magic Kitchen WeChat mini game"
+    assert discovery["project_domain"] == "小游戏 / 互动产品"
+    text = " ".join(discovery["discovery_queries"]).casefold()
+    assert "agent" not in text and "mcp" not in text and "llm" not in text

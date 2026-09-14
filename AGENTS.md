@@ -10,9 +10,10 @@ baseline until an evidence-based Analyzer/Harness migration is implemented and v
 
 Key directories:
 
+- `environment_application.py`: authoritative application layer for the current Direction-first product; REST/CLI/MCP adapters delegate Project/Profile/Architecture/Report/Change/feedback/outcome semantics here
 - `intelligence/`: full-corpus interpretation, ONE global synthesis, lazy clicked Deep Dive
 - `persistence/intelligence.py`: additive versioned intelligence in the existing Ledger
-- `service_intelligence.py`: model-free product request contract
+- `service_intelligence.py`: thin REST adapter over `EnvironmentApplication`; it must not reconstruct report ownership, Change queries, profile revisions, or calibration semantics
 - `providers/task_policy.py` + `configs/intelligence_policy.yaml`: backend model routing
 - `agent_team/`: legacy domain LLM Agents for regression/compatibility
 - `agent_integration/`: prompts, schemas, context, runner, trace
@@ -20,7 +21,7 @@ Key directories:
 - `memory/`: Project, Signal, Feedback, and Policy infrastructure
 - `signal/`: deterministic normalization, noise, clustering, scoring
 - `runtime/`: workflow, cache, permissions, tools, trace
-- `frontend/src/environment/`: primary direction-first product source for `/demo`;
+- `frontend/src/environment/`: primary direction-first product source for `/demo`; `Learning.tsx` renders the durable review-first calibration state and must never fabricate a candidate, replay gain, promotion readiness, or applied revision
 - `frontend/`: React + TypeScript source; Vite compiles into `src/signal_harness/ui/static/demo.*`
 - `ui/static/`: package-owned compiled Demo assets plus the separate Narrative review static surface
 
@@ -42,7 +43,8 @@ npm --prefix frontend run build
 
 Rules:
 
-- Every Change must receive a persisted ChangeInsight, but that Insight may come from validated cache, deterministic FactCapsule routing, or the semantic ChangeInterpreter. Only semantic misses enter bounded batches. ONE global model call still receives every compact external DirectionDigest; never use Featured or Top-K as the global corpus.
+- Every Change must receive a persisted ChangeInsight, but that Insight may come from validated cache, deterministic FactCapsule routing, or the semantic ChangeInterpreter. Only semantic misses enter bounded batches. ONE global synthesis still sees every compact external DirectionDigest; never use Featured or Top-K as the global corpus. If deterministic validation rejects only a local prose/temporal constraint, a second **localized repair** call may receive the invalid structured result plus referenced Change digests instead of replaying the whole corpus.
+- Routine community GitHub Issues may bypass the weak model only when project relation is already deterministic and the issue lacks maintainer involvement, guarded severity labels, high discussion volume, or severe-failure markers. They remain frozen in the Ledger and in the global synthesis corpus with explicitly reported/discussed posture; routing must never turn an Issue into a confirmed defect.
 - Project-owned Changes are still shallowly interpreted but may only inform project-connection context; they must never support an external EnvironmentDirection/Brief/Featured item.
 - Shallow semantic batches use deterministic diversity-aware planning and bounded concurrency (current default 3). Batch failures may split into smaller batches, but concurrency remains bounded and failed semantic items stay visibly unavailable.
 - Shallow Project Projection is cost-sensitive: the provider wire uses compact `ShallowModelBatch` fields and one short project-basis reference. Exact/direct or explicitly monitored ecosystem relations discovered by FactCapsule are Python-owned; model relation/basis mistakes are resolved per item and must not trigger a whole-batch repair. Full `ChangeInsight` remains the stable cache/product contract.
@@ -66,6 +68,8 @@ Rules:
 - Prompt, schema, route, or tool-use changes require matching tests and docs.
 - `/demo` UI changes must be made in `frontend/src/`, never by hand-editing minified `ui/static/demo.js` or generated `demo.css`. Run the Vite build to refresh the package-owned compiled assets.
 - Keep FastAPI/SSE/Product contracts independent from React; the frontend consumes existing REST/SSE APIs rather than duplicating scoring, routing, scheduling, or persistence logic.
+- Current Direction-first REST, `environment-*` CLI and current MCP tools must delegate shared business semantics to `EnvironmentApplication`. Legacy `scan/report/changes`, `ProductIntelligenceService`, and compatibility MCP tools may remain for regression/older consumers but must not become a second source of current product truth.
+- Current Change feedback/outcomes attach to frozen `scan_id + change_id` and feed durable calibration. Learning remains review-first: replay/promotion/explicit apply/rollback stay outside the Scan hot path; no adapter may auto-apply policy.
 - Public CI must stay SignalHarness-focused and offline: pytest
   `tests/signal_harness`, Ruff, mypy, and `uv build` only. It must not require
   `LLM_API_KEY`, run `--mode agent`, or call live providers. Real API smoke

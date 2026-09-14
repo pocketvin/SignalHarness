@@ -21,7 +21,10 @@ from signal_harness.intelligence.contracts import (
 )
 from signal_harness.intelligence.batch_planner import BalancedBatchPlanner
 from signal_harness.intelligence.corpus import finalize_direction, identity, project_change
-from signal_harness.intelligence.direction_digest import organize_direction_corpus
+from signal_harness.intelligence.direction_digest import (
+    organize_direction_corpus,
+    organize_project_activity_context,
+)
 from signal_harness.intelligence.fact_capsule import (
     build_fact_capsule,
     capsule_semantic_payload,
@@ -39,10 +42,68 @@ from signal_harness.intelligence.semantic_router import (
     route_capsule,
     tiny_fast_path_candidate,
 )
-from signal_harness.intelligence.quality import validate_synthesis_semantics
+from signal_harness.intelligence.quality import (
+    prune_source_diversity_candidates,
+    validate_synthesis_semantics,
+)
 from signal_harness.persistence.intelligence import IntelligenceRepository, utc_now
 
 ProgressListener = Callable[[Progress], None]
+
+
+_LOCAL_SYNTHESIS_REPAIR_CODES = {
+    "unverified_trend_velocity",
+    "temporal_same_day_mismatch",
+    "temporal_window_mismatch",
+    "radar_new_solution_trend_claim",
+    "discovery_adoption_claim",
+    "brief_trend_claim",
+    "internal_product_copy",
+    "incomplete_product_copy",
+    "product_copy_style",
+    "product_language",
+}
+
+
+def synthesis_local_repair_context(
+    output: SynthesisOutput,
+    validation_code: str,
+    *,
+    corpus: dict[str, Any],
+    window: dict[str, Any],
+    project: dict[str, Any],
+    coverage_status: str,
+) -> dict[str, Any] | None:
+    """Return the minimum evidence needed to repair prose-only synthesis failures.
+
+    Structural failures such as source diversity or invalid references deliberately return None
+    so the caller falls back to full-corpus repair. Local repair may edit the already-produced
+    result, but it may not invent new conclusions or support IDs.
+    """
+
+    if validation_code not in _LOCAL_SYNTHESIS_REPAIR_CODES:
+        return None
+    referenced: set[str] = set(output.featured_change_ids)
+    for claim in output.brief:
+        referenced.update(claim.supporting_change_ids)
+    for direction in output.directions:
+        referenced.update(direction.supporting_change_ids)
+        referenced.update(direction.contradicting_change_ids)
+    for radar in output.radar:
+        referenced.update(radar.supporting_change_ids)
+    rows = [
+        row
+        for row in corpus.get("items", [])
+        if isinstance(row, dict) and str(row.get("id") or "") in referenced
+    ]
+    return {
+        "referenced_changes": rows,
+        "corpus_legend": corpus.get("legend", {}),
+        "window": window,
+        "coverage_status": coverage_status,
+        "project": project,
+        "allowed_change_ids": sorted(referenced),
+    }
 
 
 def project_context(profile: dict[str, Any]) -> dict[str, Any]:
@@ -74,6 +135,36 @@ def project_context(profile: dict[str, Any]) -> dict[str, Any]:
         for item in profile.get("importance_preferences", [])
         if item.get("scope_key")
     ]
+    discovery = profile.get("discovery_profile", {})
+    if not isinstance(discovery, dict):
+        discovery = {}
+    architecture = profile.get("architecture_snapshot", {})
+    if not isinstance(architecture, dict):
+        architecture = {}
+    architecture_context = {
+        "覆盖": architecture.get("coverage"),
+        "主要子系统": [
+            {"名称": item.get("name"), "证据路径": list(item.get("paths", []) or [])[:3]}
+            for item in list(architecture.get("subsystems", []) or [])[:8]
+            if isinstance(item, dict)
+        ],
+        "入口线索": [
+            item.get("path")
+            for item in list(architecture.get("entrypoints", []) or [])[:8]
+            if isinstance(item, dict) and item.get("path")
+        ],
+        "依赖使用位置": [
+            {"依赖": item.get("dependency"), "文件": list(item.get("files", []) or [])[:4]}
+            for item in list(architecture.get("dependency_usage", []) or [])[:12]
+            if isinstance(item, dict)
+        ],
+        "静态结构线索": [
+            {"从": item.get("from"), "到": item.get("to")}
+            for item in list(architecture.get("static_edges", []) or [])[:10]
+            if isinstance(item, dict) and item.get("from") and item.get("to")
+        ],
+        "边界": list(architecture.get("limitations", []) or [])[:2],
+    }
     return {
         "项目名称": profile.get("project_name"),
         "用途": profile.get("purpose") or profile.get("goal"),
@@ -84,6 +175,10 @@ def project_context(profile: dict[str, Any]) -> dict[str, Any]:
         "协议": profile.get("protocols", []),
         "重点模块": profile.get("critical_modules", []),
         "关注生态": profile.get("monitored_ecosystem", []),
+        "项目领域": discovery.get("project_domain"),
+        "问题空间": discovery.get("problem_spaces", []),
+        "相邻方案类别": discovery.get("solution_categories", []),
+        "源码结构证据": architecture_context,
         "用户明确关注": preferences,
     }
 
@@ -138,12 +233,18 @@ class EnvironmentEngine:
         external_corpus = organize_direction_corpus(
             external_changes, fact_chars=self.caller.policy.direction_fact_chars
         )
-        activity_corpus = organize_direction_corpus(
-            project_activity, fact_chars=self.caller.policy.direction_fact_chars
+        activity_corpus = organize_project_activity_context(
+            project_activity,
+            max_items=self.caller.policy.project_activity_context_max_items,
+            fact_chars=min(64, self.caller.policy.direction_fact_chars),
         )
+        discovered_changes = [
+            item for item in external_changes if item.discovery_origin == "discovered"
+        ]
+        model_project_context = project_context(profile)
         payload = {
             "window": window,
-            "project": project_context(profile),
+            "project": model_project_context,
             "coverage_status": coverage_status,
             "sources": sources,
             "corpus_legend": external_corpus["legend"],
@@ -158,7 +259,9 @@ class EnvironmentEngine:
             else None,
             "manifest": {
                 "external_count": len(external_changes),
+                "discovered_count": len(discovered_changes),
                 "project_activity_count": len(project_activity),
+                "project_activity_context_count": len(activity_corpus["items"]),
             },
         }
         by_id = {item.change_id: item for item in changes}
@@ -185,6 +288,7 @@ class EnvironmentEngine:
         directions = []
         synthesis = SynthesisOutput()
         synthesis_ok = not external_changes
+        source_diversity_pruned = 0
         if external_changes:
             try:
                 encoded_size = len(json.dumps(payload, ensure_ascii=False).encode())
@@ -192,6 +296,11 @@ class EnvironmentEngine:
                     raise ValueError("global_context_budget_exceeded")
 
                 def validate(output: SynthesisOutput) -> None:
+                    nonlocal source_diversity_pruned
+                    filtered, source_diversity_pruned = prune_source_diversity_candidates(
+                        output, by_id
+                    )
+                    output.directions = filtered.directions
                     validate_synthesis_semantics(output, by_id)
                     seen: set[str] = set()
                     for candidate in output.directions:
@@ -209,8 +318,20 @@ class EnvironmentEngine:
                             raise ValueError("Duplicate direction identities")
                         seen.add(direction.direction_id)
 
+                def local_repair(
+                    output: SynthesisOutput, validation_code: str
+                ) -> dict[str, Any] | None:
+                    return synthesis_local_repair_context(
+                        output,
+                        validation_code,
+                        corpus=external_corpus,
+                        window=window,
+                        project=model_project_context,
+                        coverage_status=coverage_status,
+                    )
+
                 synthesis = await self.caller.complete(
-                    "synthesis", payload, SynthesisOutput, validate
+                    "synthesis", payload, SynthesisOutput, validate, local_repair=local_repair
                 )
                 directions = [
                     finalize_direction(
@@ -263,11 +384,13 @@ class EnvironmentEngine:
                 "relevant": sum(c.relevant for c in changes),
                 "featured": len(featured),
                 "directions": len(directions),
+                "radar": len(synthesis.radar),
                 "cache_hits": insight_stats["cache_hits"],
                 "automatic_deep_dives": 0,
             },
             brief=synthesis.brief,
             directions=directions,
+            radar=synthesis.radar,
             risks=[],
             opportunities=[],
             featured=featured,
@@ -285,6 +408,10 @@ class EnvironmentEngine:
                 "shallow_policy": self.caller.policy.fingerprint("shallow"),
                 "synthesis_policy": self.caller.policy.fingerprint("synthesis"),
                 "insight_routing": insight_stats,
+                "synthesis_source_diversity_pruned": source_diversity_pruned,
+                "project_activity_context_count": len(activity_corpus["items"]),
+                "project_activity_total_count": len(project_activity),
+                "discovered_external_count": len(discovered_changes),
                 "direction_digest_bytes": direction_digest_bytes,
                 "source_evidence_excerpt_bytes": evidence_excerpt_bytes,
                 "full_product_change_bytes": full_product_change_bytes,
@@ -329,6 +456,7 @@ class EnvironmentEngine:
             "cache_hits": 0,
             "legacy_cache_hits": 0,
             "deterministic": 0,
+            "routine_issue_deterministic": 0,
             "semantic": 0,
             "unavailable": 0,
             "semantic_batch_attempts": 0,
@@ -375,6 +503,8 @@ class EnvironmentEngine:
                 products[digest.change_id] = item
                 self.repository.save_insight(scan_id, item)
                 stats["deterministic"] += 1
+                if capsule.interpretation_hint == "routine_issue":
+                    stats["routine_issue_deterministic"] += 1
             else:
                 semantic_items.append(SemanticWorkItem(digest=digest, capsule=capsule))
 

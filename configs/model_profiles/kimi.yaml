@@ -7,7 +7,8 @@ supports_system_prompt: true
 max_input_tokens: 1048576
 max_output_tokens: 8192
 output_token_parameter: max_completion_tokens
-recommended_temperature: 0.0
+recommended_temperature: 1.0
+reasoning_effort: high
 schema_strategy: prompt_json_retry
 tool_strategy: controlled_tool_request
 checked_at: 2026-09-11

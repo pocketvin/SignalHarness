@@ -13,6 +13,7 @@ from mcp.server import MCPServer
 from mcp.types import ToolAnnotations
 
 from signal_harness.agent_integration.mode import RunMode
+from signal_harness.environment_application import EnvironmentApplication
 from signal_harness.memory import FeedbackMemory, ProjectMemory, SignalMemory
 from signal_harness.persistence import ChangeLedger
 from signal_harness.product_intelligence import ProductIntelligenceService
@@ -29,10 +30,25 @@ from signal_harness.projects.state import project_state_dir
 from signal_harness.runtime.permissions import SignalPermissionGuard
 from signal_harness.signal.policy import load_signal_policy
 
-MCP_WRITE_TOOL_NAMES = ("signalharness_start_scan",)
+MCP_WRITE_TOOL_NAMES = (
+    "signalharness_start_scan",
+    "signalharness_start_environment_scan",
+    "signalharness_record_change_feedback",
+    "signalharness_record_change_outcome",
+)
 
 MCP_TOOL_NAMES = (
     "signalharness_get_project_context",
+    "signalharness_get_environment_report",
+    "signalharness_list_environment_changes",
+    "signalharness_get_environment_change",
+    "signalharness_get_project_architecture",
+    "signalharness_get_project_activity",
+    "signalharness_get_calibration_status",
+    "signalharness_start_environment_scan",
+    "signalharness_record_change_feedback",
+    "signalharness_record_change_outcome",
+    # Compatibility surfaces retained for legacy Scan/Harness consumers.
     "signalharness_search_signal_history",
     "signalharness_get_latest_assessments",
     "signalharness_get_run_trace",
@@ -56,6 +72,12 @@ _START_SCAN = ToolAnnotations(
     destructive_hint=False,
     idempotent_hint=False,
     open_world_hint=True,
+)
+_PRODUCT_WRITE = ToolAnnotations(
+    read_only_hint=False,
+    destructive_hint=False,
+    idempotent_hint=False,
+    open_world_hint=False,
 )
 
 
@@ -130,6 +152,7 @@ class MCPRuntime:
         *,
         paths: MCPPaths,
         stream_manager: StreamRunManager | None = None,
+        environment_application: EnvironmentApplication | None = None,
     ) -> None:
         self.paths = paths
         self.streams = stream_manager or StreamRunManager(
@@ -137,6 +160,13 @@ class MCPRuntime:
             config_dir=paths.config_dir,
             output_dir=paths.output_dir,
             state_dir=paths.state_dir,
+        )
+        self.environment = environment_application or EnvironmentApplication(
+            cwd=paths.cwd,
+            config_dir=paths.config_dir,
+            output_dir=paths.output_dir,
+            state_dir=paths.state_dir,
+            streams=self.streams,
         )
         self._recovered = stream_manager is not None
         self._recovery_lock: asyncio.Lock | None = None
@@ -319,6 +349,7 @@ def build_mcp_server(
     output_dir: str | Path = "outputs",
     state_dir: str | Path = ".signal-harness",
     stream_manager: StreamRunManager | None = None,
+    environment_application: EnvironmentApplication | None = None,
 ) -> MCPServer[None]:
     """Build the MCP server without starting a transport."""
 
@@ -328,18 +359,26 @@ def build_mcp_server(
         output_dir=output_dir,
         state_dir=state_dir,
     )
-    runtime = MCPRuntime(paths=paths, stream_manager=stream_manager)
+    runtime = MCPRuntime(
+        paths=paths,
+        stream_manager=stream_manager,
+        environment_application=environment_application,
+    )
     mcp: MCPServer[None] = MCPServer(
         "SignalHarness",
         description=(
-            "Thin Project Environment Intelligence adapter: read project context, "
-            "start persistent scans, inspect status, and consume the shared product projection."
+            "Project Environment Intelligence adapter over the shared application layer. "
+            "Current tools expose Profile/Architecture/Report/Change/learning semantics; "
+            "legacy Scan/Harness tools remain compatibility-only."
         ),
     )
 
     @mcp.tool(
         name="signalharness_get_project_context",
-        description="Return stable project profile, watchlist, and active policy metadata.",
+        description=(
+            "Return the effective Project Profile, Architecture Snapshot, watchlist and policy "
+            "metadata used by the current environment product."
+        ),
         annotations=_READ_ONLY,
         structured_output=True,
     )
@@ -347,6 +386,7 @@ def build_mcp_server(
         paths.guard("read_project_context")
         selected_id = project_id or default_project_id(paths.config_dir)
         option = project_option(selected_id, paths.config_dir)
+        snapshot = runtime.environment.profile_snapshot(selected_id)
         project = ProjectMemory(
             option.project_profile_path,
             option.watchlist_path,
@@ -355,10 +395,202 @@ def build_mcp_server(
         return {
             "project_id": option.id,
             "project_name": option.name,
-            **project,
+            "profile_revision_id": snapshot.get("profile_revision_id"),
+            "project_profile": snapshot.get("effective_profile", {}),
+            "auto_profile": snapshot.get("auto_profile", {}),
+            "preferences": snapshot.get("preferences", []),
+            "watchlist": project["watchlist"],
             "policy_version": policy.get("version"),
             "enabled_tools": list(policy.get("enabled_tools", [])),
         }
+
+    @mcp.tool(
+        name="signalharness_get_environment_report",
+        description=(
+            "Return one saved Direction-first EnvironmentReport including Brief, Directions, "
+            "Radar and Featured Changes. Uses the latest report when scan_id is omitted."
+        ),
+        annotations=_READ_ONLY,
+        structured_output=True,
+    )
+    def get_environment_report(
+        project_id: str | None = None,
+        scan_id: str | None = None,
+    ) -> dict[str, Any]:
+        selected = project_id or default_project_id(paths.config_dir)
+        return runtime.environment.require_report(selected, scan_id)
+
+    @mcp.tool(
+        name="signalharness_list_environment_changes",
+        description=(
+            "List/search the same frozen Change projection used by the Direction-first Web UI. "
+            "Direction evidence can be selected with direction_id."
+        ),
+        annotations=_READ_ONLY,
+        structured_output=True,
+    )
+    def list_environment_changes(
+        project_id: str | None = None,
+        scan_id: str | None = None,
+        view: Literal["all", "relevant", "featured", "activity", "unavailable"] = "relevant",
+        query: str = "",
+        direction_id: str | None = None,
+        offset: int = 0,
+        limit: int = 25,
+    ) -> dict[str, Any]:
+        if offset < 0:
+            raise ValueError("offset must be non-negative")
+        selected = project_id or default_project_id(paths.config_dir)
+        report = runtime.environment.require_report(selected, scan_id)
+        return runtime.environment.changes(
+            selected,
+            str(report["scan_id"]),
+            view=view,
+            query=query[:400],
+            direction_id=direction_id,
+            offset=offset,
+            limit=_bounded_product_limit(limit, maximum=100),
+        )
+
+    @mcp.tool(
+        name="signalharness_get_environment_change",
+        description="Return one frozen Direction-first environment Change with its saved evidence.",
+        annotations=_READ_ONLY,
+        structured_output=True,
+    )
+    def get_environment_change(
+        change_id: str,
+        project_id: str | None = None,
+        scan_id: str | None = None,
+    ) -> dict[str, Any]:
+        selected = project_id or default_project_id(paths.config_dir)
+        report = runtime.environment.require_report(selected, scan_id)
+        return runtime.environment.change(selected, str(report["scan_id"]), change_id)
+
+    @mcp.tool(
+        name="signalharness_get_project_architecture",
+        description=(
+            "Return the current evidence-backed Architecture Snapshot: subsystems, entrypoint "
+            "hints, dependency imports and bounded static-import edges."
+        ),
+        annotations=_READ_ONLY,
+        structured_output=True,
+    )
+    def get_project_architecture(project_id: str | None = None) -> dict[str, Any]:
+        selected = project_id or default_project_id(paths.config_dir)
+        return runtime.environment.architecture(selected)
+
+    @mcp.tool(
+        name="signalharness_get_project_activity",
+        description=(
+            "Return the deterministic project-activity work-area summary for a saved environment "
+            "report. Project activity never proves an external Direction."
+        ),
+        annotations=_READ_ONLY,
+        structured_output=True,
+    )
+    def get_project_activity(
+        project_id: str | None = None,
+        scan_id: str | None = None,
+    ) -> dict[str, Any]:
+        selected = project_id or default_project_id(paths.config_dir)
+        report = runtime.environment.require_report(selected, scan_id)
+        return runtime.environment.activity_summary(selected, str(report["scan_id"]))
+
+    @mcp.tool(
+        name="signalharness_get_calibration_status",
+        description=(
+            "Return review-first learning readiness from durable Change feedback/outcomes and "
+            "candidate replay; this never auto-applies policy."
+        ),
+        annotations=_READ_ONLY,
+        structured_output=True,
+    )
+    def get_calibration_status(
+        project_id: str | None = None,
+        include_episodes: bool = False,
+    ) -> dict[str, Any]:
+        selected = project_id or default_project_id(paths.config_dir)
+        return runtime.environment.calibration_status(
+            selected, include_episodes=include_episodes
+        )
+
+    @mcp.tool(
+        name="signalharness_start_environment_scan",
+        description=(
+            "Start the current live Direction-first environment scan with backend-owned model "
+            "routing. No fixture/mode/provider knobs are exposed."
+        ),
+        annotations=_START_SCAN,
+        structured_output=True,
+    )
+    async def start_environment_scan(
+        project_id: str | None = None,
+        window: Literal["since_last", "24h", "7d", "30d"] = "since_last",
+    ) -> dict[str, Any]:
+        await runtime.ensure_recovered()
+        selected = project_id or default_project_id(paths.config_dir)
+        return runtime.environment.start_scan(selected, window=window)
+
+    @mcp.tool(
+        name="signalharness_record_change_feedback",
+        description=(
+            "Attach review-first learning feedback to one frozen environment Change. Creates a "
+            "review proposal but never applies policy automatically."
+        ),
+        annotations=_PRODUCT_WRITE,
+        structured_output=True,
+    )
+    def record_change_feedback(
+        change_id: str,
+        label: Literal["useful", "not_useful", "false_positive", "too_generic"],
+        project_id: str | None = None,
+        scan_id: str | None = None,
+        note: str = "",
+    ) -> dict[str, Any]:
+        selected = project_id or default_project_id(paths.config_dir)
+        report = runtime.environment.require_report(selected, scan_id)
+        return runtime.environment.record_feedback(
+            selected,
+            str(report["scan_id"]),
+            change_id,
+            label=label,
+            note=note[:2000],
+            source="environment-mcp",
+        )
+
+    @mcp.tool(
+        name="signalharness_record_change_outcome",
+        description=(
+            "Record observed Change outcomes for calibration. Historical reports remain frozen "
+            "and are never rewritten by this tool."
+        ),
+        annotations=_PRODUCT_WRITE,
+        structured_output=True,
+    )
+    def record_change_outcome(
+        change_id: str,
+        project_id: str | None = None,
+        scan_id: str | None = None,
+        impact_observed: bool | None = None,
+        action_taken: bool | None = None,
+        action_helpful: bool | None = None,
+        resolved: bool | None = None,
+        note: str = "",
+    ) -> dict[str, Any]:
+        selected = project_id or default_project_id(paths.config_dir)
+        report = runtime.environment.require_report(selected, scan_id)
+        return runtime.environment.record_outcome(
+            selected,
+            str(report["scan_id"]),
+            change_id,
+            impact_observed=impact_observed,
+            action_taken=action_taken,
+            action_helpful=action_helpful,
+            resolved=resolved,
+            note=note[:2000],
+            source="environment-mcp",
+        )
 
     @mcp.tool(
         name="signalharness_search_signal_history",

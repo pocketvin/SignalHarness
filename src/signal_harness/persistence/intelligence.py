@@ -8,9 +8,30 @@ from contextlib import contextmanager
 from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from signal_harness.intelligence.contracts import ChangeDigest, EnvironmentReport, ProductChange
+from signal_harness.intelligence.activity_summary import summarize_project_activity
+from signal_harness.intelligence.project_projection import normalize_relation_reason_copy
+
+
+def _present_change_json(raw: str) -> dict[str, Any]:
+    item = cast(dict[str, Any], json.loads(raw))
+    reason = item.get("relation_reason")
+    if isinstance(reason, str) and reason:
+        item["relation_reason"] = normalize_relation_reason_copy(reason)
+    return item
+
+
+def _present_report_json(raw: str) -> dict[str, Any]:
+    item = cast(dict[str, Any], json.loads(raw))
+    featured = item.get("featured")
+    if isinstance(featured, list):
+        for change in featured:
+            if isinstance(change, dict) and isinstance(change.get("relation_reason"), str):
+                change["relation_reason"] = normalize_relation_reason_copy(change["relation_reason"])
+    return item
+
 
 INTELLIGENCE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS change_revisions(
@@ -220,7 +241,7 @@ class IntelligenceRepository:
             row = db.execute(
                 "SELECT payload_json FROM environment_reports WHERE scan_id=?", (scan_id,)
             ).fetchone()
-        return json.loads(row[0]) if row else None
+        return _present_report_json(row[0]) if row else None
 
     def latest_report(self, project_id: str, *, before: str | None = None) -> dict[str, Any] | None:
         clauses, params = ["project_id=?"], [project_id]
@@ -234,7 +255,7 @@ class IntelligenceRepository:
                 + " ORDER BY window_end DESC,created_at DESC LIMIT 1",
                 params,
             ).fetchone()
-        return json.loads(row[0]) if row else None
+        return _present_report_json(row[0]) if row else None
 
     def reports(self, project_id: str) -> list[dict[str, Any]]:
         with self.connect() as db:
@@ -308,12 +329,24 @@ class IntelligenceRepository:
                 [*params, limit, offset],
             ).fetchall()
         return {
-            "items": [json.loads(row[0]) for row in rows],
+            "items": [_present_change_json(row[0]) for row in rows],
             "count": count,
             "offset": offset,
             "limit": limit,
             "has_more": offset + len(rows) < count,
         }
+
+    def activity_summary(self, scan_id: str) -> dict[str, Any]:
+        """Build a bounded deterministic UI projection over all canonical project activity."""
+
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT insight_json FROM scan_intelligence "
+                "WHERE scan_id=? AND corpus_role='project_activity' AND insight_json IS NOT NULL "
+                "ORDER BY published_at DESC,change_id ASC",
+                (scan_id,),
+            ).fetchall()
+        return summarize_project_activity([_present_change_json(row[0]) for row in rows])
 
     def change(self, scan_id: str, change_id: str) -> dict[str, Any] | None:
         with self.connect() as db:
@@ -321,7 +354,7 @@ class IntelligenceRepository:
                 "SELECT insight_json FROM scan_intelligence WHERE scan_id=? AND change_id=?",
                 (scan_id, change_id),
             ).fetchone()
-        return json.loads(row[0]) if row and row[0] else None
+        return _present_change_json(row[0]) if row and row[0] else None
 
     def snapshot_events(self, scan_id: str) -> list[dict[str, Any]]:
         with self.connect() as db:

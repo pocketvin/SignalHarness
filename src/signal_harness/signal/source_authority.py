@@ -51,6 +51,8 @@ def event_source_quality(event: SignalEvent) -> SourceQuality:
         if authority == "maintainer":
             return SourceQuality.MAINTAINER
         return SourceQuality.COMMUNITY
+    if event.source_type == "github_repository":
+        return SourceQuality.MAINTAINER
     if event.source_type == "rss":
         return SourceQuality.OFFICIAL if raw.get("official") is True else SourceQuality.SECONDARY
     if event.source_type == "web_change":

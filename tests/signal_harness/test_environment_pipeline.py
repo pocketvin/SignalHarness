@@ -71,7 +71,7 @@ class ScriptedIntelligenceProvider:
                             if basis_id:
                                 break
                 if not ignored and not basis_id:
-                    for prefix in ("m", "e"):
+                    for prefix in ("x", "m", "e"):
                         values = refs.get(prefix, [])
                         if values:
                             basis_id = f"{prefix}1"
@@ -130,11 +130,21 @@ class ScriptedIntelligenceProvider:
             ]
             return json.dumps({"results": results}, ensure_ascii=False)
         if call.output_schema == SynthesisOutput.__name__:
+            tables = payload.get("corpus_legend", {}).get("tables", {})
+
+            def decoded(item: dict[str, Any], field: str) -> Any:
+                raw = item.get(field)
+                if isinstance(raw, int):
+                    values = tables.get(field, [])
+                    if 0 <= raw < len(values):
+                        return values[raw]
+                return raw
+
             ids = [item.get("change_id", item.get("id")) for item in payload["corpus"]]
             refs = []
             seen_entities = set()
             for item in reversed(payload["corpus"]):
-                entity = str(item.get("entity") or item.get("e") or "").casefold()
+                entity = str(item.get("entity") or decoded(item, "e") or "").casefold()
                 if entity in seen_entities:
                     continue
                 refs.append(item.get("change_id", item.get("id")))
@@ -164,6 +174,26 @@ class ScriptedIntelligenceProvider:
                 if len(refs) >= 2
                 else []
             )
+            discovered = [
+                item.get("id")
+                for item in payload["corpus"]
+                if decoded(item, "o") == "discovered" and item.get("id")
+            ]
+            radar = (
+                [
+                    {
+                        "radar_type": "new_solution",
+                        "title": "一个新的相邻工具方案出现",
+                        "explanation": "这个此前未跟踪的仓库直接面向项目当前的问题空间。",
+                        "supporting_change_ids": [discovered[0]],
+                        "project_connection": "可以把它作为现有方案之外的候选实现进行对照。",
+                        "why_now": "它在本期第一次进入这个项目的外部雷达。",
+                        "uncertainty": "目前只能确认项目定位和公开说明，尚未验证实际采用情况。",
+                    }
+                ]
+                if discovered
+                else []
+            )
             return json.dumps(
                 {
                     "brief": [
@@ -171,6 +201,7 @@ class ScriptedIntelligenceProvider:
                     ],
                     "directions": directions,
                     "featured_change_ids": ids[:5],
+                    "radar": radar,
                 },
                 ensure_ascii=False,
             )
@@ -535,6 +566,49 @@ def test_temporal_same_day_claim_must_match_cited_dates():
         validate_synthesis_semantics(output, changes)
 
 
+def test_source_diversity_prune_drops_only_unsupported_direction_candidate():
+    from signal_harness.intelligence.contracts import DirectionCandidate, SynthesisOutput
+    from signal_harness.intelligence.quality import (
+        prune_source_diversity_candidates,
+        validate_synthesis_semantics,
+    )
+
+    changes = {
+        "c1": _product_change(
+            "c1", entity="OpenAI", date="2026-09-07T00:00:00+00:00", source="openai"
+        ),
+        "c2": _product_change(
+            "c2", entity="OpenAI", date="2026-09-08T00:00:00+00:00", source="openai"
+        ),
+        "c3": _product_change(
+            "c3", entity="MCP", date="2026-09-09T00:00:00+00:00", source="mcp"
+        ),
+    }
+    output = SynthesisOutput(
+        brief=[{"text": "多个外部接口出现变化。", "supporting_change_ids": ["c1", "c3"]}],
+        directions=[
+            DirectionCandidate(
+                topic_key="single-repo-issues",
+                title="单一仓库出现多个问题报告",
+                explanation="同一仓库出现两个问题报告，但不足以单独构成环境方向。",
+                supporting_change_ids=["c1", "c2"],
+            ),
+            DirectionCandidate(
+                topic_key="cross-ecosystem-contracts",
+                title="跨生态接口契约出现调整",
+                explanation="两个不同生态都出现接口契约变化。",
+                supporting_change_ids=["c1", "c3"],
+            ),
+        ],
+        featured_change_ids=["c1"],
+    )
+
+    filtered, dropped = prune_source_diversity_candidates(output, changes)
+    assert dropped == 1
+    assert [item.topic_key for item in filtered.directions] == ["cross-ecosystem-contracts"]
+    validate_synthesis_semantics(filtered, changes)
+
+
 def test_direction_overlap_and_velocity_are_rejected():
     from signal_harness.intelligence.contracts import DirectionCandidate, SynthesisOutput
     from signal_harness.intelligence.quality import validate_synthesis_semantics
@@ -583,6 +657,75 @@ def test_direction_overlap_and_velocity_are_rejected():
     )
     with pytest.raises(ValueError, match="overlapping"):
         validate_synthesis_semantics(overlap, changes)
+
+
+def test_synthesis_copy_style_rejects_report_templates_and_accepts_takeaway_copy():
+    from signal_harness.intelligence.contracts import DirectionCandidate, SynthesisOutput
+    from signal_harness.intelligence.quality import validate_synthesis_semantics
+
+    changes = {
+        "c1": _product_change(
+            "c1", entity="LangGraph", date="2026-09-11T08:00:00+00:00", source="langgraph"
+        ),
+        "c2": _product_change(
+            "c2", entity="OpenTelemetry", date="2026-09-11T09:00:00+00:00", source="otel"
+        ),
+    }
+    base = {
+        "topic_key": "agent-audit",
+        "explanation": "代理执行开始出现更明确的审计与验证方案，目前仍以讨论和提议为主。",
+        "supporting_change_ids": ["c1", "c2"],
+        "watch_next": ["如果上游形成正式规范，再检查现有审计输出是否需要对齐"],
+    }
+
+    templated = SynthesisOutput(
+        brief=[{"text": "代理执行的审计方式值得继续留意。", "supporting_change_ids": ["c1", "c2"]}],
+        directions=[
+            DirectionCandidate(
+                **base,
+                title="代理审计讨论增多",
+                project_connection="项目重点模块包括 agent eval，因此这些变化值得关注。",
+            )
+        ],
+        featured_change_ids=["c1"],
+    )
+    with pytest.raises(ValueError, match="human_product_copy"):
+        validate_synthesis_semantics(templated, changes)
+
+    natural = SynthesisOutput(
+        brief=[{"text": "代理执行的审计方式值得继续留意。", "supporting_change_ids": ["c1", "c2"]}],
+        directions=[
+            DirectionCandidate(
+                **base,
+                title="Agent 审计开始出现更具体的方案",
+                project_connection=(
+                    "这会碰到现有的 agent eval 和 trace 链路。现在不用改代码，等上游形成稳定规范后再决定是否对齐。"
+                ),
+            )
+        ],
+        featured_change_ids=["c1"],
+    )
+    validate_synthesis_semantics(natural, changes)
+
+
+def test_synthesis_copy_style_limits_brief_to_three_overall_judgments():
+    from signal_harness.intelligence.contracts import SynthesisOutput
+    from signal_harness.intelligence.quality import validate_synthesis_semantics
+
+    changes = {
+        "c1": _product_change(
+            "c1", entity="OpenAI", date="2026-09-11T08:00:00+00:00", source="openai"
+        )
+    }
+    output = SynthesisOutput(
+        brief=[
+            {"text": f"整体判断 {index}", "supporting_change_ids": ["c1"]}
+            for index in range(4)
+        ],
+        featured_change_ids=["c1"],
+    )
+    with pytest.raises(ValueError, match="human_product_copy"):
+        validate_synthesis_semantics(output, changes)
 
 
 def test_product_copy_rejects_internal_contract_vocabulary():
@@ -1473,6 +1616,100 @@ def test_model_usage_counts_invalid_attempt_and_success(tmp_path: Path, project_
     assert caller.trace.steps[1].total_tokens == 150
 
 
+class _LocalizedRepairProvider:
+    name = "localized-repair"
+    model = "localized-repair-model"
+
+    def __init__(self, calls: list[AgentCall]) -> None:
+        self.calls = calls
+
+    async def close(self) -> None:
+        pass
+
+    async def complete(self, call: AgentCall) -> str:
+        self.calls.append(call)
+        if "invalid_result" in call.input_payload:
+            result = dict(call.input_payload["invalid_result"])
+            result["directions"] = [
+                {
+                    **result["directions"][0],
+                    "title": "工具兼容问题持续出现",
+                    "explanation": "两个独立变化都涉及工具兼容边界。",
+                }
+            ]
+            return json.dumps(result, ensure_ascii=False)
+        return json.dumps(
+            {
+                "brief": [
+                    {
+                        "text": "这期工具兼容边界值得留意。",
+                        "supporting_change_ids": ["c1", "c2"],
+                    }
+                ],
+                "directions": [
+                    {
+                        "topic_key": "tool-compat",
+                        "previous_direction_id": None,
+                        "title": "工具兼容问题正在加速",
+                        "explanation": "两个独立变化都涉及工具兼容边界。",
+                        "supporting_change_ids": ["c1", "c2"],
+                        "contradicting_change_ids": [],
+                        "project_connection": "这会碰到工具调用与协议适配链路。",
+                        "watch_next": ["如果上游发布兼容修复，再验证现有调用。"],
+                        "uncertainty": "当前只确认到公开变化。",
+                    }
+                ],
+                "featured_change_ids": ["c1", "c2"],
+                "radar": [],
+            },
+            ensure_ascii=False,
+        )
+
+
+def test_synthesis_prose_failure_uses_localized_repair_context(project_root: Path) -> None:
+    calls: list[AgentCall] = []
+    provider = _LocalizedRepairProvider(calls)
+    caller = BoundedModelCaller(
+        TaskPolicy.load(project_root / "configs"),
+        TraceRecorder(),
+        lambda name, role: provider,
+        {role: ["repair"] for role in ("shallow", "synthesis", "deep_dive")},
+    )
+    corpus = [{"id": f"c{index}", "f": "紧凑事实"} for index in range(1, 101)]
+
+    def validate(output: SynthesisOutput) -> None:
+        if output.directions and "加速" in output.directions[0].title:
+            raise ValueError("Direction prose must not pre-empt guarded trend state")
+
+    def local_repair(output: SynthesisOutput, validation_code: str) -> dict[str, Any] | None:
+        assert validation_code == "unverified_trend_velocity"
+        ids = set(output.featured_change_ids)
+        for direction in output.directions:
+            ids.update(direction.supporting_change_ids)
+        return {
+            "referenced_changes": [row for row in corpus if row["id"] in ids],
+            "allowed_change_ids": sorted(ids),
+        }
+
+    output = asyncio.run(
+        caller.complete(
+            "synthesis",
+            {"project": {}, "corpus_legend": {}, "corpus": corpus},
+            SynthesisOutput,
+            validate,
+            local_repair=local_repair,
+        )
+    )
+    assert output.directions[0].title == "工具兼容问题持续出现"
+    assert len(calls) == 2
+    assert len(calls[0].input_payload["corpus"]) == 100
+    assert "corpus" not in calls[1].input_payload
+    assert [row["id"] for row in calls[1].input_payload["referenced_changes"]] == ["c1", "c2"]
+    assert caller.audit[0]["repair_mode"] == "localized"
+    assert caller.audit[1]["repair_mode"] == "localized"
+    assert caller.trace.steps[0].metadata["public_summary"] == "首次结果未通过证据约束，正在自动修正。"
+
+
 def test_github_issue_source_identity_matches_dependency_without_mutating_change_entity(
     tmp_path: Path,
 ) -> None:
@@ -1540,3 +1777,300 @@ def test_github_owner_name_cannot_create_false_direct_dependency_match(tmp_path:
     capsule = build_fact_capsule(digest, {"dependencies": ["httpx"]})
     assert capsule.deterministic_relation == "unknown"
     assert capsule.deterministic_basis_label == ""
+
+
+def test_project_activity_context_is_bounded_and_kind_balanced() -> None:
+    from signal_harness.intelligence.direction_digest import organize_project_activity_context
+
+    changes = []
+    for index in range(12):
+        kind = "github_commit" if index < 9 else "github_pull_request"
+        item = _product_change(
+            f"c{index + 1}",
+            entity="owner/project",
+            date=f"2026-09-{(index % 9) + 1:02d}T00:00:00+00:00",
+            source="owner/project",
+            corpus_role="project_activity",
+        ).model_copy(update={"kind": kind})
+        changes.append(item)
+
+    context = organize_project_activity_context(changes, max_items=4, fact_chars=64)
+
+    assert context["index"]["count"] == 12
+    assert context["index"]["context_count"] == 4
+    assert context["index"]["context_truncated"] is True
+    assert len(context["items"]) == 4
+    assert {item["k"] for item in context["items"]} == {
+        "github_commit",
+        "github_pull_request",
+    }
+
+
+def test_large_project_activity_is_bounded_but_external_corpus_remains_full(
+    tmp_path: Path, project_root: Path
+) -> None:
+    engine, kwargs, calls, repo, *_ = setup_engine(tmp_path, project_root, 40)
+    digests = list(kwargs["digests"])
+    digests = [
+        item.model_copy(update={"corpus_role": "project_activity"}) if index < 34 else item
+        for index, item in enumerate(digests)
+    ]
+    kwargs["digests"] = digests
+
+    report = asyncio.run(engine.run(**kwargs))
+
+    synthesis = [call for call in calls if call.agent_name == "EnvironmentSynthesizer"][-1]
+    assert report.counts["project_activity"] == 34
+    assert report.counts["external_changes"] == 6
+    assert len(synthesis.input_payload["corpus"]) == 6
+    assert synthesis.input_payload["manifest"]["external_count"] == 6
+    assert synthesis.input_payload["manifest"]["project_activity_count"] == 34
+    assert synthesis.input_payload["manifest"]["project_activity_context_count"] == 24
+    assert synthesis.input_payload["project_activity_index"]["count"] == 34
+    assert synthesis.input_payload["project_activity_index"]["context_truncated"] is True
+    assert len(synthesis.input_payload["project_activity"]) == 24
+    with repo.connect() as db:
+        audit = json.loads(
+            db.execute(
+                "SELECT audit_json FROM environment_reports WHERE scan_id='scan-test'"
+            ).fetchone()[0]
+        )
+    assert audit["project_activity_total_count"] == 34
+    assert audit["project_activity_context_count"] == 24
+
+
+def test_discovered_change_reaches_same_synthesis_call_and_saved_radar(
+    tmp_path: Path, project_root: Path
+) -> None:
+    from signal_harness.projects.discovery_profile import derive_discovery_profile
+
+    ledger = ChangeLedger(tmp_path / "radar-engine.sqlite3")
+    auto_profile = {
+        "project_name": "Radar demo",
+        "purpose": "Multi-channel AI gateway",
+    }
+    auto_profile["discovery_profile"] = derive_discovery_profile(auto_profile)
+    profile = ledger.ensure_profile_revision(project_id="radar-demo", auto_profile=auto_profile)
+    ledger.begin_scan(
+        scan_id="radar-scan",
+        project_id="radar-demo",
+        collected_count=1,
+        deduped_count=1,
+        profile_revision_id=profile["profile_revision_id"],
+    )
+    event = SignalEvent(
+        event_id="repo-123",
+        source_type="github_repository",
+        source_name="acme/sandbox-kit",
+        title="acme/sandbox-kit",
+        content="A tool execution sandbox for agent runtimes.",
+        url="https://github.com/acme/sandbox-kit",
+        collected_at=NOW,
+        published_at=NOW,
+        raw_payload={
+            "discovery_origin": "discovered",
+            "discovery_basis": '"agent runtime" tools in:name,description',
+            "source_authority": "maintainer",
+        },
+    )
+    digests = assemble_changes([event], ledger.persist_observations([event]))
+    calls: list[AgentCall] = []
+    caller = BoundedModelCaller(
+        TaskPolicy.load(project_root / "configs"),
+        TraceRecorder(),
+        lambda name, role: ScriptedIntelligenceProvider(calls),
+        {role: ["offline"] for role in ("shallow", "synthesis", "deep_dive")},
+    )
+    repo = IntelligenceRepository(ledger.path)
+    report = asyncio.run(
+        EnvironmentEngine(repo, caller).run(
+            scan_id="radar-scan",
+            project_id="radar-demo",
+            profile_revision_id=profile["profile_revision_id"],
+            profile=profile["effective_profile"],
+            digests=digests,
+            window={"from": "2026-09-09T00:00:00+00:00", "to": "2026-09-11T00:00:00+00:00"},
+            observed_count=1,
+            sources=[],
+            coverage_status="complete",
+        )
+    )
+    assert report.status == "complete"
+    assert report.counts["radar"] == 1
+    assert report.radar[0].radar_type == "new_solution"
+    assert report.radar[0].supporting_change_ids == [digests[0].change_id]
+    assert sum(call.agent_name == "EnvironmentSynthesizer" for call in calls) == 1
+    synthesis = next(call for call in calls if call.agent_name == "EnvironmentSynthesizer")
+    assert synthesis.input_payload["manifest"]["discovered_count"] == 1
+    origin_index = synthesis.input_payload["corpus"][0]["o"]
+    origin_table = synthesis.input_payload["corpus_legend"]["tables"]["o"]
+    assert origin_table[origin_index] == "discovered"
+    assert repo.report("radar-scan")["radar"][0]["radar_type"] == "new_solution"
+
+
+def test_routine_community_issue_can_skip_weak_model_when_relation_is_deterministic(
+    tmp_path: Path,
+) -> None:
+    from signal_harness.intelligence.fact_capsule import build_fact_capsule, deterministic_insight
+    from signal_harness.intelligence.semantic_router import route_capsule
+
+    ledger = ChangeLedger(tmp_path / "routine-issue.sqlite3")
+    event = SignalEvent(
+        event_id="issue-routine",
+        source_type="github_issue",
+        source_name="vitejs/vite",
+        title="docs: clarify environment variable loading order",
+        content="The README can be clearer about the order used for env files.",
+        url="https://github.com/vitejs/vite/issues/123",
+        collected_at=NOW,
+        published_at=NOW,
+        raw_payload={
+            "author_association": "NONE",
+            "comments": 1,
+            "labels": [{"name": "documentation"}],
+        },
+    )
+    digest = assemble_changes([event], ledger.persist_observations([event]))[0]
+    assert digest.interpretation_hint == "routine_issue"
+    capsule = build_fact_capsule(digest, {"dependencies": ["vite"]})
+    assert capsule.deterministic_relation == "direct"
+    assert route_capsule(capsule).route == "deterministic"
+    insight = deterministic_insight(capsule)
+    assert insight.attention == "low"
+    assert "社区" in insight.summary
+    assert "不等同于已确认缺陷" in insight.uncertainty
+
+
+@pytest.mark.parametrize(
+    ("raw_payload", "title"),
+    [
+        (
+            {"author_association": "MEMBER", "comments": 0, "labels": []},
+            "Clarify one API behavior",
+        ),
+        (
+            {"author_association": "NONE", "comments": 1, "labels": [{"name": "P1"}]},
+            "Request validation behavior change",
+        ),
+        (
+            {"author_association": "NONE", "comments": 1, "labels": []},
+            "Security regression allows path traversal",
+        ),
+        (
+            {"author_association": "NONE", "comments": 7, "labels": []},
+            "Proposal with active maintainer discussion",
+        ),
+    ],
+)
+def test_high_signal_github_issue_stays_semantic(
+    tmp_path: Path, raw_payload: dict[str, Any], title: str
+) -> None:
+    from signal_harness.intelligence.fact_capsule import build_fact_capsule
+    from signal_harness.intelligence.semantic_router import route_capsule
+
+    ledger = ChangeLedger(tmp_path / f"semantic-{abs(hash(title))}.sqlite3")
+    event = SignalEvent(
+        event_id="issue-high",
+        source_type="github_issue",
+        source_name="vitejs/vite",
+        title=title,
+        content=title,
+        url="https://github.com/vitejs/vite/issues/999",
+        collected_at=NOW,
+        published_at=NOW,
+        raw_payload=raw_payload,
+    )
+    digest = assemble_changes([event], ledger.persist_observations([event]))[0]
+    assert digest.interpretation_hint == "default"
+    capsule = build_fact_capsule(digest, {"dependencies": ["vite"]})
+    assert capsule.deterministic_relation == "direct"
+    assert route_capsule(capsule).route == "semantic"
+
+
+class _LocalizedSynthesisRepairProvider:
+    name = "localized-repair-probe"
+    model = "localized-repair-model"
+
+    def __init__(self, calls: list[AgentCall]) -> None:
+        self.calls = calls
+
+    async def close(self) -> None:
+        pass
+
+    async def complete(self, call: AgentCall) -> str:
+        self.calls.append(call)
+        if len(self.calls) == 1:
+            return json.dumps(
+                {
+                    "brief": [],
+                    "directions": [
+                        {
+                            "topic_key": "runtime-reliability",
+                            "title": "运行时可靠性问题正在加速",
+                            "explanation": "多个变化都指向连接与恢复问题。",
+                            "supporting_change_ids": ["c1", "c2"],
+                            "contradicting_change_ids": [],
+                            "project_connection": "这会碰到运行时恢复链路。",
+                            "watch_next": [],
+                            "uncertainty": "尚未比较可比历史窗口。",
+                        }
+                    ],
+                    "featured_change_ids": ["c1"],
+                    "radar": [],
+                },
+                ensure_ascii=False,
+            )
+        repaired = dict(call.input_payload["invalid_result"])
+        repaired["directions"] = [dict(repaired["directions"][0])]
+        repaired["directions"][0]["title"] = "运行时可靠性问题持续出现"
+        return json.dumps(repaired, ensure_ascii=False)
+
+
+def test_synthesis_semantic_failure_uses_localized_repair_payload(project_root: Path) -> None:
+    calls: list[AgentCall] = []
+    caller = BoundedModelCaller(
+        TaskPolicy.load(project_root / "configs"),
+        TraceRecorder(),
+        lambda name, role: _LocalizedSynthesisRepairProvider(calls),
+        {role: ["repair"] for role in ("shallow", "synthesis", "deep_dive")},
+    )
+    payload = {
+        "project": {"项目名称": "demo"},
+        "corpus": [
+            {"id": f"c{index}", "f": "连接关闭与恢复路径出现一个需要综合判断的变化。" * 4}
+            for index in range(1, 201)
+        ],
+        "corpus_legend": {},
+        "manifest": {"external_count": 200},
+    }
+
+    def validate(output: SynthesisOutput) -> None:
+        if "加速" in output.directions[0].title:
+            raise ValueError("Direction prose must not pre-empt guarded trend state")
+
+    def local_repair(output: SynthesisOutput, code: str) -> dict[str, Any] | None:
+        assert code == "unverified_trend_velocity"
+        return {
+            "referenced_changes": payload["corpus"][:2],
+            "window": {"from": "2026-09-01", "to": "2026-09-08"},
+        }
+
+    result = asyncio.run(
+        caller.complete(
+            "synthesis",
+            payload,
+            SynthesisOutput,
+            validate,
+            local_repair=local_repair,
+        )
+    )
+    assert result.directions[0].title == "运行时可靠性问题持续出现"
+    assert len(calls) == 2
+    assert "corpus" in calls[0].input_payload
+    assert "corpus" not in calls[1].input_payload
+    assert calls[1].input_payload["validation_code"] == "unverified_trend_velocity"
+    assert caller.audit[0]["repair_mode"] == "localized"
+    assert caller.audit[1]["repair_mode"] == "localized"
+    assert caller.audit[1]["input_bytes"] < caller.audit[0]["input_bytes"]
+    assert caller.trace.steps[0].metadata["repair_mode"] == "localized"
+    assert caller.trace.steps[1].metadata["repair_mode"] == "localized"

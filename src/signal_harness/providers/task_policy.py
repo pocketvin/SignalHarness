@@ -27,6 +27,7 @@ class TaskPolicy:
     tiny_fast_path_max_changes: int = 4
     tiny_fast_path_max_input_bytes: int = 24000
     direction_fact_chars: int = 88
+    project_activity_context_max_items: int = 24
     max_provider_attempts: int = 2
     retry_split_min_batch: int = 4
     roles: dict[str, Any] | None = None
@@ -49,6 +50,10 @@ class TaskPolicy:
             ),
             tiny_fast_path_max_input_bytes=max(
                 2000, min(100000, int(raw.get("tiny_fast_path_max_input_bytes", 24000)))
+            ),
+            direction_fact_chars=max(32, min(160, int(raw.get("direction_fact_chars", 88)))),
+            project_activity_context_max_items=max(
+                0, min(100, int(raw.get("project_activity_context_max_items", 24)))
             ),
             max_provider_attempts=max(1, min(2, int(raw.get("max_provider_attempts", 2)))),
             retry_split_min_batch=max(1, min(8, int(raw.get("retry_split_min_batch", 4)))),
@@ -109,6 +114,18 @@ class TaskPolicy:
             }
             if role != "shallow":
                 provider.request_options["reasoning_effort"] = "high"
-        # Kimi K3's model default is retained; never send unverified thinking parameters.
+        elif name == "kimi":
+            # Kimi K3 always reasons. Shallow extraction and bounded environment synthesis
+            # do not need the high reasoning tier; keeping synthesis low avoids multi-minute
+            # latency on otherwise compact corpora. Deep Dive retains high reasoning.
+            provider.profile = replace(
+                provider.profile,
+                reasoning_effort="high" if role == "deep_dive" else "low",
+                max_output_tokens=(
+                    min(provider.profile.max_output_tokens, 8192)
+                    if role == "synthesis"
+                    else provider.profile.max_output_tokens
+                ),
+            )
         provider.set_timeout(self.timeout(role))
         return provider

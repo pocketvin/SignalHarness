@@ -22,6 +22,7 @@ class SignalPermissionGuard:
             "read_github_issue",
             "read_github_commit",
             "read_github_pull_request",
+            "read_github_discovery",
             "read_local_git",
             "read_package_registry",
             "read_security_advisory",

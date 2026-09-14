@@ -6,10 +6,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-INTELLIGENCE_VERSION = "environment-v1.6"
-CHANGE_INSIGHT_VERSION = "environment-shallow-v1.7"
-LEGACY_CHANGE_INSIGHT_VERSIONS = ("environment-shallow-v1.6", "environment-v1.3")
-SYNTHESIS_VERSION = "environment-synthesis-v1.6"
+INTELLIGENCE_VERSION = "environment-v1.7"
+CHANGE_INSIGHT_VERSION = "environment-shallow-v1.8"
+LEGACY_CHANGE_INSIGHT_VERSIONS = ("environment-shallow-v1.7", "environment-shallow-v1.6", "environment-v1.3")
+SYNTHESIS_VERSION = "environment-synthesis-v1.11"
 DEEP_DIVE_VERSION = "environment-v1.3"  # deep-dive cache unchanged by report-only evolution
 
 
@@ -42,6 +42,9 @@ class ChangeDigest(Contract):
     published_at: str | None
     current_version: str | None = None
     corpus_role: CorpusRole = "external_environment"
+    discovery_origin: Literal["watched", "discovered"] = "watched"
+    discovery_basis: str = Field(default="", max_length=320)
+    interpretation_hint: Literal["default", "routine_issue"] = "default"
     evidence: list[Evidence]
 
 
@@ -83,28 +86,39 @@ class InsightBatch(Contract):
 
 
 class GroundedClaim(Contract):
-    text: str = Field(min_length=1, max_length=1800)
+    text: str = Field(min_length=1, max_length=360)
     supporting_change_ids: list[str] = Field(min_length=1, max_length=100)
 
 
 class DirectionCandidate(Contract):
     topic_key: str = Field(min_length=1, max_length=100)
     previous_direction_id: str | None = None
-    title: str = Field(min_length=1, max_length=140)
-    explanation: str = Field(min_length=1, max_length=1500)
+    title: str = Field(min_length=1, max_length=56)
+    explanation: str = Field(min_length=1, max_length=520)
     supporting_change_ids: list[str] = Field(min_length=2, max_length=200)
     contradicting_change_ids: list[str] = Field(default_factory=list, max_length=100)
-    project_connection: str = Field(default="", max_length=600)
-    watch_next: list[str] = Field(default_factory=list, max_length=4)
-    uncertainty: str = Field(default="", max_length=500)
+    project_connection: str = Field(default="", max_length=240)
+    watch_next: list[str] = Field(default_factory=list, max_length=2)
+    uncertainty: str = Field(default="", max_length=320)
+
+
+class RadarItem(Contract):
+    radar_type: Literal["new_solution", "emerging_direction"]
+    title: str = Field(min_length=1, max_length=64)
+    explanation: str = Field(min_length=1, max_length=480)
+    supporting_change_ids: list[str] = Field(min_length=1, max_length=40)
+    project_connection: str = Field(default="", max_length=240)
+    why_now: str = Field(default="", max_length=240)
+    uncertainty: str = Field(default="", max_length=280)
 
 
 class SynthesisOutput(Contract):
-    """One strong-model call produces directions AND report; no narrative agent."""
+    """One strong-model call produces directions, radar, AND report; no narrative agent."""
 
     brief: list[GroundedClaim] = Field(default_factory=list, max_length=5)
     directions: list[DirectionCandidate] = Field(default_factory=list, max_length=6)
     featured_change_ids: list[str] = Field(default_factory=list, max_length=5)
+    radar: list[RadarItem] = Field(default_factory=list, max_length=3)
 
 
 class Direction(Contract):
@@ -134,6 +148,8 @@ class ProductChange(Contract):
     kind: str
     published_at: str | None
     corpus_role: CorpusRole = "external_environment"
+    discovery_origin: Literal["watched", "discovered"] = "watched"
+    discovery_basis: str = ""
     summary: str
     what_changed: str
     project_relation: Literal["direct", "context", "none", "unknown"]
@@ -161,6 +177,7 @@ class EnvironmentReport(Contract):
     counts: dict[str, int]
     brief: list[GroundedClaim]
     directions: list[Direction]
+    radar: list[RadarItem] = Field(default_factory=list)
     risks: list[GroundedClaim]
     opportunities: list[GroundedClaim]
     featured: list[ProductChange]
@@ -190,4 +207,4 @@ class Progress(Contract):
     message: str
     completed: int = Field(default=0, ge=0)
     total: int | None = Field(default=None, ge=0)
-    status: Literal["running", "complete", "degraded", "error"] = "running"
+    status: Literal["running", "complete", "degraded", "error", "cancelled"] = "running"

@@ -13,14 +13,24 @@ import {
   Search,
   Settings2,
   ShieldCheck,
+  Square,
+  Workflow,
   X,
 } from "lucide-react";
 import { api, dateText } from "./api";
-import type { Change, Direction, Progress, WindowMode } from "./types";
+import type {
+  Change,
+  Direction,
+  Progress,
+  RadarItem,
+  TraceStep,
+  WindowMode,
+} from "./types";
 import { useEnvironment } from "./useEnvironment";
 import { ChangeDetail } from "./Detail";
 import { ProjectSettings } from "./Settings";
 import { EnvironmentMonitoring } from "./Monitoring";
+import { LearningDashboard, LearningSummaryCard } from "./Learning";
 import "./environment.css";
 
 const states: Record<string, string> = {
@@ -92,6 +102,145 @@ function LiveProgress({
     </section>
   );
 }
+
+const traceLabels: Record<string, string> = {
+  load_config: "读取项目配置",
+  collect_signals: "采集环境来源",
+  normalize: "规范化观察",
+  time_window_filter: "筛选时间窗口",
+  deduplicate: "整理来源修订",
+  assemble_change_revisions: "组装独立变化",
+  llm_agent_call: "模型分析",
+};
+
+function traceTitle(step: TraceStep) {
+  if (step.step === "llm_agent_call") {
+    if (step.agent_name === "ChangeInterpreter") return "理解变化与项目关系";
+    if (step.agent_name === "EnvironmentSynthesizer") return "综合环境方向";
+    if (step.agent_name === "DeepDiveAnalyzer") return "深入核实变化";
+  }
+  return traceLabels[step.step] || step.step.replaceAll("_", " ");
+}
+
+type TraceRepairMode = "localized" | "full_context" | "historical" | null;
+
+function traceRepairMode(step: TraceStep, laterSteps: TraceStep[]): TraceRepairMode {
+  const attempt = Number(step.metadata?.attempt ?? 0);
+  const validationCode = step.metadata?.validation_code;
+  const explicitRepair =
+    step.step === "llm_agent_call" &&
+    step.status === "error" &&
+    attempt === 1 &&
+    typeof validationCode === "string" &&
+    validationCode.length > 0;
+  if (explicitRepair) {
+    return step.metadata?.repair_mode === "localized" ? "localized" : "full_context";
+  }
+
+  // Older saved traces predate validation metadata. A paid completion followed by a successful
+  // synthesis from the same provider/model is the observable signature of the old structured
+  // retry path. Provider/network failures normally have no completion usage or fall through to
+  // another provider, so those remain real errors.
+  if (
+    step.step === "llm_agent_call" &&
+    step.status === "error" &&
+    step.agent_name === "EnvironmentSynthesizer" &&
+    (step.completion_tokens ?? 0) > 0 &&
+    laterSteps.some(
+      (later) =>
+        later.step === "llm_agent_call" &&
+        later.status === "success" &&
+        later.agent_name === step.agent_name &&
+        later.provider === step.provider &&
+        later.model === step.model,
+    )
+  ) {
+    return "historical";
+  }
+  return null;
+}
+
+function repairLabel(mode: TraceRepairMode) {
+  if (mode === "localized") return "首次结果未通过证据校验 · 已自动局部修正";
+  if (mode === "full_context") return "首次结果未通过证据校验 · 已自动重新综合";
+  return "首次结果未通过证据校验 · 随后修正成功";
+}
+
+function TracePanel({
+  steps,
+  initialOpen = true,
+  note = "来自当前任务事件流",
+  standalone = false,
+}: {
+  steps: TraceStep[];
+  initialOpen?: boolean;
+  note?: string;
+  standalone?: boolean;
+}) {
+  const [open, setOpen] = useState(initialOpen);
+  if (!steps.length) return null;
+  return (
+    <details
+      className={`execution-trace${standalone ? " standalone" : ""}`}
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary>
+        <span>
+          <Workflow size={16} />
+          真实执行 Trace
+        </span>
+        <small>{steps.length} 步 · {note}</small>
+      </summary>
+      <div className="trace-list">
+        {steps.map((step, index) => {
+          const actor = step.agent_name || step.agent;
+          const model = [step.provider, step.model].filter(Boolean).join(" / ");
+          const repairMode = traceRepairMode(step, steps.slice(index + 1));
+          const autoRepair = repairMode !== null;
+          return (
+            <div
+              className={`trace-row ${autoRepair ? "repair" : step.status}`}
+              key={`${index}-${step.step}`}
+            >
+              <span className="trace-status" aria-label={step.status}>
+                {autoRepair ? (
+                  <RefreshCw size={14} />
+                ) : step.status === "running" ? (
+                  <LoaderCircle size={14} className="spinning" />
+                ) : step.status === "success" ? (
+                  <Check size={14} />
+                ) : step.status === "error" ? (
+                  <X size={14} />
+                ) : (
+                  "–"
+                )}
+              </span>
+              <div className="trace-copy">
+                <strong>{traceTitle(step)}</strong>
+                <span>
+                  {actor && <i>{actor}</i>}
+                  {model && <i>{model}</i>}
+                  {step.input_count != null && <i>输入 {step.input_count}</i>}
+                  {step.output_count != null && <i>输出 {step.output_count}</i>}
+                  {step.cache_hit === true && <i>缓存命中</i>}
+                  {step.fallback_used && <i>已回退</i>}
+                  {autoRepair && <i>{repairLabel(repairMode)}</i>}
+                </span>
+              </div>
+              <span className="trace-metrics">
+                {step.total_tokens != null && step.total_tokens > 0 && (
+                  <b>{step.total_tokens.toLocaleString()} tok</b>
+                )}
+                {step.duration_ms > 0 && <small>{(step.duration_ms / 1000).toFixed(1)}s</small>}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </details>
+  );
+}
 function ChangeRow({
   item,
   onOpen,
@@ -117,7 +266,7 @@ function ChangeRow({
         className={`attention ${item.interpretation_status === "unavailable" ? "unknown" : item.attention}`}
       >
         {item.corpus_role === "project_activity"
-          ? "项目自身"
+          ? "项目活动"
           : item.interpretation_status === "unavailable"
             ? "解释待完成"
             : item.attention === "watch"
@@ -158,25 +307,28 @@ function DirectionCard({
         </span>
       </div>
       <h3>{item.title}</h3>
-      <p className="direction-explanation">{item.explanation}</p>
       {item.project_connection && (
         <div className="project-connection">
-          <span>与你的项目</span>
+          <span>对这个项目意味着什么</span>
           <p>{item.project_connection}</p>
         </div>
       )}
       {!!item.watch_next.length && (
         <div className="watch-next">
-          <span>接下来注意</span>
+          <span>什么时候需要动</span>
           <p>{item.watch_next.join("；")}</p>
         </div>
       )}
+      <details className="direction-reasoning">
+        <summary>为什么这样判断</summary>
+        <p>{item.explanation}</p>
+      </details>
       <div className="direction-bottom">
         <button className="text-button" onClick={() => onEvidence(item)}>
-          查看支持与反向证据 <ArrowRight size={15} />
+          查看原始变化与证据 <ArrowRight size={15} />
         </button>
         <details>
-          <summary aria-label="判断边界">判断边界</summary>
+          <summary aria-label="不确定性与判断边界">不确定性</summary>
           <p>{item.state_reason}</p>
           {item.uncertainty && <p>{item.uncertainty}</p>}
         </details>
@@ -184,11 +336,55 @@ function DirectionCard({
     </article>
   );
 }
+function RadarCard({
+  item,
+  onEvidence,
+}: {
+  item: RadarItem;
+  onEvidence: (changeId: string) => void;
+}) {
+  return (
+    <article className="radar-card">
+      <div className="radar-card-top">
+        <span className={`radar-type ${item.radar_type}`}>
+          {item.radar_type === "emerging_direction" ? "开始形成" : "新出现"}
+        </span>
+        <span>{item.supporting_change_ids.length} 个外部信号</span>
+      </div>
+      <h3>{item.title}</h3>
+      <p className="radar-explanation">{item.explanation}</p>
+      {item.why_now && (
+        <div className="radar-note">
+          <span>为什么现在值得看</span>
+          <p>{item.why_now}</p>
+        </div>
+      )}
+      <div className="radar-project-link">
+        <span>和这个项目的关系</span>
+        <p>{item.project_connection}</p>
+      </div>
+      <div className="radar-card-bottom">
+        <button
+          className="text-button"
+          onClick={() => onEvidence(item.supporting_change_ids[0])}
+        >
+          查看代表变化 <ArrowRight size={15} />
+        </button>
+        {item.uncertainty && (
+          <details>
+            <summary>判断边界</summary>
+            <p>{item.uncertainty}</p>
+          </details>
+        )}
+      </div>
+    </article>
+  );
+}
 export default function Workspace() {
   const sh = useEnvironment();
-  const [tab, setTab] = useState<"overview" | "changes" | "settings">(
-    "overview",
-  );
+  const [tab, setTab] = useState<
+    "overview" | "changes" | "learning" | "settings"
+  >("overview");
   const [windowMode, setWindowMode] = useState<WindowMode>("since_last");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -211,7 +407,26 @@ export default function Workspace() {
     });
     window.scrollTo({ top: 0, behavior: "instant" });
   }
-  function navigate(value: "overview" | "changes" | "settings") {
+  function openRadarEvidence(changeId: string) {
+    if (!report) return;
+    void api
+      .change(sh.projectId, report.scan_id, changeId)
+      .then((item) => sh.openChange(item))
+      .catch((e) => sh.setError(e instanceof Error ? e.message : String(e)));
+  }
+  function viewProjectActivity() {
+    setTab("changes");
+    setSearch("");
+    sh.setFilters({
+      view: "activity",
+      query: "",
+      directionId: "",
+      offset: 0,
+    });
+    window.scrollTo({ top: 0, behavior: "instant" });
+  }
+
+  function navigate(value: "overview" | "changes" | "learning" | "settings") {
     setTab(value);
     if (value === "changes")
       sh.setFilters({
@@ -305,6 +520,16 @@ export default function Workspace() {
             全部变化{report && <span>{report.counts.relevant}</span>}
           </button>
           <button
+            aria-current={tab === "learning" ? "page" : undefined}
+            onClick={() => navigate("learning")}
+          >
+            <Workflow size={18} />
+            学习与校准
+            {sh.learning && sh.learning.labeled_count > 0 && (
+              <span>{sh.learning.labeled_count}</span>
+            )}
+          </button>
+          <button
             aria-current={tab === "settings" ? "page" : undefined}
             onClick={() => navigate("settings")}
           >
@@ -315,7 +540,7 @@ export default function Workspace() {
         <div className="sidebar-context">
           <span>当前观察范围</span>
           <p>{project?.watchlist?.source_count ?? 0} 个已连接来源</p>
-          <small>围绕项目依赖、协议与技术生态持续理解变化。</small>
+          <small>围绕项目依赖、问题空间与技术生态持续理解变化。</small>
         </div>
         <button
           className="sidebar-connect"
@@ -332,12 +557,14 @@ export default function Workspace() {
             <h1>
               {tab === "settings"
                 ? "项目与关注重点"
-                : tab === "changes"
-                  ? "查看每一个变化"
-                  : "最近形成了什么方向"}
+                : tab === "learning"
+                  ? "学习与校准"
+                  : tab === "changes"
+                    ? "查看每一个变化"
+                    : "最近形成了什么方向"}
             </h1>
           </div>
-          {tab !== "settings" && (
+          {(tab === "overview" || tab === "changes") && (
             <div className="scan-controls">
               <label className="sr-only" htmlFor="environment-window">
                 观察时间范围
@@ -346,6 +573,7 @@ export default function Workspace() {
                 id="environment-window"
                 value={windowMode}
                 onChange={(e) => setWindowMode(e.target.value as WindowMode)}
+                disabled={active}
               >
                 {windows.map(([id, label]) => (
                   <option key={id} value={id}>
@@ -365,10 +593,24 @@ export default function Workspace() {
                 )}
                 {active ? "正在检查" : "检查最新变化"}
               </button>
+              {active && (
+                <button
+                  className="stop-button"
+                  onClick={() => void sh.stopScan()}
+                  disabled={sh.stopping || !sh.scan?.run_id}
+                >
+                  {sh.stopping ? (
+                    <LoaderCircle className="spinning" size={15} />
+                  ) : (
+                    <Square size={14} fill="currentColor" />
+                  )}
+                  {sh.stopping ? "正在停止" : "停止任务"}
+                </button>
+              )}
             </div>
           )}
         </header>
-        {windowMode === "custom" && tab !== "settings" && (
+        {windowMode === "custom" && (tab === "overview" || tab === "changes") && (
           <div className="custom-window">
             <label>
               从
@@ -405,8 +647,25 @@ export default function Workspace() {
             </button>
           </div>
         )}
-        {sh.progress && tab !== "settings" && (
-          <LiveProgress progress={sh.progress} reconnecting={sh.reconnecting} />
+        {sh.progress && (tab === "overview" || tab === "changes") && (
+          <div className="live-run">
+            <LiveProgress progress={sh.progress} reconnecting={sh.reconnecting} />
+            <TracePanel steps={sh.traceSteps} />
+          </div>
+        )}
+        {active && report && (tab === "overview" || tab === "changes") && (
+          <div className="previous-report-note" role="note">
+            本次检查还在进行。下方先保留上一份已完成报告；新结果只有在本次检查完成并通过校验后才会替换它。
+          </div>
+        )}
+        {!sh.progress && (tab === "overview" || tab === "changes") && sh.reportTrace.length > 0 && (
+          <TracePanel
+            key={report?.scan_id || "saved-trace"}
+            steps={sh.reportTrace}
+            initialOpen={false}
+            note="已保存的本次真实执行轨迹"
+            standalone
+          />
         )}
         {sh.loading ? (
           <div className="loading-area" role="status">
@@ -420,12 +679,20 @@ export default function Workspace() {
               onPreference={sh.savePreference}
               onNatural={sh.naturalPreference}
               onConnect={sh.refreshMeta}
+              onRefreshArchitecture={sh.refreshArchitecture}
             />
             <EnvironmentMonitoring
               key={sh.projectId}
               projectId={sh.projectId}
             />
           </>
+        ) : tab === "learning" ? (
+          <LearningDashboard
+            status={sh.learning}
+            loading={sh.learningLoading}
+            error={sh.learningError}
+            onRefresh={() => void sh.refreshLearning()}
+          />
         ) : !report ? (
           <section className="empty-environment">
             <span className="empty-symbol">
@@ -480,7 +747,7 @@ export default function Workspace() {
                       另参考 <strong>
                         {report.counts.project_activity}
                       </strong>{" "}
-                      个项目自身变化。
+                      条项目活动记录。
                     </>
                   )}
                 </p>
@@ -517,6 +784,28 @@ export default function Workspace() {
             ))}
             {tab === "overview" ? (
               <>
+                {!!report.radar?.length && (
+                  <section className="radar-section">
+                    <div className="section-heading">
+                      <div>
+                        <h2>项目外部雷达</h2>
+                        <p>
+                          根据这个项目的问题空间主动发现此前未跟踪的新方案；不是全局热门榜。
+                        </p>
+                      </div>
+                      <span>最多展示 3 条</span>
+                    </div>
+                    <div className="radar-grid">
+                      {report.radar.map((item, index) => (
+                        <RadarCard
+                          item={item}
+                          onEvidence={openRadarEvidence}
+                          key={`${item.radar_type}-${item.title}-${index}`}
+                        />
+                      ))}
+                    </div>
+                  </section>
+                )}
                 <section className="directions-section">
                   <div className="section-heading">
                     <h2>本期值得关注的方向</h2>
@@ -645,6 +934,60 @@ export default function Workspace() {
                     </small>
                   </aside>
                 </div>
+                {sh.activitySummary && sh.activitySummary.total_count > 0 && (
+                  <section className="paper-panel project-activity-summary">
+                    <div className="section-heading activity-summary-heading">
+                      <div>
+                        <h2>这个项目最近也在变化</h2>
+                        <p>
+                          {sh.activitySummary.total_count} 条归并后的项目活动。这里帮助你看清当前施工重点，
+                          不会拿项目自身改动去证明外部环境方向。
+                        </p>
+                      </div>
+                      <Workflow size={20} />
+                    </div>
+                    <div className="activity-group-grid">
+                      {sh.activitySummary.groups.map((group) => (
+                        <article className="activity-group-card" key={group.label}>
+                          <div className="activity-group-title">
+                            <h3>{group.label}</h3>
+                            <span>{group.count} 条</span>
+                          </div>
+                          <div className="activity-samples">
+                            {group.samples.map((sample) => (
+                              <button
+                                key={sample.change_id}
+                                onClick={() =>
+                                  void api
+                                    .change(sh.projectId, report.scan_id, sample.change_id)
+                                    .then((item) => sh.openChange(item))
+                                    .catch((e) => sh.setError(e.message))
+                                }
+                              >
+                                <span>{sample.text}</span>
+                                <time>{dateText(sample.published_at)}</time>
+                              </button>
+                            ))}
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                    <div className="activity-summary-footer">
+                      <span>
+                        {sh.activitySummary.other_count > 0
+                          ? `另外还有 ${sh.activitySummary.other_count} 条分布在其他工作面。`
+                          : "上面已经覆盖本期主要工作面。"}
+                      </span>
+                      <button className="text-button" onClick={viewProjectActivity}>
+                        查看全部项目活动 <ArrowRight size={16} />
+                      </button>
+                    </div>
+                  </section>
+                )}
+                <LearningSummaryCard
+                  status={sh.learning}
+                  onOpen={() => navigate("learning")}
+                />
                 <section className="featured-section">
                   <div className="section-heading">
                     <div>
@@ -703,7 +1046,7 @@ export default function Workspace() {
                       ["relevant", "与项目有关"],
                       ["all", "全部环境变化"],
                       ...((report.counts.project_activity ?? 0) > 0
-                        ? [["activity", "项目自身"]]
+                        ? [["activity", "项目活动"]]
                         : []),
                       ["unavailable", "解释待完成"],
                     ].map(([value, label]) => (
@@ -830,6 +1173,12 @@ export default function Workspace() {
         onClose={sh.closeDetail}
         onRetry={() => {
           if (sh.detail) void sh.openChange(sh.detail, true);
+        }}
+        onLearningStateChanged={() => void sh.refreshLearning()}
+        onOpenLearning={() => {
+          sh.closeDetail();
+          navigate("learning");
+          window.scrollTo({ top: 0, behavior: "smooth" });
         }}
       />
     </div>

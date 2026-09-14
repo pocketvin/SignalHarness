@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from signal_harness.intelligence.contracts import (
     ChangeDigest,
@@ -17,10 +17,32 @@ from signal_harness.intelligence.contracts import (
     ProductChange,
     ShallowInsight,
 )
+from signal_harness.intelligence.direction_identity import independent_source_channel
 from signal_harness.signal.schemas import SignalEvent
 from signal_harness.signal.source_authority import event_source_quality
 from signal_harness.signal.source_identity import release_package_identity
 from signal_harness.tools.web_snapshot import normalize_web_text
+
+
+_ISSUE_HIGH_SIGNAL = re.compile(
+    r"(?i)security|vulnerab|\bcve\b|ssrf|xss|csrf|\brce\b|memory leak|\bleak\b|crash|panic|"
+    r"deadlock|race condition|timeout|regression|breaking|data loss|corrupt|segfault|"
+    r"denial of service|prototype pollution|injection|path traversal|privilege|remote code|"
+    r"unbounded|hang|freeze"
+)
+_ISSUE_HIGH_LABELS = {
+    "security",
+    "regression",
+    "p0",
+    "p1",
+    "p2",
+    "needs maintainer",
+    "ready for work",
+    "fix proposed",
+    "critical",
+    "high priority",
+    "performance",
+}
 
 
 def identity(prefix: str, value: Any) -> str:
@@ -38,6 +60,44 @@ def source_revision_events(events: list[SignalEvent]) -> list[SignalEvent]:
         if previous is None or event.collected_at >= previous.collected_at:
             result[key] = event
     return list(result.values())
+
+
+def _issue_interpretation_hint(rows: list[tuple[SignalEvent, int]]) -> Literal["default", "routine_issue"]:
+    """Route only low-risk community issue reports around the weak model.
+
+    The issue still remains frozen in the Ledger and appears in the full strong-model corpus.
+    This hint only says that a conservative reported-issue summary plus an already-deterministic
+    project relation is enough for the shallow ChangeInsight. Maintainer involvement, high-signal
+    labels/text, or meaningful discussion keep the semantic path.
+    """
+
+    if not rows or any(event.source_type != "github_issue" for event, _ in rows):
+        return "default"
+    for event, _ in rows:
+        raw = event.raw_payload
+        association = str(raw.get("author_association") or "").strip().upper()
+        if association in {"OWNER", "MEMBER", "COLLABORATOR"}:
+            return "default"
+        try:
+            comments = int(raw.get("comments") or 0)
+        except (TypeError, ValueError):
+            comments = 0
+        if comments >= 4:
+            return "default"
+        labels = {
+            str(label.get("name") or "").strip().casefold()
+            for label in raw.get("labels", [])
+            if isinstance(label, dict)
+        }
+        if any(
+            high == label or high in label
+            for label in labels
+            for high in _ISSUE_HIGH_LABELS
+        ):
+            return "default"
+        if _ISSUE_HIGH_SIGNAL.search(f"{event.title} {event.content}"):
+            return "default"
+    return "routine_issue"
 
 
 def assemble_changes(
@@ -86,6 +146,19 @@ def assemble_changes(
             if primary.source_type == "security_advisory"
             else ""
         )
+        discovery_bases = list(
+            dict.fromkeys(
+                str(event.raw_payload.get("discovery_basis") or "").strip()
+                for event, _ in rows
+                if event.raw_payload.get("discovery_origin") == "discovered"
+                and str(event.raw_payload.get("discovery_basis") or "").strip()
+            )
+        )
+        discovery_origin: Literal["watched", "discovered"] = (
+            "discovered"
+            if any(event.raw_payload.get("discovery_origin") == "discovered" for event, _ in rows)
+            else "watched"
+        )
         result.append(
             ChangeDigest(
                 change_id=change_id,
@@ -100,6 +173,9 @@ def assemble_changes(
                     if any(bool(event.raw_payload.get("project_owned", False)) for event, _ in rows)
                     else "external_environment"
                 ),
+                discovery_origin=discovery_origin,
+                discovery_basis=" · ".join(discovery_bases[:3])[:320],
+                interpretation_hint=_issue_interpretation_hint(rows),
                 evidence=evidence,
             )
         )
@@ -146,7 +222,7 @@ def project_change(
 ) -> ProductChange:
     if insight is None:
         return ProductChange(
-            **digest.model_dump(exclude={"current_version"}),
+            **digest.model_dump(exclude={"current_version", "interpretation_hint"}),
             summary=digest.title,
             what_changed="本条变化的自动解释暂未完成，可查看原始证据。",
             project_relation="unknown",
@@ -164,7 +240,7 @@ def project_change(
     ignored = "ignore" in preferences
     explicit_interest = bool({"critical", "important"} & set(preferences))
     return ProductChange(
-        **digest.model_dump(exclude={"current_version"}),
+        **digest.model_dump(exclude={"current_version", "interpretation_hint"}),
         **insight.model_dump(exclude={"change_id", "evidence_ids", "attention"}),
         attention="low"
         if ignored or "low" in preferences
@@ -190,6 +266,8 @@ def corpus_payload(changes: list[ProductChange]) -> list[dict[str, Any]]:
             "kind": item.kind,
             "published_at": item.published_at,
             "corpus_role": item.corpus_role,
+            "discovery_origin": item.discovery_origin,
+            "discovery_basis": item.discovery_basis,
             "summary": item.summary,
             "what_changed": item.what_changed,
             "topics": item.topics,
@@ -289,12 +367,12 @@ def finalize_direction(
     ):
         state, reason = "uncertain", "存在反向证据、解释缺失或来源覆盖缺口，暂不判定增强或减弱。"
     source_identities = {
-        (e.source_type.casefold(), e.source_name.casefold())
+        independent_source_channel(e)
         for change_id in supports
         for e in changes[change_id].evidence
     }
     authoritative_source_identities = {
-        (e.source_type.casefold(), e.source_name.casefold())
+        independent_source_channel(e)
         for change_id in supports
         for e in changes[change_id].evidence
         if e.authority in {"official", "maintainer"}

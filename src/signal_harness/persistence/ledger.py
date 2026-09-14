@@ -1261,6 +1261,19 @@ class ChangeLedger:
                 (_utc_now(), error[:1000], scan_id),
             )
 
+    def cancel_scan(self, *, scan_id: str) -> None:
+        """Mark a user-cancelled Scan terminal without treating it as a system failure."""
+
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE scans
+                SET status='cancelled', completed_at=?, error=NULL
+                WHERE scan_id=? AND status='running'
+                """,
+                (_utc_now(), scan_id),
+            )
+
     def list_scan_changes(self, scan_id: str, *, offset: int = 0, limit: int = 100) -> LedgerChangePage:
         if offset < 0:
             raise ValueError("offset must be non-negative")
