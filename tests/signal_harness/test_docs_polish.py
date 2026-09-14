@@ -54,9 +54,9 @@ def test_public_ci_stays_offline_and_focused(project_root: Path) -> None:
     assert "signal-harness calibrate" not in ci
     assert "regression-eval" not in ci
     assert "project-eval" not in ci
-    assert "actions/checkout@v7" in ci
-    assert "actions/setup-python@v7" in ci
-    assert "astral-sh/setup-uv@v10" in ci
+    assert "actions/checkout@v7.0.1" in ci
+    assert "actions/setup-python@v7.0.0" in ci
+    assert "astral-sh/setup-uv@v10.1.0" in ci
 
 
 def test_agent_runner_split_modules_exist(project_root: Path) -> None:
