@@ -242,7 +242,7 @@ uv run signal-harness mcp
 uv run signal-harness serve --host 127.0.0.1 --port 8001
 ```
 
-The MCP surface includes current-product tools plus compatibility tools. Write actions (starting scans and recording feedback / outcomes) have explicit permission boundaries; MCP is not falsely described as entirely read-only.
+The MCP surface exposes **19 tools: 15 read-only + 4 write actions**. It includes current-product tools plus a small compatibility surface. The four write actions only start scans or record feedback / outcomes and keep explicit permission boundaries; MCP is not falsely described as entirely read-only.
 
 ---
 

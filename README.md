@@ -247,7 +247,7 @@ uv run signal-harness mcp
 uv run signal-harness serve --host 127.0.0.1 --port 8001
 ```
 
-当前 MCP 同时包含 current-product tools 和少量 legacy compatibility tools。写动作（启动 Scan、记录 feedback / outcome）有明确权限边界，不把整个 MCP 伪装成 read-only。
+当前 MCP 一共暴露 **19 个工具：15 个只读 + 4 个写动作**。其中既包含 current-product tools，也保留少量 legacy compatibility tools。4 个写动作仅用于启动 Scan、记录 feedback / outcome，并带有明确权限边界；不会把整个 MCP 伪装成 read-only。
 
 ---
 

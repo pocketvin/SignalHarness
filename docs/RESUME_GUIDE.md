@@ -12,7 +12,7 @@ Use the signal-intelligence scenario as the business context, but lead with the 
 
 - Built a fixed five-Agent signal-intelligence Harness with schema-first contracts, controlled two-turn tool use, Python-owned permission/budget enforcement, deterministic fallback, and human-gated learning proposals.
 - Built a 40-case labelled Agent regression suite and CI gate covering high-risk changes, routine updates, negated-risk language, policy/tool/provider signals, source noise, and irrelevant inputs; current offline contract result is 100% decision/category accuracy with 100% priority precision/recall and 0% FPR/FNR.
-- Added trace-level observability for schema retry/fallback, tool execution, latency, provider-reported token usage and estimated cost; implemented a read-only MCP surface plus FastAPI REST service and Docker deployment path without bypassing runtime guardrails.
+- Added trace-level observability for schema retry/fallback, tool execution, latency, provider-reported token usage and estimated cost; implemented the original read-only MCP baseline plus FastAPI REST service and Docker deployment path without bypassing runtime guardrails. The current product surface has since expanded to 19 MCP tools (15 read-only + 4 guarded write actions).
 
 ## Shorter two-bullet version
 

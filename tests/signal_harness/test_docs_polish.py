@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from signal_harness.mcp_server import MCP_TOOL_NAMES, MCP_WRITE_TOOL_NAMES
+
 
 def test_polish_docs_exist_and_are_linked(project_root: Path) -> None:
     docs = [
@@ -52,6 +54,9 @@ def test_public_ci_stays_offline_and_focused(project_root: Path) -> None:
     assert "signal-harness calibrate" not in ci
     assert "regression-eval" not in ci
     assert "project-eval" not in ci
+    assert "actions/checkout@v7" in ci
+    assert "actions/setup-python@v7" in ci
+    assert "astral-sh/setup-uv@v10" in ci
 
 
 def test_agent_runner_split_modules_exist(project_root: Path) -> None:
@@ -93,6 +98,11 @@ def test_public_readmes_describe_current_product_in_both_languages(project_root:
     assert "docs/REPAIR_PASS.md" in zh
     assert "docs/MODEL_EVAL_RESULTS.md" in zh
     assert "docs/REAL_SOURCE_SMOKE.md" in zh
+
+    read_count = len(MCP_TOOL_NAMES) - len(MCP_WRITE_TOOL_NAMES)
+    write_count = len(MCP_WRITE_TOOL_NAMES)
+    assert f"{len(MCP_TOOL_NAMES)} 个工具：{read_count} 个只读 + {write_count} 个写动作" in zh
+    assert f"{len(MCP_TOOL_NAMES)} tools: {read_count} read-only + {write_count} write actions" in en
 
 
 def test_provider_env_example_matches_current_catalog_contract(project_root: Path) -> None:

@@ -100,7 +100,7 @@ SignalHarness is maintained as its own project and the current package does not 
 
 ## Current service surface and next steps
 
-The Harness is accessible through CLI, a thin FastAPI REST service, and five read-only MCP tools. Docker runs the same service entry point. MCP does not add a second write permission plane.
+At the time of this Harness review, the legacy surface was accessible through CLI, a thin FastAPI REST service, and five read-only MCP tools. The current Direction-first product has since expanded that MCP surface to 19 tools (15 read-only + 4 guarded write actions) while keeping permission enforcement in the shared runtime rather than creating a second permission plane.
 
 - Add richer fixtures for long-context and conflicting-evidence model eval.
 - Keep real provider eval manual and public CI offline.

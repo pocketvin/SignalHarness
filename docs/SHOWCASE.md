@@ -31,4 +31,4 @@ The `resume-v1` corpus contains 40 labelled product cases. The current offline m
 
 ## External interface showcase
 
-`signal-harness serve` exposes REST run/trace/signal/feedback endpoints and MCP Streamable HTTP. `signal-harness mcp` exposes the same five read-only MCP tools over stdio. Both reuse the core domain/runtime instead of introducing a second scoring or permission implementation.
+`signal-harness serve` exposes REST/SSE endpoints and MCP Streamable HTTP. `signal-harness mcp` exposes the same current MCP surface over stdio: 19 tools in total, with 15 read-only tools and 4 guarded write actions for starting scans or recording feedback/outcomes. Both reuse the shared application/runtime semantics instead of introducing a second scoring or permission implementation.
